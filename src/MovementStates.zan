@@ -1,0 +1,608 @@
+using System;
+
+// The path-following movement states.
+//
+// Port of openbw/bwgame.h, movement_UM_*. See StateMachine.zan for the
+// file map. Every state returns true when the dispatcher should run the
+// loop again with the (possibly changed) movement state.
+
+public class MovementStatesImpl {
+    public StateMachine M;
+    public Sim Sim;
+    public Regions R;
+    public PathProgress Pathing;
+    public Unit U;
+
+    public MovementStatesImpl(StateMachine m) {
+        M = m;
+        Sim = m.Sim;
+        R = m.R;
+        Pathing = m.Pathing;
+        U = m.U;
+    }
+
+    // openbw: void set_unit_immovable(unit_t* u)
+    public void SetUnitImmovable() {
+        Kin.SetNextSpeed(U, Fp.Zero());
+        Sim.StopUnit(U);
+        Pathing.SetUnitMoveTarget(U.Sprite.Position.X, U.Sprite.Position.Y);
+        U.SetStatus(StatusFlag.Immovable);
+        U.UserActionFlags = U.UserActionFlags & ~2;
+    }
+
+    // openbw: void update_unit_pathing_collision(unit_t* u)
+    public void UpdateUnitPathingCollision() {
+        if ((~U.MovementFlags & 2) != 0) return;
+        if (U.PathingCollisionCounter <= 2) return;
+        if (U.UOrderNotInterruptible()) return;
+        if (U.UIscriptNobrk()) return;
+        U.MovementFlags = U.MovementFlags & ~2;
+    }
+
+    // ---- states ------------------------------------------------------------
+
+    // openbw: bool movement_UM_Init(unit_t* u, execute_movement_struct& ems) {
+    //     u->pathing_flags &= ~(1 | 2);
+    //     if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+    //     u->terrain_no_collision_bounds = {{0, 0}, {0, 0}};
+    //     int next_state = movement_states::UM_Lump;
+    //     if (!ut_turret(u) && u_iscript_nobrk(u)) next_state = movement_states::UM_InitSeq;
+    //     else if (!u->sprite || unit_dead(u)) next_state = movement_states::UM_Lump;
+    //     else if (u_in_bunker(u)) next_state = movement_states::UM_Bunker;
+    //     else if (us_hidden(u)) { ... next_state = movement_states::UM_Hidden; }
+    //     else if (u_burrowed(u)) next_state = movement_states::UM_Lump;
+    //     else if (u_can_move(u)) {
+    //         next_state = u->pathing_flags & 1 ? movement_states::UM_AtRest : movement_states::UM_Flyer;
+    //     } else if (u_can_turn(u)) { ... }
+    //     u->movement_state = next_state;
+    //     return true;
+    // }
+    public bool UmInit(Ems ems) {
+        U.PathingFlags = U.PathingFlags & ~3;
+        if (U.Sprite.ElevationLevel < 12) U.PathingFlags = U.PathingFlags | 1;
+        U.TerrainNoCollisionFromX = 0;
+        U.TerrainNoCollisionFromY = 0;
+        U.TerrainNoCollisionToX = 0;
+        U.TerrainNoCollisionToY = 0;
+        MovementStates next = MovementStates.UM_Lump;
+        if (!U.UtTurret() && U.UIscriptNobrk()) {
+            next = MovementStates.UM_InitSeq;
+        } else if (U.Sprite == null) {
+            next = MovementStates.UM_Lump;
+        } else if (U.UInBunker()) {
+            next = MovementStates.UM_Bunker;
+        } else if (U.UBurrowed()) {
+            next = MovementStates.UM_Lump;
+        } else if (U.UCanMove()) {
+            next = (U.PathingFlags & 1) != 0 ? MovementStates.UM_AtRest : MovementStates.UM_Flyer;
+        } else if (U.UCanTurn()) {
+            next = U.UtTurret() ? MovementStates.UM_Turret : MovementStates.UM_BldgTurret;
+        }
+        U.MovementState = next;
+        return true;
+    }
+
+    // openbw: bool movement_UM_CheckIllegal(unit_t* u, execute_movement_struct& ems)
+    //
+    // The unit stands in an illegal position (inside terrain). The state
+    // searches for a legal position to move to and walks there with a
+    // single step path.
+    //
+    // The upstream code has two branches: one for a position that is legal
+    // but blocked by another unit, and one for a position that is inside
+    // the terrain. The first needs the unit finder, which this layer does
+    // not have, so only the second is ported here.
+    public bool UmCheckIllegal(Ems ems) {
+        U.ClearStatus(StatusFlag.Collision);
+        int posX = U.Sprite.Position.X;
+        int posY = U.Sprite.Position.Y;
+        if (!M.UnitTypeCanFitAt(U.UnitType, posX, posY)) {
+            // The position is inside the terrain: look for a legal spot.
+            int[] moveTo = FindLegalPosition(posX, posY);
+            moveTo = Pathing.RestrictMoveTarget(moveTo[0], moveTo[1]);
+            if (moveTo[0] != posX || moveTo[1] != posY) {
+                Pathing.Current = null;
+                if (M.IsAtMoveTarget() || M.MovementFlag(4)) {
+                    Pathing.SetUnitMoveTarget(moveTo[0], moveTo[1]);
+                } else {
+                    Pathing.SetNextTargetWaypoint(moveTo[0], moveTo[1]);
+                    if (U.NextMovementWaypoint.X != moveTo[0] || U.NextMovementWaypoint.Y != moveTo[1]) {
+                        U.NextMovementWaypoint = new Xy(moveTo[0], moveTo[1]);
+                        M.SetMovementFlag(1);
+                    }
+                }
+                Pathing.Current = Pathing.CreateSingleStepPath(posX, posY, moveTo[0], moveTo[1]);
+                U.TerrainNoCollisionFromX = 0;
+                U.TerrainNoCollisionFromY = 0;
+                U.TerrainNoCollisionToX = 0;
+                U.TerrainNoCollisionToY = 0;
+                U.PathingFlags = U.PathingFlags | 2;
+                U.MovementState = MovementStates.UM_MoveToLegal;
+                return false;
+            }
+            U.SetStatus(StatusFlag.Collision);
+            U.PathingFlags = U.PathingFlags | 2;
+            U.MovementState = MovementStates.UM_MoveToLegal;
+            return false;
+        }
+        U.PathingFlags = U.PathingFlags & ~6;
+        if (M.IsAtMoveTarget() || M.MovementFlag(4)) {
+            U.MovementState = MovementStates.UM_AtRest;
+        } else {
+            U.MovementState = MovementStates.UM_AnotherPath;
+        }
+        return true;
+    }
+
+    // openbw: the region based search for a legal position in
+    // movement_UM_CheckIllegal.
+    private int[] FindLegalPosition(int posX, int posY) {
+        int regionIndex = Pathing.GetRegionAt(posX, posY);
+        Region r = R.RegionsList[regionIndex];
+        if (r.Walkable()) {
+            int centerX = r.CenterXRaw >> 8;
+            int centerY = r.CenterYRaw >> 8;
+            int dir = Kin.XyDirection(new Xy(centerX - posX, centerY - posY)).RawValue()
+                + 16 * Sim.Rng.Rand(50, -2, 2);
+            Fp length = Fp.Integer(Sim.Rng.Rand(50, 2, 4) * 8);
+            Fp centerLength = Fp.Integer(PathProgress.XyLength(centerX - posX, centerY - posY));
+            if (length > centerLength - Fp.Integer(1)) length = centerLength - Fp.Integer(1);
+            XyFp8 delta = Kin.DirectionXY(Dir.FromRaw(dir), length);
+            Xy target = Kin.ToXy(Kin.ToXyFp8(new Xy(posX, posY)) + delta);
+            if (!M.IsReachable(posX, posY, target.X, target.Y)) return new int[] { posX, posY };
+            return new int[] { target.X, target.Y };
+        }
+        int bestDistance = 2147483647;
+        Region bestRegion = null;
+        int lastCenterX = 0;
+        int lastCenterY = 0;
+        foreach (int n in r.WalkableNeighbors) {
+            Region nr = R.RegionsList[n];
+            int ncx = nr.CenterXRaw >> 8;
+            int ncy = nr.CenterYRaw >> 8;
+            lastCenterX = ncx;
+            lastCenterY = ncy;
+            int distance = PathProgress.XyLength(ncx - posX, ncy - posY);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestRegion = nr;
+            }
+        }
+        if (bestRegion != null) {
+            bool maybeOutside = false;
+            if (posX + 32 < bestRegion.AreaFromX) maybeOutside = true;
+            if (posX - 32 >= bestRegion.AreaToX) maybeOutside = true;
+            if (posY + 32 < bestRegion.AreaFromY) maybeOutside = true;
+            if (posY - 32 >= bestRegion.AreaToY) maybeOutside = true;
+            if (maybeOutside) {
+                Dir dir = Kin.XyDirection(new Xy(lastCenterX - posX, lastCenterY - posY));
+                XyFp8 delta = Kin.DirectionXY(dir, Fp.Integer(64));
+                Xy target = Kin.ToXy(Kin.ToXyFp8(new Xy(posX, posY)) + delta);
+                return new int[] { target.X, target.Y };
+            }
+            int[] adjusted = Pathing.AdjustDestination(bestRegion.Index, posX, posY);
+            if (adjusted[0] == posX && adjusted[1] == posY) {
+                return new int[] { posX, posY - 64 };
+            }
+            return adjusted;
+        }
+        if (r.NonWalkableNeighbors.Count > 0) {
+            int randomIndex = Sim.Rng.Rand(50, 0, r.NonWalkableNeighbors.Count - 1);
+            Region n = R.RegionsList[r.NonWalkableNeighbors[randomIndex]];
+            int ncx = n.CenterXRaw >> 8;
+            int ncy = n.CenterYRaw >> 8;
+            int length = PathProgress.XyLength(ncx - posX, ncy - posY);
+            if (length > 64) length = 64;
+            Dir dir = Kin.XyDirection(new Xy(ncx - posX, ncy - posY));
+            XyFp8 delta = Kin.DirectionXY(dir, Fp.Integer(length));
+            Xy target = Kin.ToXy(Kin.ToXyFp8(new Xy(posX, posY)) + delta);
+            return new int[] { target.X, target.Y };
+        }
+        return new int[] { posX, posY };
+    }
+
+    // openbw: bool movement_UM_AtRest(unit_t* u, execute_movement_struct& ems)
+    public bool UmAtRest(Ems ems) {
+        if (!M.IsAtMoveTarget()) {
+            if (U.PathingCollisionCounter != 0) {
+                if (U.PathingCollisionCounter > 2) U.PathingCollisionCounter = 2;
+                else U.PathingCollisionCounter--;
+            }
+        } else {
+            U.PathingCollisionCounter = 0;
+        }
+        bool goingToNextWaypoint = false;
+        if (GoToNextWaypoint()) {
+            goingToNextWaypoint = true;
+            Sim.UpdateUnitMovementValues(U, ems);
+            // The unit-to-unit collision check needs the unit finder, which
+            // this layer does not have; the terrain check does.
+            if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                Kin.SetNextSpeed(U, Fp.Zero());
+                U.MovementFlags = ems.PostMovementFlags;
+                Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+                if (ems.StoppingMovement) {
+                    // openbw: sprite_run_anim(u->sprite, WalkingToIdle)
+                } else if (ems.StartingMovement) {
+                    // openbw: sprite_run_anim(u->sprite, Walking)
+                }
+                Pathing.SetFlingyMoveTarget(U.Sprite.Position.X, U.Sprite.Position.Y);
+                Sim.StopUnit(U);
+            } else {
+                Sim.FinishUnitMovement(U, ems);
+            }
+        }
+        if (U.UCollision() && U.UGroundUnit()) {
+            U.MovementState = MovementStates.UM_CheckIllegal;
+            return false;
+        }
+        if (!M.IsAtMoveTarget() && !M.MovementFlag(4)) {
+            U.MovementState = MovementStates.UM_StartPath;
+            return true;
+        }
+        if (!goingToNextWaypoint) {
+            U.NextSpeed = Fp.Zero();
+            if (U.CurrentSpeed != Fp.Zero()) {
+                U.CurrentSpeed = Fp.Zero();
+                U.Velocity = new XyFp8(Fp.Zero(), Fp.Zero());
+            }
+            Sim.SetNextTargetWaypoint(U, new Xy(U.Sprite.Position.X, U.Sprite.Position.Y));
+            U.MovementState = MovementStates.UM_Dormant;
+        }
+        return false;
+    }
+
+    // openbw: the go_to_next_waypoint lambda of movement_UM_AtRest
+    private bool GoToNextWaypoint() {
+        if (M.MovementFlag(4)) return true;
+        if (M.IsAtMoveTarget()) {
+            if (M.MovementFlag(2)) return true;
+            if (U.Position != U.NextTargetWaypoint) {
+                Dir dir = Kin.XyDirection(new Xy(U.NextTargetWaypoint.X - U.Position.X,
+                                                U.NextTargetWaypoint.Y - U.Position.Y));
+                if (U.Heading != dir) return true;
+                if (U.NextVelocityDirection != dir) return true;
+            }
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_Dormant(unit_t* u, execute_movement_struct& ems)
+    public bool UmDormant(Ems ems) {
+        bool rest = false;
+        if (U.UCollision() && U.UGroundUnit()) rest = true;
+        if (!M.IsAtMoveTarget()) rest = true;
+        if (U.Position != U.NextTargetWaypoint) rest = true;
+        if (rest) {
+            U.MovementState = MovementStates.UM_AtRest;
+            return true;
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_AtMoveTarget(unit_t* u, execute_movement_struct& ems)
+    public bool UmAtMoveTarget(Ems ems) {
+        Pathing.Current = null;
+        if (U.NextMovementWaypoint != U.MoveTargetPos) {
+            U.NextMovementWaypoint = new Xy(U.MoveTargetPos.X, U.MoveTargetPos.Y);
+        }
+        if (!U.UGroundUnit() || M.MovementFlag(4)) {
+            U.MovementState = MovementStates.UM_AtRest;
+        } else {
+            U.MovementState = MovementStates.UM_CheckIllegal;
+        }
+        return true;
+    }
+
+    // openbw: bool movement_UM_NewMoveTarget(unit_t* u, execute_movement_struct& ems)
+    public bool UmNewMoveTarget(Ems ems) {
+        if (Pathing.Current != null) {
+            Pathing.Current.StateFlags = Pathing.Current.StateFlags & ~1;
+        }
+        if (!M.UnitUpdatePathMovementState(true)) {
+            Pathing.Current = null;
+            U.MovementState = MovementStates.UM_Repath;
+        }
+        return true;
+    }
+
+    // openbw: bool movement_UM_AnotherPath(unit_t* u, execute_movement_struct& ems)
+    public bool UmAnotherPath(Ems ems) {
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+            U.MovementState = MovementStates.UM_FollowPath;
+        } else {
+            U.MovementState = MovementStates.UM_FailedPath;
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_StartPath(unit_t* u, execute_movement_struct& ems)
+    public bool UmStartPath(Ems ems) {
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+            MovementStates next = MovementStates.UM_FollowPath;
+            if ((U.UserActionFlags & 2) != 0) {
+                U.UserActionFlags = U.UserActionFlags & ~2;
+                if (U.FlingyMovementType == 2) {
+                    // openbw: u->path->delay = lcg_rand(51, 0, 2);
+                    Pathing.Current.Delay = Sim.Rng.Rand(51, 0, 2);
+                    next = MovementStates.UM_UIOrderDelay;
+                }
+            }
+            U.MovementState = next;
+            return true;
+        }
+        U.MovementState = MovementStates.UM_FailedPath;
+        return false;
+    }
+
+    // openbw: bool movement_UM_FollowPath(unit_t* u, execute_movement_struct& ems)
+    public bool UmFollowPath(Ems ems) {
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        if (!Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+            U.MovementState = MovementStates.UM_AnotherPath;
+            return true;
+        }
+        Fp speed = U.NextSpeed;
+        Sim.UpdateUnitMovementValues(U, ems);
+        if (U.FlingyMovementType == 0) speed = U.CurrentSpeed;
+        // The unit-to-unit collision check is not part of this layer, so
+        // only the terrain check can report a collision here.
+        if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+            if (Pathing.Current != null) Pathing.Current.LastCollisionSpeed = speed;
+            U.MovementState = MovementStates.UM_FixTerrain;
+            return true;
+        }
+        if (U.Sprite.Position != ems.Position) {
+            if (U.PathingCollisionCounter != 0) {
+                if (U.PathingCollisionCounter > 2) U.PathingCollisionCounter = 2;
+                else U.PathingCollisionCounter--;
+            }
+        }
+        Sim.FinishUnitMovement(U, ems);
+        if (M.IsAtMoveTarget()) {
+            U.MovementState = MovementStates.UM_AtMoveTarget;
+        } else {
+            if (Pathing.Current != null) {
+                if (Pathing.Current.Delay != 0) {
+                    Pathing.Current.Delay--;
+                } else {
+                    Pathing.Current.Delay = 30;
+                    U.MovementState = MovementStates.UM_ScoutPath;
+                }
+            }
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_ScoutPath(unit_t* u, execute_movement_struct& ems)
+    public bool UmScoutPath(Ems ems) {
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        U.MovementState = MovementStates.UM_FollowPath;
+        return true;
+    }
+
+    // openbw: bool movement_UM_Repath(unit_t* u, execute_movement_struct& ems)
+    public bool UmRepath(Ems ems) {
+        M.HasCollisionUnit = false;
+        Pathing.Current = null;
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+            U.MovementState = MovementStates.UM_FollowPath;
+        } else {
+            U.MovementState = MovementStates.UM_FailedPath;
+        }
+        return true;
+    }
+
+    // openbw: bool movement_UM_FailedPath(unit_t* u, execute_movement_struct& ems)
+    public bool UmFailedPath(Ems ems) {
+        U.PathingCollisionCounter = 10;
+        UpdateUnitPathingCollision();
+        U.MovementState = MovementStates.UM_RetryPath;
+        return false;
+    }
+
+    // openbw: bool movement_UM_RetryPath(unit_t* u, execute_movement_struct& ems)
+    public bool UmRetryPath(Ems ems) {
+        if (M.UnitUpdatePathMovementState(false)) return true;
+        if (U.PathingCollisionCounter < 20) {
+            U.PathingCollisionCounter++;
+            return false;
+        }
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+            U.MovementState = MovementStates.UM_FollowPath;
+            return true;
+        }
+        SetUnitImmovable();
+        U.MovementState = MovementStates.UM_AtMoveTarget;
+        return false;
+    }
+
+    // openbw: bool movement_UM_FixTerrain(unit_t* u, execute_movement_struct& ems)
+    public bool UmFixTerrain(Ems ems) {
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        Kin.SetNextSpeed(U, Pathing.Current.LastCollisionSpeed);
+        Sim.UpdateUnitMovementValues(U, ems);
+        if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+            UpdateUnitPathingCollision();
+            Dir toWaypoint = Kin.XyDirection(new Xy(U.NextMovementWaypoint.X - U.Sprite.Position.X,
+                                                    U.NextMovementWaypoint.Y - U.Sprite.Position.Y));
+            if (U.NextVelocityDirection == toWaypoint) {
+                int slideFreeDirection = -1;
+                int movementX = ems.Position.X - U.Position.X;
+                int movementY = ems.Position.Y - U.Position.Y;
+                int desiredQuadrant = DirIndex.Index(U.CurrentVelocityDirection) / 64;
+                if (ems.Position.X != U.Sprite.Position.X
+                    && (ems.Position.Y == U.Sprite.Position.Y
+                        || M.CheckTerrainCollision(movementX, 0))) {
+                    if (movementX >= 0) {
+                        if (desiredQuadrant == 0) slideFreeDirection = 0;
+                        if (desiredQuadrant == 1) slideFreeDirection = -128;
+                    } else {
+                        if (desiredQuadrant == 3) slideFreeDirection = 0;
+                        if (desiredQuadrant == 2) slideFreeDirection = -128;
+                    }
+                } else {
+                    if (movementY < 0) {
+                        if (desiredQuadrant == 0) slideFreeDirection = 64;
+                        if (desiredQuadrant == 3) slideFreeDirection = -64;
+                    } else {
+                        if (desiredQuadrant == 1) slideFreeDirection = 64;
+                        if (desiredQuadrant == 2) slideFreeDirection = -64;
+                    }
+                }
+                Pathing.Current.SlideFreeDirection = slideFreeDirection;
+                U.MovementState = MovementStates.UM_TerrainSlide;
+            } else {
+                Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+            }
+        } else {
+            Sim.FinishUnitMovement(U, ems);
+            U.MovementFlags = U.MovementFlags | 1;
+            U.MovementState = MovementStates.UM_FollowPath;
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_TerrainSlide(unit_t* u, execute_movement_struct& ems)
+    public bool UmTerrainSlide(Ems ems) {
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        U.MovementFlags = U.MovementFlags & ~1;
+        Dir nextVelocityDirection = U.NextVelocityDirection;
+        MoveToward(Pathing.Current.SlideFreeDirection, ems);
+        U.MovementFlags = U.MovementFlags | 1;
+        U.NextVelocityDirection = nextVelocityDirection;
+        Kin.SetDesiredVelocityDirection(U, Dir.FromRaw(Pathing.Current.SlideFreeDirection));
+        if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+            U.MovementState = MovementStates.UM_ForceMoveFree;
+        } else {
+            Sim.FinishUnitMovement(U, ems);
+            Fp nextSpeed = U.NextSpeed;
+            Kin.SetNextSpeed(U, Pathing.Current.LastCollisionSpeed);
+            MoveToward(Kin.XyDirection(new Xy(U.NextMovementWaypoint.X - U.Sprite.Position.X,
+                                             U.NextMovementWaypoint.Y - U.Sprite.Position.Y)).RawValue(), ems);
+            Kin.SetNextSpeed(U, nextSpeed);
+            if (!M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                U.MovementFlags = U.MovementFlags | 1;
+                U.MovementState = MovementStates.UM_FollowPath;
+            }
+        }
+        return false;
+    }
+
+    // openbw: the move lambda of movement_UM_TerrainSlide
+    private void MoveToward(int direction, Ems ems) {
+        ems.PreMovementFlags = U.MovementFlags;
+        Kin.SetCurrentVelocityDirection(U, Dir.FromRaw(direction));
+        Kin.UpdateCurrentSpeedTowardsWaypoint(U);
+        Sim.SetMovementFlags(U, ems);
+        Sim.SetMovementValues(U, ems);
+        ems.PostMovementFlags = U.MovementFlags;
+        U.MovementFlags = ems.PreMovementFlags;
+    }
+
+    // openbw: bool movement_UM_ForceMoveFree(unit_t* u, execute_movement_struct& ems)
+    public bool UmForceMoveFree(Ems ems) {
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (M.IsAtMoveTarget() || M.MovementFlag(4)) {
+            U.MovementState = MovementStates.UM_AtMoveTarget;
+            return false;
+        }
+        Kin.SetNextSpeed(U, Fp.Zero());
+        Pathing.Current = null;
+        U.MovementState = MovementStates.UM_TurnAndStart;
+        return true;
+    }
+
+    // openbw: bool movement_UM_MoveToLegal(unit_t* u, execute_movement_struct& ems)
+    public bool UmMoveToLegal(Ems ems) {
+        if (Pathing.Current == null) {
+            U.MovementState = MovementStates.UM_CheckIllegal;
+            return true;
+        }
+        if ((U.PathingFlags & 4) != 0) {
+            U.PathingFlags = U.PathingFlags & ~4;
+            U.SetStatus(StatusFlag.Collision);
+            Pathing.Current = null;
+            U.MovementState = MovementStates.UM_AtRest;
+            return true;
+        }
+        if ((Pathing.Current.StateFlags & 1) != 0
+            || Pathing.Current.NextX != U.NextMovementWaypoint.X
+            || Pathing.Current.NextY != U.NextMovementWaypoint.Y) {
+            U.NextMovementWaypoint = new Xy(Pathing.Current.NextX, Pathing.Current.NextY);
+        }
+        if (MoveToLegal(ems)) {
+            Pathing.Current = null;
+            U.SetStatus(StatusFlag.Collision);
+            U.MovementState = MovementStates.UM_CheckIllegal;
+        }
+        return false;
+    }
+
+    // openbw: the move lambda of movement_UM_MoveToLegal
+    private bool MoveToLegal(Ems ems) {
+        if (!Pathing.IsMovingAlongPath()) return true;
+        Sim.UpdateUnitMovementValues(U, ems);
+        if (M.IsInMapBounds(U.UnitType, ems.Position.X, ems.Position.Y)) {
+            Sim.FinishUnitMovement(U, ems);
+            return false;
+        }
+        Dir toWaypoint = Kin.XyDirection(new Xy(U.NextMovementWaypoint.X - U.Sprite.Position.X,
+                                                U.NextMovementWaypoint.Y - U.Sprite.Position.Y));
+        if (U.NextVelocityDirection == toWaypoint) return true;
+        Sim.UpdateUnitMovementValues(U, ems);
+        Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        return false;
+    }
+
+    // openbw: bool movement_UM_TurnAndStart(unit_t* u, execute_movement_struct& ems)
+    public bool UmTurnAndStart(Ems ems) {
+        M.HasCollisionUnit = false;
+        Pathing.Current = null;
+        if (M.IsAtMoveTarget() || (U.MovementFlags & 4) != 0) {
+            U.MovementState = MovementStates.UM_AtMoveTarget;
+            return true;
+        }
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+            U.MovementState = MovementStates.UM_FaceTarget;
+            return false;
+        }
+        U.MovementState = MovementStates.UM_FailedPath;
+        return true;
+    }
+
+    // openbw: bool movement_UM_FaceTarget(unit_t* u, execute_movement_struct& ems)
+    public bool UmFaceTarget(Ems ems) {
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        if (M.IsAtMoveTarget() || (U.MovementFlags & 4) != 0) {
+            U.MovementState = MovementStates.UM_AtMoveTarget;
+            return true;
+        }
+        Dir dir = Kin.XyDirection(new Xy(U.NextMovementWaypoint.X - U.Sprite.Position.X,
+                                        U.NextMovementWaypoint.Y - U.Sprite.Position.Y));
+        if (U.NextVelocityDirection == dir) {
+            if (Pathing.Current != null && (Pathing.Current.StateFlags & 1) != 0) {
+                U.MovementState = MovementStates.UM_NewMoveTarget;
+            } else {
+                U.MovementState = MovementStates.UM_FollowPath;
+            }
+            return true;
+        }
+        Sim.UpdateUnitMovementValues(U, ems);
+        Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        return false;
+    }
+
+    // openbw: bool movement_UM_UIOrderDelay(unit_t* u, execute_movement_struct& ems)
+    public bool UmUIOrderDelay(Ems ems) {
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        if (Pathing.Current != null && Pathing.Current.Delay == 0) {
+            U.MovementState = MovementStates.UM_FollowPath;
+            return true;
+        }
+        if (Pathing.Current != null) Pathing.Current.Delay--;
+        return false;
+    }
+}

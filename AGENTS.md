@@ -39,6 +39,9 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/Path.zan` | `path_t`：单位携带的路径对象（长路径 + 短路径 + 索引） |
 | `src/PathProgress.zan` | `path_progress` / `unit_path_to` / `create_single_step_path` |
 | `src/path_main.zan` | 路径执行层对拍入口 |
+| `src/StateMachine.zan` | 运动状态机调度器 + 地形碰撞（两阶段收缩 + 扫描） |
+| `src/MovementStates.zan` | 各 UM_* 状态的具体实现（路径跟随 / 撞地形 / 卡墙） |
+| `src/state_main.zan` | 运动状态机对拍入口 |
 | `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
 | `tools/cppbed/regions_bed.cpp` | regions 层的 C++ 对照床 |
 | `tools/cppbed/astar_bed.cpp` | 长路径 A* 的 C++ 对照床 |
@@ -47,11 +50,13 @@ raw 值都必须与原 C++ 实现完全相同。
 | `tools/cppbed/openbw_traced.h` | **加 trace 钩子的 openbw 副本**（由脚本从真源码生成） |
 | `tools/cppbed/shortpath_trace2.cpp` | 短路径逐步 trace 床（编译 traced 副本） |
 | `tools/cppbed/path_bed.cpp` | 路径执行层的 C++ 对照床（真 create_unit + 真移动积分） |
+| `tools/cppbed/state_bed.cpp` | 运动状态机的 C++ 对照床（真 execute_movement 驱动） |
 | `check.sh` | 运动学层一键逐位对拍 |
 | `check_regions.sh` | regions 层一键逐位对拍 |
 | `check_astar.sh` | 长路径 A* 一键逐位对拍 |
 | `check_shortpath.sh` | 短路径搜索一键逐位对拍 |
 | `check_path.sh` | 路径执行层一键逐位对拍 |
+| `check_state.sh` | 运动状态机一键逐位对拍（7 地形 × 16 场景） |
 
 ## 构建与验证
 
@@ -68,11 +73,19 @@ bash check_astar.sh
 # 短路径搜索对拍（7 个地形变体 × 10 个查询）
 bash check_shortpath.sh
 
+# 路径执行层对拍（7 个地形变体 × 10 个场景）
+bash check_path.sh
+
+# 运动状态机对拍（7 个地形变体 × 16 个场景）
+bash check_state.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
 bash check_astar.sh 3
 bash check_shortpath.sh 3
+bash check_path.sh 3
+bash check_state.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -424,6 +437,53 @@ Zan 侧 `List` 没有 `resize`，且**不能**边遍历边替换自身
 "partially walkable"地形，flag 是 `flag_partially_walkable | flag_walkable`、
 mega tile 是 2，漏了会让 region 数量完全不同——**床和被测物不一致时，
 对拍失败会被误判成移植缺陷**。两边都从 `Terrain.zan` 取，别复制一份。
+
+### 32. 状态机的两阶段地形碰撞：`terrain_no_collision_bounds` 先收缩再扫描
+
+`check_unit_movement_terrain_collision` 不是"返回一个 bool"，它是两步：
+
+1. **收缩**：把 `u->terrain_no_collision_bounds`（一个"已知无地形"的盒）
+   按 c0..c3 四个方向的 contour 迭代缩小，写回 unit。
+2. **扫描**：再按移动方向做四个方向的 `upper_bound`/`lower_bound` 扫描，
+   命中即判定碰撞。
+
+移植时**只写第一步**会得到"永远不碰撞"的错误结果。
+
+### 33. `unit_type_inner_bounding_box` 是 `{-from, to}`，符号相反
+
+`unit_type_inner_bounding_box(ut, origin)` 返回 `{origin - from, origin + to}`，
+而 `from` 本身是负的 ⇒ 盒是 `origin + |from|`。写 `origin + from` 会把盒
+缩小方向搞反，`is_blocked` 判错。
+
+### 34. 短路径搜索会**清空** `pf.short_path`，失败时留下空列表
+
+C++ `pathfinder_find_short_path` 在重建前无条件 `pf.short_path.clear()`。
+Zan 侧若只在成功时才 `Pf.ShortPath = points`，失败时会**留下上一次的
+旧列表**⇒ `path_progress` 误判"有路径"⇒ 状态机不进入 `FailedPath`，
+而是继续跟一条已经不存在的路径。赋值必须无条件做。
+
+### 35. `tile_t::flag_has_creep` 是 `0x40`，不是 `0x100`
+
+`0x100` 是 `flag_very_high`。`is_walkable` 判错 ⇒ 地面单位在有残骸的
+格子上被判为非法位置 ⇒ 反复进 `CheckIllegal`。
+
+### 36. `Sim.TileIndex` 的地图宽度不能写死
+
+openbw 是 `uy * game_st.map_tile_width + ux`，写死 128 在 64 宽的床上
+索引全错 ⇒ 读到别的 tile 的 flag。tile 尺寸要从地图尺寸算。
+
+### 37. 状态机层的边界：单位间碰撞不在这一层
+
+`check_unit_movement_unit_collision` / `check_unit_movement_terrain_collision`
+里的单位间部分需要 unit finder（所有单位的空间索引），本层没有。
+单单位床里恒为"无碰撞"。**但 `is_blocked` 里的 `unit_type_can_fit_at`
+（地形判定）必须移植**——它决定单位会不会反复进 `CheckIllegal`。
+
+### 38. `UM_CheckIllegal` 的"找合法位置"分支要移植
+
+单位卡在墙里时，C++ 会**搜索**一个合法位置并用
+`create_single_step_path` 走过去，而不是原地卡死。跳过这段 ⇒
+单位永远停在非法位置，两侧状态机立刻分叉。
 
 ## 已知 zanc 缺陷
 

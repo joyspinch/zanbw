@@ -1,0 +1,501 @@
+using System;
+
+// The movement state machine: the dispatcher and the path-following states.
+//
+// Port of openbw/bwgame.h:
+//   execute_movement()                 12091-12140 (the dispatcher)
+//   unit_update_path_movement_state()  10908-10933
+//   movement_UM_AtRest()               11062-11125
+//   movement_UM_Dormant()              11382-11393
+//   movement_UM_AtMoveTarget()         11537-11550
+//   movement_UM_NewMoveTarget()        11551-11562
+//   movement_UM_AnotherPath()          11441-11446
+//   movement_UM_StartPath()            11447-11464
+//   movement_UM_FollowPath()           11465-11529
+//   movement_UM_ScoutPath()            11530-11536
+//   movement_UM_Repath()               11563-11575
+//   movement_UM_FailedPath()           11628-11634
+//   movement_UM_RetryPath()            11708-11722
+//   movement_UM_TurnAndStart()         11669-11690
+//   movement_UM_FaceTarget()           11691-11707
+//   movement_UM_UIOrderDelay()         11576-11585
+//   check_unit_movement_terrain_collision()  8807-8980
+//
+// The unit-to-unit collision checks are not part of this layer: they need
+// the unit finder (a spatial index over all units), which the bed does not
+// have. In a single unit bed they always report "no collision".
+
+public class StateMachine {
+    public Sim Sim;
+    public Regions R;
+    public PathProgress Pathing;
+    public Unit U;
+
+    // openbw: st.consider_collision_with_unit_bug
+    public bool HasCollisionUnit;
+    public int CollisionUnitId;
+
+    public StateMachine(Sim sim, Regions r, PathProgress pathing, Unit u) {
+        Sim = sim;
+        R = r;
+        Pathing = pathing;
+        U = u;
+    }
+
+    // ---- helpers -----------------------------------------------------------
+
+    public bool MovementFlag(int flag) { return (U.MovementFlags & flag) != 0; }
+    public void SetMovementFlag(int flag) { U.MovementFlags = U.MovementFlags | flag; }
+    public void UnsetMovementFlag(int flag) { U.MovementFlags = U.MovementFlags & ~flag; }
+
+    // openbw: bool unit_is_at_move_target(const flingy_t* u) const
+    public bool IsAtMoveTarget() { return U.Sprite.Position == U.MoveTargetPos; }
+
+    // openbw: unit_update_path_movement_state(u, allow_new_path)
+    public bool UnitUpdatePathMovementState(bool allowNewPath) {
+        if (IsAtMoveTarget() || MovementFlag(4)) {
+            U.MovementState = MovementStates.UM_AtMoveTarget;
+            return true;
+        }
+        if (U.UCollision() && U.UGroundUnit()) {
+            Pathing.Current = null;
+            U.MovementState = MovementStates.UM_CheckIllegal;
+            return true;
+        }
+        MovementStates next = MovementStates.UM_AnotherPath;
+        if (!allowNewPath || Pathing.Current != null) {
+            if (Pathing.Current == null || (Pathing.Current.StateFlags & 1) == 0) return false;
+            next = MovementStates.UM_NewMoveTarget;
+        }
+        if (U.MovementState >= MovementStates.UM_FixCollision
+            && U.MovementState <= MovementStates.UM_TerrainSlide) {
+            next = MovementStates.UM_TurnAndStart;
+        }
+        U.MovementState = next;
+        return true;
+    }
+
+    // openbw: bool execute_movement(unit_t* u)
+    //
+    // The dispatcher: it runs the current state until a state returns
+    // false. The states that return true have changed the movement state,
+    // so the loop continues with the new one.
+    public bool ExecuteMovement() {
+        MovementStatesImpl states = new MovementStatesImpl(this);
+        Ems ems = new Ems();
+        ems.RefreshVision = false;
+        while (true) {
+            bool cont = false;
+            switch (U.MovementState) {
+                case MovementStates.UM_Init:
+                    cont = states.UmInit(ems);
+                    break;
+                case MovementStates.UM_CheckIllegal:
+                    cont = states.UmCheckIllegal(ems);
+                    break;
+                case MovementStates.UM_FixTerrain:
+                    cont = states.UmFixTerrain(ems);
+                    break;
+                case MovementStates.UM_TerrainSlide:
+                    cont = states.UmTerrainSlide(ems);
+                    break;
+                case MovementStates.UM_ForceMoveFree:
+                    cont = states.UmForceMoveFree(ems);
+                    break;
+                case MovementStates.UM_MoveToLegal:
+                    cont = states.UmMoveToLegal(ems);
+                    break;
+                case MovementStates.UM_AtRest:
+                    cont = states.UmAtRest(ems);
+                    break;
+                case MovementStates.UM_Dormant:
+                    cont = states.UmDormant(ems);
+                    break;
+                case MovementStates.UM_AtMoveTarget:
+                    cont = states.UmAtMoveTarget(ems);
+                    break;
+                case MovementStates.UM_NewMoveTarget:
+                    cont = states.UmNewMoveTarget(ems);
+                    break;
+                case MovementStates.UM_AnotherPath:
+                    cont = states.UmAnotherPath(ems);
+                    break;
+                case MovementStates.UM_StartPath:
+                    cont = states.UmStartPath(ems);
+                    break;
+                case MovementStates.UM_FollowPath:
+                    cont = states.UmFollowPath(ems);
+                    break;
+                case MovementStates.UM_ScoutPath:
+                    cont = states.UmScoutPath(ems);
+                    break;
+                case MovementStates.UM_Repath:
+                    cont = states.UmRepath(ems);
+                    break;
+                case MovementStates.UM_FailedPath:
+                    cont = states.UmFailedPath(ems);
+                    break;
+                case MovementStates.UM_RetryPath:
+                    cont = states.UmRetryPath(ems);
+                    break;
+                case MovementStates.UM_TurnAndStart:
+                    cont = states.UmTurnAndStart(ems);
+                    break;
+                case MovementStates.UM_FaceTarget:
+                    cont = states.UmFaceTarget(ems);
+                    break;
+                case MovementStates.UM_UIOrderDelay:
+                    cont = states.UmUIOrderDelay(ems);
+                    break;
+                default:
+                    cont = false;
+                    break;
+            }
+            if (!cont) return ems.RefreshVision;
+        }
+    }
+
+    // openbw: bool is_in_map_bounds(const unit_type_t* unit_type, xy pos) const
+    public bool IsInMapBounds(UnitType ut, int posX, int posY) {
+        if (posX - ut.DimensionsFrom.X < 0) return false;
+        if (posY - ut.DimensionsFrom.Y < 0) return false;
+        if (posX + ut.DimensionsTo.X >= Sim.MapWidth) return false;
+        if (posY + ut.DimensionsTo.Y >= Sim.MapHeight) return false;
+        return true;
+    }
+
+    // openbw: bool is_in_inner_map_bounds(rect area) const
+    public bool IsInInnerMapBounds(int fromX, int fromY, int toX, int toY) {
+        if (fromX < 0) return false;
+        if (toX >= Sim.MapWidth) return false;
+        if (fromY < 0) return false;
+        if (toY >= Sim.MapHeight) return false;
+        return true;
+    }
+
+    // openbw: bool is_walkable(xy pos) const
+    public bool IsWalkable(int posX, int posY) {
+        int index = Sim.TileIndex(new Xy(posX, posY));
+        int flags = R.TileFlags[index];
+        if ((flags & 0x40) != 0) return true;    // flag_has_creep
+        if ((flags & 0x2000) != 0) {              // flag_partially_walkable
+            int megatile = R.MegaTileIndex[index];
+            int cell = (posY / 8 % 4) * 4 + (posX / 8 % 4);
+            return (R.Vf4Flags[megatile * 16 + cell] & 1) != 0;
+        }
+        return (flags & 1) != 0;                  // flag_walkable
+    }
+
+    // openbw: bool can_fit_at(xy pos, std::array<int, 4> inner) const
+    public bool CanFitAt(int posX, int posY, int[] inner) {
+        List<Contour> c0 = R.Contours[0];
+        int i = LowerBoundV0(c0, posY);
+        while (i != 0) {
+            i--;
+            if (inner[0] + c0[i].V0 < posY) break;
+            if (inner[1] + c0[i].V1 <= posX && inner[3] + c0[i].V2 >= posX) return false;
+        }
+        List<Contour> c1 = R.Contours[1];
+        i = UpperBoundV0(c1, posX);
+        while (i != c1.Count) {
+            if (inner[1] + c1[i].V0 > posX) break;
+            if (inner[2] + c1[i].V1 <= posY && inner[0] + c1[i].V2 >= posY) return false;
+            i++;
+        }
+        List<Contour> c2 = R.Contours[2];
+        i = UpperBoundV0(c2, posY);
+        while (i != c2.Count) {
+            if (inner[2] + c2[i].V0 > posY) break;
+            if (inner[1] + c2[i].V1 <= posX && inner[3] + c2[i].V2 >= posX) return false;
+            i++;
+        }
+        List<Contour> c3 = R.Contours[3];
+        i = LowerBoundV0(c3, posX);
+        while (i != 0) {
+            i--;
+            if (inner[3] + c3[i].V0 < posX) break;
+            if (inner[2] + c3[i].V1 <= posY && inner[0] + c3[i].V2 >= posY) return false;
+        }
+        return true;
+    }
+
+    // openbw: bool is_reachable(xy from, xy to) const {
+    //     return get_region_at(from)->group_index == get_region_at(to)->group_index;
+    // }
+    public bool IsReachable(int fromX, int fromY, int toX, int toY) {
+        int fromRegion = Pathing.GetRegionAt(fromX, fromY);
+        int toRegion = Pathing.GetRegionAt(toX, toY);
+        return R.RegionsList[fromRegion].GroupIndex == R.RegionsList[toRegion].GroupIndex;
+    }
+
+    // openbw: bool unit_type_can_fit_at(const unit_type_t* unit_type, xy pos) const
+    public bool UnitTypeCanFitAt(UnitType ut, int posX, int posY) {
+        if (!IsInMapBounds(ut, posX, posY)) return false;
+        if (!IsWalkable(posX, posY)) return false;
+        int[] inner = new int[4];
+        inner[0] = ut.DimensionsFrom.Y;
+        inner[1] = -ut.DimensionsTo.X;
+        inner[2] = -ut.DimensionsTo.Y;
+        inner[3] = ut.DimensionsFrom.X;
+        return CanFitAt(posX, posY, inner);
+    }
+
+    // openbw: std::pair<bool, unit_t*> is_blocked(const unit_t* u, xy pos) const {
+    //     rect bounds = unit_inner_bounding_box(u, pos);
+    //     if (!is_in_inner_map_bounds(bounds)) return {true, nullptr};
+    //     unit_t* largest_unit = get_largest_blocking_unit(u, bounds);
+    //     if (!largest_unit) return {!unit_type_can_fit_at(u->unit_type, pos), nullptr};
+    //     return {true, largest_unit};
+    // }
+    //
+    // The unit finder is not part of this layer, so no other unit can
+    // block the way.
+    public bool IsBlocked(int posX, int posY) {
+        // openbw: unit_type_inner_bounding_box(u, origin) is
+        //     { origin - dimensions.from, origin + dimensions.to }
+        // and dimensions.from is negative, so the "from" side grows.
+        int fromX = posX - U.UnitType.DimensionsFrom.X;
+        int fromY = posY - U.UnitType.DimensionsFrom.Y;
+        int toX = posX + U.UnitType.DimensionsTo.X;
+        int toY = posY + U.UnitType.DimensionsTo.Y;
+        if (!IsInInnerMapBounds(fromX, fromY, toX, toY)) return true;
+        return !UnitTypeCanFitAt(U.UnitType, posX, posY);
+    }
+
+    // openbw: check_unit_movement_terrain_collision(u, movement)
+    //
+    // Two steps. First it narrows u->terrain_no_collision_bounds down to
+    // the box around the unit that is known to be free of terrain, then it
+    // sweeps the contours in the direction of the movement to see whether
+    // the unit would end up inside a wall.
+    public bool CheckTerrainCollision(int moveX, int moveY) {
+        if (!U.UGroundUnit()) {
+            // openbw: !is_in_map_bounds(unit_bounding_box(u, ems.position))
+            int fromX = U.Position.X + moveX - U.UnitType.DimensionsFrom.X;
+            int fromY = U.Position.Y + moveY - U.UnitType.DimensionsFrom.Y;
+            int toX = fromX + (U.UnitType.DimensionsTo.X - U.UnitType.DimensionsFrom.X) + 1;
+            int toY = fromY + (U.UnitType.DimensionsTo.Y - U.UnitType.DimensionsFrom.Y) + 1;
+            return fromX < 0 || fromY < 0 || toX > Sim.MapWidth || toY > Sim.MapHeight;
+        }
+        int newX = U.Position.X + moveX;
+        int newY = U.Position.Y + moveY;
+        if (newX >= U.TerrainNoCollisionFromX && newY >= U.TerrainNoCollisionFromY) {
+            if (newX <= U.TerrainNoCollisionToX && newY <= U.TerrainNoCollisionToY) return false;
+        }
+        int posX = U.Position.X;
+        int posY = U.Position.Y;
+        int boundFromX = posX - 128;
+        int boundFromY = posY - 128;
+        int boundToX = posX + 128;
+        int boundToY = posY + 128;
+
+        int[] inner = new int[4];
+        inner[0] = U.UnitType.DimensionsFrom.Y;
+        inner[1] = -U.UnitType.DimensionsTo.X;
+        inner[2] = -U.UnitType.DimensionsTo.Y;
+        inner[3] = U.UnitType.DimensionsFrom.X;
+
+        List<Contour> c0 = R.Contours[0];
+        List<Contour> c1 = R.Contours[1];
+        List<Contour> c2 = R.Contours[2];
+        List<Contour> c3 = R.Contours[3];
+
+        // The four binary searches over the contours. c0 and c3 are searched
+        // with upper_bound (comparing value < c.v[0]), c1 and c2 with
+        // lower_bound (comparing c.v[0] < value).
+        int i0 = UpperBoundV0(c0, posY - inner[0]);
+        int i1 = LowerBoundV0(c1, posX - inner[1]);
+        int i2 = LowerBoundV0(c2, posY - inner[2]);
+        int i3 = UpperBoundV0(c3, posX - inner[3]);
+
+        // First pass: shrink the free box by the contours around the unit.
+        while (true) {
+            bool done = true;
+            if (i0 != 0) {
+                done = false;
+                i0--;
+                Contour c = ExpandContour(c0[i0], inner);
+                if (c.V0 >= boundFromY) {
+                    if (c.V2 >= boundFromX && c.V1 <= boundToX) {
+                        if (posX < c.V1 && posY - c.V0 < c.V1 - posX) {
+                            boundToX = c.V1 - 1;
+                        } else if (posX > c.V2 && posY - c.V0 < posX - c.V2) {
+                            boundFromX = c.V2 + 1;
+                        } else {
+                            boundFromY = c.V0 + 1;
+                        }
+                    }
+                } else {
+                    i0 = 0;
+                }
+            }
+            if (i1 != c1.Count) {
+                done = false;
+                Contour c = ExpandContour(c1[i1], inner);
+                i1++;
+                if (c.V0 <= boundToX) {
+                    if (c.V2 >= boundFromY && c.V1 <= boundToY) {
+                        if (posY < c.V1 && c.V0 - posX < c.V1 - posY) {
+                            boundToY = c.V1 - 1;
+                        } else if (posY > c.V2 && c.V0 - posX < posY - c.V2) {
+                            boundFromY = c.V2 + 1;
+                        } else {
+                            boundToX = c.V0 - 1;
+                        }
+                    }
+                } else {
+                    i1 = c1.Count;
+                }
+            }
+            if (i2 != c2.Count) {
+                done = false;
+                Contour c = ExpandContour(c2[i2], inner);
+                i2++;
+                if (c.V0 <= boundToY) {
+                    if (c.V2 >= boundFromX && c.V1 <= boundToX) {
+                        if (posX < c.V1 && c.V0 - posY < c.V1 - posX) {
+                            boundToX = c.V1 - 1;
+                        } else if (posX > c.V2 && c.V0 - posY < posX - c.V2) {
+                            boundFromX = c.V2 + 1;
+                        } else {
+                            boundToY = c.V0 - 1;
+                        }
+                    }
+                } else {
+                    i2 = c2.Count;
+                }
+            }
+            if (i3 != 0) {
+                done = false;
+                i3--;
+                Contour c = ExpandContour(c3[i3], inner);
+                if (c.V0 >= boundFromX) {
+                    if (c.V2 >= boundFromY && c.V1 <= boundToY) {
+                        if (posY < c.V1 && posX - c.V0 < c.V1 - posY) {
+                            boundToY = c.V1 - 1;
+                        } else if (posY > c.V2 && posX - c.V0 < posY - c.V2) {
+                            boundFromY = c.V2 + 1;
+                        } else {
+                            boundFromX = c.V0 + 1;
+                        }
+                    }
+                } else {
+                    i3 = 0;
+                }
+            }
+            if (done) break;
+        }
+
+        U.TerrainNoCollisionFromX = boundFromX;
+        U.TerrainNoCollisionFromY = boundFromY;
+        U.TerrainNoCollisionToX = boundToX;
+        U.TerrainNoCollisionToY = boundToY;
+        if (newX >= boundFromX && newY >= boundFromY) {
+            if (newX <= boundToX && newY <= boundToY) return false;
+        }
+
+        int minX = posX;
+        int minY = posY;
+        int maxX = newX;
+        int maxY = newY;
+        if (maxX < minX) { int t = minX; minX = maxX; maxX = t; }
+        if (maxY < minY) { int t = minY; minY = maxY; maxY = t; }
+
+        // Second pass: sweep the contours in the direction of the movement.
+        if (newY < posY) {
+            int i = UpperBoundV0(c0, posY - inner[0]);
+            while (i != 0) {
+                i--;
+                Contour c = ExpandContour(c0[i], inner);
+                if (c.V0 < newY) break;
+                if (c.V1 <= maxX && c.V2 >= minX) {
+                    if ((~c.Flags & 0x30) != 0) return true;
+                    if (c.V1 <= minX) return true;
+                    if (c.V2 >= maxX) return true;
+                }
+            }
+        }
+        if (newX > posX) {
+            int i = LowerBoundV0(c1, posX - inner[1]);
+            while (i != c1.Count) {
+                Contour c = ExpandContour(c1[i], inner);
+                i++;
+                if (c.V0 > newX) break;
+                if (c.V1 <= maxY && c.V2 >= minY) {
+                    if ((~c.Flags & 0x30) != 0) return true;
+                    if (c.V1 <= minY) return true;
+                    if (c.V2 >= maxY) return true;
+                }
+            }
+        }
+        if (newY > posY) {
+            int i = LowerBoundV0(c2, posY - inner[2]);
+            while (i != c2.Count) {
+                Contour c = ExpandContour(c2[i], inner);
+                i++;
+                if (c.V0 > newY) break;
+                if (c.V1 <= maxX && c.V2 >= minX) {
+                    if ((~c.Flags & 0x30) != 0) return true;
+                    if (c.V1 <= minX) return true;
+                    if (c.V2 >= maxX) return true;
+                }
+            }
+        }
+        if (newX < posX) {
+            int i = UpperBoundV0(c3, posX - inner[3]);
+            while (i != 0) {
+                i--;
+                Contour c = ExpandContour(c3[i], inner);
+                if (c.V0 < newX) break;
+                if (c.V1 <= maxY && c.V2 >= minY) {
+                    if ((~c.Flags & 0x30) != 0) return true;
+                    if (c.V1 <= minY) return true;
+                    if (c.V2 >= maxY) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // openbw: std::upper_bound(c.begin(), c.end(), value, cmp_u) with
+    //     cmp_u = [&](int v, const contour& c) { return v < c.v[0]; }
+    // -- the first contour whose v[0] is greater than the value.
+    private static int UpperBoundV0(List<Contour> list, int value) {
+        int lo = 0;
+        int hi = list.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (value < list[mid].V0) hi = mid; else lo = mid + 1;
+        }
+        return lo;
+    }
+
+    // openbw: std::lower_bound(c.begin(), c.end(), value, cmp_l) with
+    //     cmp_l = [&](const contour& c, int v) { return c.v[0] < v; }
+    // -- the first contour whose v[0] is not less than the value.
+    private static int LowerBoundV0(List<Contour> list, int value) {
+        int lo = 0;
+        int hi = list.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (list[mid].V0 < value) lo = mid + 1; else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: auto expand = [&](regions_t::contour c) {
+    //     c.v[0] += inner[c.dir];
+    //     c.v[1] += inner[c.flags & 3];
+    //     c.v[2] += inner[(c.flags >> 2) & 3];
+    //     return c;
+    // }
+    private static Contour ExpandContour(Contour c, int[] inner) {
+        Contour r = new Contour();
+        r.V0 = c.V0 + inner[c.Dir];
+        r.V1 = c.V1 + inner[c.Flags & 3];
+        r.V2 = c.V2 + inner[(c.Flags >> 2) & 3];
+        r.Dir = c.Dir;
+        r.Flags = c.Flags;
+        return r;
+    }
+}

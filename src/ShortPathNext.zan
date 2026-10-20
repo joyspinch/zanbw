@@ -106,6 +106,10 @@ public class ShortPathNext {
         Pf.DestinationReached = sp.DestinationReached;
         Pf.IsStuck = Pf.IsStuck || sp.IsStuck;
 
+        // openbw: pathfinder_find_short_path clears pf.short_path before it
+        // rebuilds it, so a failed search leaves the list empty.
+        Pf.ShortPath = points;
+        Pf.ShortPathIndex = 0;
         if (points.Count != 0) {
             int[] last = points[points.Count - 1];
             if (Pf.DestinationReached) {
@@ -123,8 +127,6 @@ public class ShortPathNext {
                     Pf.IsStuck = true;
                 }
             }
-            Pf.ShortPath = points;
-            Pf.ShortPathIndex = 0;
             return true;
         }
         return false;

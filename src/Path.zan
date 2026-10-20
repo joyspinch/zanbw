@@ -23,6 +23,14 @@ public class Path {
     public int CurrentLongPathIndex;
     public int CurrentShortPathIndex;
 
+    // openbw: path_t::last_collision_speed -- the speed the unit had when
+    // it last hit something, so a retry can resume at the same pace.
+    public Fp LastCollisionSpeed;
+
+    // openbw: path_t::slide_free_direction -- the direction the unit slides
+    // in when it is stuck against terrain.
+    public int SlideFreeDirection;
+
     public int SourceX;
     public int SourceY;
     public int DestinationX;
@@ -34,6 +42,8 @@ public class Path {
         LongPath = new List<int>();
         ShortPath = new List<int[]>();
         Delay = 0;
+        LastCollisionSpeed = Fp.Zero();
+        SlideFreeDirection = -1;
         CreationFrame = 0;
         StateFlags = 0;
         FullLongPathSize = 0;

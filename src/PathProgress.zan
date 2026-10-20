@@ -109,6 +109,22 @@ public class PathProgress {
         return new int[] { res.X, res.Y };
     }
 
+    // openbw: xy pathfinder_adjust_destination(const regions_t::region* source_region, xy destination) const
+    public int[] AdjustDestination(int sourceRegion, int destinationX, int destinationY) {
+        Pathfinder pf = new Pathfinder(R);
+        ShortPathNext next = new ShortPathNext(R, pf);
+        return next.AdjustDestination(sourceRegion, destinationX, destinationY);
+    }
+
+    // openbw: void set_next_target_waypoint(flingy_t* u, xy pos) {
+    //     if (u->next_target_waypoint == pos) return;
+    //     u->next_target_waypoint = pos;
+    // }
+    public void SetNextTargetWaypoint(int posX, int posY) {
+        if (U.NextTargetWaypoint.X == posX && U.NextTargetWaypoint.Y == posY) return;
+        U.NextTargetWaypoint = new Xy(posX, posY);
+    }
+
     // openbw: set_unit_move_target(u, move_target)
     public void SetUnitMoveTarget(int posX, int posY) {
         if (U.MoveTargetPos.X == posX && U.MoveTargetPos.Y == posY) return;

@@ -41,12 +41,16 @@ public class Sim {
     public Rng Rng;
     public int MapWidth;
     public int MapHeight;
+    public int MapTileWidth;
+    public int MapTileHeight;
     public int[] RepulseField;
 
     public Sim(Rng rng, int mapWidth, int mapHeight) {
         Rng = rng;
         MapWidth = mapWidth;
         MapHeight = mapHeight;
+        MapTileWidth = mapWidth / 32;
+        MapTileHeight = mapHeight / 32;
         RepulseField = new int[((mapWidth + 47) / 48) * ((mapHeight + 47) / 48)];
     }
 
@@ -352,6 +356,64 @@ public class Sim {
         u.MovementFlags = ems.PreMovementFlags;
     }
 
+    // openbw: void set_next_target_waypoint(flingy_t* u, xy pos) {
+    //     if (u->next_target_waypoint == pos) return;
+    //     u->next_target_waypoint = pos;
+    // }
+    public void SetNextTargetWaypoint(Unit u, Xy pos) {
+        if (u.NextTargetWaypoint == pos) return;
+        u.NextTargetWaypoint = pos;
+    }
+
+    // openbw: void stop_flingy(flingy_t* u) {
+    //     if (u_movement_flag(u, 4)) return;
+    //     u_unset_movement_flag(u, 0x10);
+    //     u_unset_movement_flag(u, 0x20);
+    //     u_unset_movement_flag(u, 0x40);
+    //     u->move_target.pos = u->position;
+    //     u->move_target.unit = nullptr;
+    //     u->next_movement_waypoint = u->position;
+    //     if (u_movement_flag(u, 2) && u->flingy_movement_type == 0) {
+    //         fp8 d = unit_halt_distance(u);
+    //         u->move_target.pos = to_xy(u->exact_position + direction_xy(u->next_velocity_direction, d));
+    //         u->next_movement_waypoint = u->move_target.pos;
+    //         if (!unit_is_at_move_target(u)) u_set_movement_flag(u, 4);
+    //     }
+    // }
+    public void StopFlingy(Unit u) {
+        if ((u.MovementFlags & 4) != 0) return;
+        u.MovementFlags = u.MovementFlags & ~0x10;
+        u.MovementFlags = u.MovementFlags & ~0x20;
+        u.MovementFlags = u.MovementFlags & ~0x40;
+        u.MoveTargetPos = new Xy(u.Position.X, u.Position.Y);
+        u.HasMoveTargetUnit = false;
+        u.NextMovementWaypoint = new Xy(u.Position.X, u.Position.Y);
+        if ((u.MovementFlags & 2) != 0 && u.FlingyMovementType == 0) {
+            Fp d = Kin.UnitHaltDistance(u);
+            XyFp8 target = u.ExactPosition + Kin.DirectionXY(u.NextVelocityDirection, d);
+            Xy xyTarget = Kin.ToXy(target);
+            u.MoveTargetPos = xyTarget;
+            u.NextMovementWaypoint = xyTarget;
+            if (u.Sprite.Position != u.MoveTargetPos) u.MovementFlags = u.MovementFlags | 4;
+        }
+    }
+
+    // openbw: void stop_unit(unit_t* u) {
+    //     if (u->pathing_flags & 2) u->pathing_flags |= 4;
+    //     stop_flingy(u);
+    //     xy move_target = restrict_move_target_to_valid_bounds(u, u->move_target.pos);
+    //     if (u->move_target.pos != move_target) {
+    //         u->move_target.pos = move_target;
+    //         u->next_movement_waypoint = move_target;
+    //     }
+    //     u->move_target_timer = 15;
+    // }
+    public void StopUnit(Unit u) {
+        if ((u.PathingFlags & 2) != 0) u.PathingFlags = u.PathingFlags | 4;
+        StopFlingy(u);
+        u.MoveTargetTimer = 15;
+    }
+
     // openbw: bool finish_flingy_movement(flingy_t* u, execute_movement_struct& ems) {
     //     bool moved = u->position != ems.position;
     //     u->movement_flags = ems.post_movement_flags;
@@ -388,13 +450,14 @@ public class Sim {
     }
 
     // openbw: size_t tile_index(xy pos) const {
-    //     size_t ux = (size_t)pos.x / 32;  size_t uy = (size_t)pos.y / 32;
+    //     size_t ux = (size_t)pos.x / 32;
+    //     size_t uy = (size_t)pos.y / 32;
     //     return uy * game_st.map_tile_width + ux;
     // }
     public int TileIndex(Xy pos) {
         int ux = pos.X / 32;
         int uy = pos.Y / 32;
-        return uy * 128 + ux;
+        return uy * MapTileWidth + ux;
     }
 
     // ---- movement states ---------------------------------------------------
