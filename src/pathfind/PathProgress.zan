@@ -146,6 +146,9 @@ public class PathProgress {
         SetFlingyMoveTarget(restricted[0], restricted[1]);
         if (U.HasStatusFlag(StatusFlag.Immovable)) U.ClearStatus(StatusFlag.Immovable);
         U.MoveTargetTimer = 15;
+        // openbw: the order queue is empty in this layer, so the flag is
+        // always cleared.
+        U.UnsetMovementFlag(0x20);
     }
 
     // openbw: set_flingy_move_target(u, target_pos)

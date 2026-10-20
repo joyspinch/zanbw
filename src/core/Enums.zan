@@ -70,6 +70,9 @@ public enum StatusFlag {
     Flag400000 = 0x400000,
     Gathering = 0x800000,
     TurretWalking = 0x1000000,
+    // openbw: the turret state tests a raw flag that the C++ enum does
+    // not name: (unit_t::status_flags_t)0x2000000
+    Flag2000000 = 0x2000000,
     Invincible = 0x4000000,
     ReadyToAttack = 0x8000000,
     SpeedUpgrade = 0x10000000,
@@ -123,6 +126,7 @@ public enum UnitTypes {
     // The indices are the ones of openbw's UnitTypes enum. Only the ones
     // the collision code needs are listed.
     ZergLarva = 35,
+    ProtossInterceptor = 73,
     SpecialUpperLevelDoor = 205,
     SpecialRightUpperLevelDoor = 206,
     SpecialPitDoor = 207,

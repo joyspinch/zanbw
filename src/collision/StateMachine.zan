@@ -105,6 +105,30 @@ public class StateMachine {
                 case MovementStates.UM_Init:
                     cont = states.UmInit(ems);
                     break;
+                case MovementStates.UM_InitSeq:
+                    cont = states.UmInitSeq(ems);
+                    break;
+                case MovementStates.UM_Lump:
+                    cont = states.UmLump(ems);
+                    break;
+                case MovementStates.UM_Turret:
+                    cont = states.UmTurret(ems);
+                    break;
+                case MovementStates.UM_Bunker:
+                    cont = states.UmBunker(ems);
+                    break;
+                case MovementStates.UM_Hidden:
+                    cont = states.UmHidden(ems);
+                    break;
+                case MovementStates.UM_BldgTurret:
+                    cont = states.UmBldgTurret(ems);
+                    break;
+                case MovementStates.UM_Flyer:
+                    cont = states.UmFlyer(ems);
+                    break;
+                case MovementStates.UM_LumpWannabe:
+                    cont = states.UmLumpWannabe(ems);
+                    break;
                 case MovementStates.UM_CheckIllegal:
                     cont = states.UmCheckIllegal(ems);
                     break;

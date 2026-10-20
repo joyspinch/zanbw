@@ -1,0 +1,272 @@
+using System;
+
+// Entry point of the movement state machine differential test for the
+// states that only unusual unit types reach.
+//
+//   zanbw_state2.exe <terrain variant> <scenario>
+//
+// The output format matches tools/cppbed/state2_bed.cpp exactly.
+
+public class State2Main {
+    // The unit types the scenarios pick from. They mirror the ones in
+    // the C++ bed: the plain bed only has the ground unit that can move
+    // and turn, these add the combinations that reach the other states.
+    static UnitType MakeType(int flags, int elevation) {
+        FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
+                                       Fp.Integer(512), Fp.Integer(8), 0);
+        return new UnitType(0, ft, elevation, flags, 7,
+            new Xy(8, 8), new Xy(8, 8));
+    }
+
+    static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+        int scen = 0;
+        if (args.Length >= 2) scen = Convert.ToInt32(args[1]);
+        Terrain.Variant = variant;
+
+        Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
+        for (int y = 0; y < Terrain.TileHeight; y++) {
+            for (int x = 0; x < Terrain.TileWidth; x++) {
+                r.MegaTileIndex[y * Terrain.TileWidth + x] = Terrain.MegaTileIndex(x, y);
+                r.TileFlags[y * Terrain.TileWidth + x] = Terrain.TileFlags(x, y);
+            }
+        }
+        for (int i = 0; i < 16; i++) {
+            r.Vf4Flags[i] = 1;
+            r.Vf4Flags[16 + i] = 0;
+            r.Vf4Flags[32 + i] = (i / 4 >= 2) ? 1 : 0;
+        }
+
+        RegionsMain rm = new RegionsMain(r);
+        rm.RegionsCreate();
+
+        // The scenarios must match the C++ bed one for one.
+        string[] names = new string[] {
+            "turret", "bldgturret", "flyer", "lumpwannabe",
+            "lumpwannabeturret", "bunker", "hidden", "burrowed",
+            "nobrk", "nobrkturret", "gathering", "immovable",
+        };
+        int[] typeIndex = new int[] { 1, 2, 3, 4, 5, 0, 0, 0, 0, 1, 0, 0 };
+        int[] startX = new int[] {
+            400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400 };
+        int[] startY = new int[] {
+            400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400 };
+        int[] targetX = new int[] {
+            700, 700, 3000, 700, 700, 700, 700, 700, 700, 700, 700, 700 };
+        int[] targetY = new int[] {
+            400, 400, 3000, 400, 400, 400, 400, 400, 400, 400, 400, 400 };
+        int[] statusAdd = new int[] {
+            0, 0, 0, 0, 0,
+            (int)StatusFlag.InBunker, 0, (int)StatusFlag.Burrowed,
+            (int)StatusFlag.IscriptNobrk, (int)StatusFlag.IscriptNobrk,
+            (int)StatusFlag.Gathering, (int)StatusFlag.Immovable,
+        };
+        bool[] hidden = new bool[] {
+            false, false, false, false, false,
+            false, true, false, false, false, false, false,
+        };
+        int[] frames = new int[] {
+            20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20 };
+
+        if (scen < 0 || scen >= names.Length) return 1;
+        string name = names[scen];
+        int sx = startX[scen];
+        int sy = startY[scen];
+
+        // The unit types: index 0 is the plain ground unit, the others
+        // carry the flag combinations the scenarios need.
+        UnitType[] types = new UnitType[6];
+        types[0] = MakeType((int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 0);
+        types[1] = MakeType((int)UnitTypeFlag.CanTurn | (int)UnitTypeFlag.Turret, 0);
+        types[2] = MakeType((int)UnitTypeFlag.CanTurn, 0);
+        types[3] = MakeType((int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.Flyer, 12);
+        types[4] = MakeType((int)UnitTypeFlag.Building, 0);
+        types[5] = MakeType((int)UnitTypeFlag.Building | (int)UnitTypeFlag.Turret, 0);
+
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+
+        Unit u = new Unit();
+        // openbw: create_unit() calls lcg_rand(14) before doing anything
+        // else, and initialize_unit() draws the wireframe randomizer from
+        // lcg_rand(15). Both advance the shared RNG state, so every later
+        // random draw in the run depends on them.
+        sim.Rng.Rand(14);
+        u.WireframeRandomizer = sim.Rng.Rand(15) & 0xff;
+        UnitType ut = types[typeIndex[scen]];
+        FlingyType ft = ut.Flingy;
+        u.UnitType = ut;
+        u.FlingyType = ft;
+        u.Owner = 0;
+        u.Position = new Xy(sx, sy);
+        u.ExactPosition = Kin.ToXyFp8(u.Position);
+        u.Sprite = new Sprite();
+        u.Sprite.Position = u.Position;
+        // openbw: create_sprite() sets the elevation to 4, but
+        // initialize_unit_type() then overwrites it with the unit type's
+        // own elevation level. The movement state machine reads the
+        // sprite's elevation to decide between the ground states and
+        // UM_Flyer.
+        u.Sprite.ElevationLevel = ut.ElevationLevel;
+        u.MoveTargetPos = new Xy(sx, sy);
+        u.NextMovementWaypoint = new Xy(sx, sy);
+        u.NextTargetWaypoint = new Xy(sx, sy);
+        u.NextSpeed = ft.TopSpeed;
+        // openbw: initialize_flingy leaves current_speed at zero; the bed
+        // only raises next_speed.
+        u.CurrentSpeed = Fp.Zero();
+        u.FlingyTopSpeed = ft.TopSpeed;
+        u.FlingyAcceleration = ft.Acceleration;
+        u.FlingyTurnRate = ft.TurnRate;
+        u.FlingyMovementType = 0;
+        u.NextVelocityDirection = Dir.FromRaw(64);
+        u.CurrentVelocityDirection = Dir.FromRaw(64);
+        u.DesiredVelocityDirection = Dir.FromRaw(64);
+        // openbw: initialize_unit sets the status flags from the unit type.
+        if ((ut.Flags & (int)UnitTypeFlag.Building) != 0) u.SetStatus(StatusFlag.GroundedBuilding);
+        if ((ut.Flags & (int)UnitTypeFlag.Flyer) != 0) u.SetStatus(StatusFlag.Flying);
+        if ((ut.Flags & (int)UnitTypeFlag.CanTurn) != 0) u.SetStatus(StatusFlag.CanTurn);
+        if ((ut.Flags & (int)UnitTypeFlag.CanMove) != 0) u.SetStatus(StatusFlag.CanMove);
+        if ((ut.Flags & (int)UnitTypeFlag.Flyer) == 0) u.SetStatus(StatusFlag.GroundUnit);
+        // openbw: initialize_flingy calls set_flingy_move_target(f, pos),
+        // which clears movement flag 4 and sets movement flag 1.
+        u.MovementFlags = 1;
+        // The scenario's status flags are applied on top of what
+        // initialize_unit set from the unit type.
+        u.StatusFlagBits = u.StatusFlagBits | statusAdd[scen];
+        if (hidden[scen]) {
+            u.Sprite.SetFlag(SpriteFlag.Hidden);
+        } else {
+            // openbw: initialize_unit hides every non-building unit; the
+            // engine reveals it through show_unit() once it comes into
+            // vision. The vision refresh is not part of this bed, so
+            // reveal the unit directly.
+            u.Sprite.UnsetFlag(SpriteFlag.Hidden);
+        }
+        if (u.HasStatusFlag(StatusFlag.Flying)) {
+            // openbw: show_unit() calls increment_repulse_field() for
+            // flying units, which is what sets u.repulse_index.
+            sim.IncrementRepulseField(u);
+        }
+        if (u.HasStatusFlag(StatusFlag.GroundedBuilding)) {
+            // openbw: initialize_unit() puts a grounded building into the
+            // unit finder and checks whether anything already stands where
+            // it was placed. Turrets stay out of the finder.
+            bool isTurret = (ut.Flags & (int)UnitTypeFlag.Turret) != 0;
+            if (!isTurret) {
+                Box inner = u.InnerBoxAt(u.Sprite.Position.X, u.Sprite.Position.Y);
+                sim.Finder.Insert(u, inner.FromX, inner.ToX, inner.FromY, inner.ToY);
+            }
+            sim.CheckUnitCollision(u);
+        }
+
+        PathProgress pp = new PathProgress(r, sim, u);
+        pp.CurrentFrame = 0;
+
+        StateMachine sm = new StateMachine(sim, r, pp, u);
+
+        Console.WriteLine("scenario=" + name + " variant=" + variant);
+
+        // The order sets the move target; the state machine then asks for
+        // a path towards it.
+        pp.SetUnitMoveTarget(targetX[scen], targetY[scen]);
+        Console.WriteLine("S 0 frame=0 to=" + targetX[scen] + "," + targetY[scen]);
+        DumpUnit("  U", u, pp);
+
+        int frame = 0;
+        while (frame < frames[scen]) {
+            // One frame of the real movement state machine.
+            sm.ExecuteMovement();
+            frame = frame + 1;
+            pp.CurrentFrame = frame;
+            DumpUnit("F" + frame, u, pp);
+        }
+        Console.WriteLine("done");
+        return 0;
+    }
+
+    static void DumpUnit(string tag, Unit u, PathProgress pp) {
+        string line = tag + " state=" + StateName(u.MovementState)
+            + " pos=" + u.Position.X + "," + u.Position.Y
+            + " exact=" + u.ExactPosition.X.RawValue() + "," + u.ExactPosition.Y.RawValue()
+            + " speed=" + u.CurrentSpeed.RawValue()
+            + " next_speed=" + u.NextSpeed.RawValue()
+            + " vel=" + u.Velocity.X.RawValue() + "," + u.Velocity.Y.RawValue()
+            + " vdir=" + u.NextVelocityDirection.RawValue()
+            + " cdir=" + u.CurrentVelocityDirection.RawValue()
+            + " ddir=" + u.DesiredVelocityDirection.RawValue()
+            + " heading=" + u.Heading.RawValue()
+            + " mt=" + u.MoveTargetPos.X + "," + u.MoveTargetPos.Y
+            + " waypoint=" + u.NextMovementWaypoint.X + "," + u.NextMovementWaypoint.Y
+            + " target_waypoint=" + u.NextTargetWaypoint.X + "," + u.NextTargetWaypoint.Y
+            + " flags=0x" + Hex(u.MovementFlags)
+            + " pcc=" + u.PathingCollisionCounter
+            + " status=0x" + Hex(u.StatusFlagBits)
+            + " has_path=" + (pp.Current == null ? 0 : 1);
+        Path p = pp.Current;
+        if (p != null) {
+            line = line + " path(delay=" + p.Delay
+                + " sf=" + p.StateFlags
+                + " cli=" + p.CurrentLongPathIndex
+                + " csi=" + p.CurrentShortPathIndex
+                + " src=" + p.SourceX + "," + p.SourceY
+                + " dst=" + p.DestinationX + "," + p.DestinationY
+                + " next=" + p.NextX + "," + p.NextY
+                + " long=" + p.LongPath.Count
+                + " short=" + p.ShortPath.Count + ")";
+        }
+        Console.WriteLine(line);
+    }
+
+    static string Hex(int v) {
+        if (v == 0) return "0";
+        string digits = "0123456789abcdef";
+        string r = "";
+        int x = v;
+        while (x != 0) {
+            r = digits[x & 0xf] + r;
+            x = x >> 4;
+        }
+        return r;
+    }
+
+    static string StateName(MovementStates s) {
+        if (s == MovementStates.UM_Init) return "Init";
+        if (s == MovementStates.UM_InitSeq) return "InitSeq";
+        if (s == MovementStates.UM_Lump) return "Lump";
+        if (s == MovementStates.UM_Turret) return "Turret";
+        if (s == MovementStates.UM_Bunker) return "Bunker";
+        if (s == MovementStates.UM_BldgTurret) return "BldgTurret";
+        if (s == MovementStates.UM_Hidden) return "Hidden";
+        if (s == MovementStates.UM_Flyer) return "Flyer";
+        if (s == MovementStates.UM_FakeFlyer) return "FakeFlyer";
+        if (s == MovementStates.UM_AtRest) return "AtRest";
+        if (s == MovementStates.UM_Dormant) return "Dormant";
+        if (s == MovementStates.UM_AtMoveTarget) return "AtMoveTarget";
+        if (s == MovementStates.UM_CheckIllegal) return "CheckIllegal";
+        if (s == MovementStates.UM_MoveToLegal) return "MoveToLegal";
+        if (s == MovementStates.UM_LumpWannabe) return "LumpWannabe";
+        if (s == MovementStates.UM_FailedPath) return "FailedPath";
+        if (s == MovementStates.UM_RetryPath) return "RetryPath";
+        if (s == MovementStates.UM_StartPath) return "StartPath";
+        if (s == MovementStates.UM_UIOrderDelay) return "UIOrderDelay";
+        if (s == MovementStates.UM_TurnAndStart) return "TurnAndStart";
+        if (s == MovementStates.UM_FaceTarget) return "FaceTarget";
+        if (s == MovementStates.UM_NewMoveTarget) return "NewMoveTarget";
+        if (s == MovementStates.UM_AnotherPath) return "AnotherPath";
+        if (s == MovementStates.UM_Repath) return "Repath";
+        if (s == MovementStates.UM_RepathMovers) return "RepathMovers";
+        if (s == MovementStates.UM_FollowPath) return "FollowPath";
+        if (s == MovementStates.UM_ScoutPath) return "ScoutPath";
+        if (s == MovementStates.UM_ScoutFree) return "ScoutFree";
+        if (s == MovementStates.UM_FixCollision) return "FixCollision";
+        if (s == MovementStates.UM_WaitFree) return "WaitFree";
+        if (s == MovementStates.UM_GetFree) return "GetFree";
+        if (s == MovementStates.UM_SlidePrep) return "SlidePrep";
+        if (s == MovementStates.UM_SlideFree) return "SlideFree";
+        if (s == MovementStates.UM_ForceMoveFree) return "ForceMoveFree";
+        if (s == MovementStates.UM_FixTerrain) return "FixTerrain";
+        if (s == MovementStates.UM_TerrainSlide) return "TerrainSlide";
+        return "?";
+    }
+}

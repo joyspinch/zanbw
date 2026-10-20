@@ -71,12 +71,25 @@ public class MovementStatesImpl {
             next = MovementStates.UM_Lump;
         } else if (U.UInBunker()) {
             next = MovementStates.UM_Bunker;
+        } else if (U.USHidden()) {
+            // openbw: a hidden unit that is not at its move target is
+            // frozen where it is.
+            if (M.MovementFlag(2) || !M.IsAtMoveTarget()) {
+                SetUnitImmovable();
+                Sim.UpdateUnitMovementValues(U, ems);
+                Sim.FinishUnitMovement(U, ems);
+            }
+            next = MovementStates.UM_Hidden;
         } else if (U.UBurrowed()) {
             next = MovementStates.UM_Lump;
         } else if (U.UCanMove()) {
             next = (U.PathingFlags & 1) != 0 ? MovementStates.UM_AtRest : MovementStates.UM_Flyer;
         } else if (U.UCanTurn()) {
             next = U.UtTurret() ? MovementStates.UM_Turret : MovementStates.UM_BldgTurret;
+        } else if ((U.PathingFlags & 1) != 0 && (M.MovementFlag(2) || !M.IsAtMoveTarget())) {
+            // openbw: the unit can neither move nor turn and is not at its
+            // move target: it slides to the target.
+            next = MovementStates.UM_LumpWannabe;
         }
         U.MovementState = next;
         return true;
@@ -388,6 +401,52 @@ public class MovementStatesImpl {
             return new int[] { target.X, target.Y };
         }
         return new int[] { posX, posY };
+    }
+
+    // openbw: bool movement_UM_LumpWannabe(unit_t* u, execute_movement_struct& ems) {
+    //     if (!unit_is_at_move_target(u) || u_movement_flag(u, 2)) {
+    //         update_unit_movement_values(u, ems);
+    //         if (check_ground_unit_movement_unit_collision(u, ems) || check_unit_movement_terrain_collision(u, ems)) {
+    //             set_next_speed(u, 0_fp8);
+    //             u->movement_flags = ems.post_movement_flags;
+    //             update_unit_heading(u, u->current_velocity_direction);
+    //             ... sprite_run_anim ...
+    //             set_flingy_move_target(u, u->sprite->position);
+    //             stop_unit(u);
+    //         } else {
+    //             finish_unit_movement(u, ems);
+    //         }
+    //         return false;
+    //     } else {
+    //         u->movement_state = movement_states::UM_Lump;
+    //         return true;
+    //     }
+    // }
+    //
+    // The unit can neither move nor turn, but it is not at its move
+    // target: it slides to the target and stops there.
+    public bool UmLumpWannabe(Ems ems) {
+        if (!M.IsAtMoveTarget() || M.MovementFlag(2)) {
+            Sim.UpdateUnitMovementValues(U, ems);
+            if (M.CheckGroundUnitMovementUnitCollision(ems.Position.X, ems.Position.Y) != null
+                || M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                Kin.SetNextSpeed(U, Fp.Zero());
+                U.MovementFlags = ems.PostMovementFlags;
+                Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+                if (ems.StoppingMovement) {
+                    // openbw: sprite_run_anim(u->sprite, WalkingToIdle)
+                } else if (ems.StartingMovement) {
+                    // openbw: sprite_run_anim(u->sprite, Walking)
+                }
+                Pathing.SetFlingyMoveTarget(U.Sprite.Position.X, U.Sprite.Position.Y);
+                Sim.StopUnit(U);
+            } else {
+                Sim.FinishUnitMovement(U, ems);
+            }
+            return false;
+        }
+        U.MovementState = MovementStates.UM_Lump;
+        return true;
     }
 
     // openbw: bool movement_UM_AtRest(unit_t* u, execute_movement_struct& ems)
@@ -850,6 +909,165 @@ public class MovementStatesImpl {
         }
         Sim.UpdateUnitMovementValues(U, ems);
         Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        return false;
+    }
+
+    // openbw: bool movement_UM_InitSeq(unit_t* u, execute_movement_struct& ems) {
+    //     if (u_status_flag(u, unit_t::status_flag_iscript_nobrk)) return false;
+    //     u->movement_state = movement_states::UM_Init;
+    //     return true;
+    // }
+    public bool UmInitSeq(Ems ems) {
+        if (U.HasStatusFlag(StatusFlag.IscriptNobrk)) return false;
+        U.MovementState = MovementStates.UM_Init;
+        return true;
+    }
+
+    // openbw: bool movement_UM_Lump(unit_t* u, execute_movement_struct& ems) {
+    //     return false;
+    // }
+    //
+    // The unit does nothing: it stays where it is.
+    public bool UmLump(Ems ems) {
+        return false;
+    }
+
+    // openbw: bool movement_UM_Hidden(unit_t* u, execute_movement_struct& ems) {
+    //     ems.refresh_vision = false;
+    //     return false;
+    // }
+    public bool UmHidden(Ems ems) {
+        ems.RefreshVision = false;
+        return false;
+    }
+
+    // openbw: bool movement_UM_Bunker(unit_t* u, execute_movement_struct& ems) {
+    //     ems.refresh_vision = false;
+    //     update_current_velocity_direction_towards_waypoint(u);
+    //     set_movement_flags(u, ems);
+    //     update_unit_heading(u, u->current_velocity_direction);
+    //     return false;
+    // }
+    public bool UmBunker(Ems ems) {
+        ems.RefreshVision = false;
+        Kin.UpdateCurrentVelocityDirectionTowardsWaypoint(U);
+        Sim.SetMovementFlags(U, ems);
+        Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        return false;
+    }
+
+    // openbw: bool movement_UM_BldgTurret(unit_t* u, execute_movement_struct& ems) {
+    //     update_current_velocity_direction_towards_waypoint(u);
+    //     set_movement_flags(u, ems);
+    //     update_unit_heading(u, u->current_velocity_direction);
+    //     return false;
+    // }
+    public bool UmBldgTurret(Ems ems) {
+        Kin.UpdateCurrentVelocityDirectionTowardsWaypoint(U);
+        Sim.SetMovementFlags(U, ems);
+        Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        return false;
+    }
+
+    // openbw: bool movement_UM_Turret(unit_t* u, execute_movement_struct& ems) {
+    //     ems.refresh_vision = false;
+    //     set_unit_move_target(u, u->sprite->position);
+    //     auto dir_error = u->desired_velocity_direction - u->heading;
+    //     if (dir_error != -128_dir) {
+    //         if (dir_error >= -10_dir && dir_error <= 10_dir) {
+    //             u_unset_movement_flag(u, 1);
+    //         }
+    //     }
+    //     if (u_status_flag(u, (unit_t::status_flags_t)0x2000000)) {
+    //         set_movement_flags(u, ems);
+    //     } else {
+    //         update_current_velocity_direction_towards_waypoint(u);
+    //         set_movement_flags(u, ems);
+    //         update_unit_heading(u, u->current_velocity_direction);
+    //     }
+    //     return false;
+    // }
+    public bool UmTurret(Ems ems) {
+        ems.RefreshVision = false;
+        Pathing.SetUnitMoveTarget(U.Sprite.Position.X, U.Sprite.Position.Y);
+        // openbw: direction_t is an 8 bit value, so the error wraps into
+        // [-128, 127].
+        int dirError = Dir.Truncate(U.DesiredVelocityDirection.RawValue() - U.Heading.RawValue());
+        if (dirError != -128) {
+            if (dirError >= -10 && dirError <= 10) {
+                U.UnsetMovementFlag(1);
+            }
+        }
+        if (U.HasStatusFlag(StatusFlag.Flag2000000)) {
+            Sim.SetMovementFlags(U, ems);
+        } else {
+            Kin.UpdateCurrentVelocityDirectionTowardsWaypoint(U);
+            Sim.SetMovementFlags(U, ems);
+            Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_Flyer(unit_t* u, execute_movement_struct& ems) {
+    //     if (u->sprite->position != u->move_target.pos) {
+    //         xy move_target = restrict_unit_pos_to_bounds(u->move_target.pos, u->unit_type, map_bounds());
+    //         if (move_target != u->move_target.pos) {
+    //             set_flingy_move_target(u, move_target);
+    //             u_set_status_flag(u, unit_t::status_flag_immovable);
+    //         }
+    //     }
+    //     update_unit_movement_values(u, ems);
+    //     bool being_repulsed = apply_repulse_field(u, ems);
+    //     ems.position = restrict_unit_pos_to_bounds(ems.position, u->unit_type, map_bounds());
+    //     finish_unit_movement(u, ems);
+    //     if (u_can_move(u) && !ut_building(u) && u->unit_type->id != UnitTypes::Protoss_Interceptor) {
+    //         size_t index = repulse_index(u->position);
+    //         if (index != u->repulse_index) {
+    //             decrement_repulse_field(u);
+    //             increment_repulse_field(u);
+    //         }
+    //         if (being_repulsed) {
+    //             if (std::max(std::abs(u->move_target.pos.x - u->position.x), std::abs(u->move_target.pos.y - u->position.y)) < 24) {
+    //                 u->move_target.pos = u->position;
+    //                 u->next_movement_waypoint = u->position;
+    //             }
+    //         }
+    //     }
+    //     return false;
+    // }
+    public bool UmFlyer(Ems ems) {
+        if (U.Sprite.Position != U.MoveTargetPos) {
+            Xy moveTarget = Sim.RestrictUnitPosToBounds(U.MoveTargetPos, U.UnitType,
+                new Xy(0, 0), new Xy(Sim.MapWidth, Sim.MapHeight - 32));
+            if (moveTarget != U.MoveTargetPos) {
+                Pathing.SetFlingyMoveTarget(moveTarget.X, moveTarget.Y);
+                U.SetStatus(StatusFlag.Immovable);
+            }
+        }
+        Sim.UpdateUnitMovementValues(U, ems);
+        bool beingRepulsed = Sim.ApplyRepulseField(U, ems);
+        ems.Position = Sim.RestrictUnitPosToBounds(ems.Position, U.UnitType,
+            new Xy(0, 0), new Xy(Sim.MapWidth, Sim.MapHeight - 32));
+        Sim.FinishUnitMovement(U, ems);
+        if (U.UCanMove() && !U.UtBuilding()
+            && U.UnitType.Id != (int)UnitTypes.ProtossInterceptor) {
+            int index = Sim.RepulseIndex(U.Position);
+            if (index != U.RepulseIndex) {
+                Sim.DecrementRepulseField(U);
+                Sim.IncrementRepulseField(U);
+            }
+            if (beingRepulsed) {
+                int dx = U.MoveTargetPos.X - U.Position.X;
+                int dy = U.MoveTargetPos.Y - U.Position.Y;
+                if (dx < 0) dx = -dx;
+                if (dy < 0) dy = -dy;
+                int far = dx > dy ? dx : dy;
+                if (far < 24) {
+                    U.MoveTargetPos = new Xy(U.Position.X, U.Position.Y);
+                    U.NextMovementWaypoint = new Xy(U.Position.X, U.Position.Y);
+                }
+            }
+        }
         return false;
     }
 
