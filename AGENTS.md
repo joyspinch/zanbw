@@ -76,6 +76,9 @@ bash check_path.sh
 # 运动状态机对拍（7 个地形变体 × 16 个场景）
 bash check_state.sh
 
+# 特殊单位运动状态对拍（7 个地形变体 × 12 个场景：炮塔/建筑/飞行/隐藏/掩体…）
+bash check_state2.sh
+
 # 单位间碰撞层对拍（7 个地形变体 × 17 场景，两单位对撞）
 bash check_collide.sh
 
@@ -86,6 +89,7 @@ bash check_astar.sh 3
 bash check_shortpath.sh 3
 bash check_path.sh 3
 bash check_state.sh 3
+bash check_state2.sh 3
 bash check_collide.sh 5 3
 ```
 
@@ -379,6 +383,19 @@ for (auto* nr : move_to_region->walkable_neighbors) {
 
 这样 trace 床的每一步都保证来自真实现，Zan 侧逐行 diff 才有意义。
 
+## 运动状态机（execute_movement / UM_* 状态）
+
+对应 openbw/bwgame.h 11031-11983。参照床 `tools/cppbed/state_bed.cpp`，
+Zan 侧 `src/collision/MovementStates.zan` + `src/collision/StateMachine.zan`，
+检查脚本 `check_state.sh`（7 变体 × 16 场景）。
+
+普通地面单位（能走能转）只会走到 60 个状态里的 60 个里的一小部分。
+剩下的 8 个（`UM_Turret` / `UM_BldgTurret` / `UM_Flyer` / `UM_Hidden` /
+`UM_Bunker` / `UM_Lump` / `UM_LumpWannabe` / `UM_InitSeq`）要靠特殊的
+单位类型或状态标志才进得去，专门的对照床是
+`tools/cppbed/state2_bed.cpp` + `src/beds/state2_main.zan`，
+脚本 `check_state2.sh`（7 变体 × 12 场景）。
+
 ## 路径执行层（path_t / path_progress / unit_path_to）
 
 对应 openbw/bwgame.h 10751-10906。参照床 `tools/cppbed/path_bed.cpp`，
@@ -619,6 +636,43 @@ Collision.IsBlockedWithUnit(this, u, posX, posY, blockingUnit);        // 段错
 另外**不要用 `out` 做方法重载**，Zan 的重载解析在 `out` 参数上不可靠：
 带 `out` 的版本起一个**独立名字**（`IsBlocked` / `IsBlockedWithUnit`），
 不要写成 `IsBlocked` 的两个重载。
+
+### 48. 对照床的地形数据必须共用一份，不能各写各的
+
+新开一层对拍床时，最容易犯的错是"顺手再写一份地形"：床 A 用
+`mega_tile_index = 墙 ? 1 : 0`，床 B 用 `墙且邻接 ? 1 : 孤立墙 ? 2 : 0`。
+两边**看起来**都是"墙=不可走"，但 mega tile 的编号含义不同 →
+`game_st.vf4` 的查表结果不同 → 区域分解不同 → 路径从根上就分叉，
+后面每一帧的数值都对不上。
+
+**规则**：所有对拍床的地形函数都从 `tools/cppbed/regions_bed.cpp` 抄，
+和 `src/regions/Terrain.zan` 一一对应。地形函数一改，两边一起改。
+症状是"区域编号不一样"（比如 C++ 报 region 11、Zan 报 region 63）。
+
+### 49. 精灵的高度层级来自**单位类型**，不是 `create_sprite` 的默认值
+
+`create_sprite()` 把 `sprite->elevation_level` 设成 4，
+`initialize_unit_type()` 紧接着用 `unit_type->elevation_level` 覆盖它。
+`UM_Init` 用 `sprite->elevation_level < 12` 决定走地面状态还是
+`UM_Flyer`，所以**飞行单位必须让精灵高度 = 单位类型高度**（12）。
+床里手搓单位时漏了这一步，飞行单位会走进 `UM_AtRest` 而不是 `UM_Flyer`。
+
+### 50. 落地建筑的初始化有副作用：进 unit finder + 一次碰撞检查
+
+`initialize_unit()` 对 `u_grounded_building(u)` 的单位做三件事：
+`unit_finder_insert(u)`、`set_unit_tiles_occupied(...)`、
+`check_unit_collision(u)`。最后一项会给**互相重叠的单位**打
+`status_flag_collision`（0x40000）——差这一位，状态机的走向就变了。
+
+注意 `unit_finder_insert(u)` 对**炮塔**直接 return（炮塔不进空间索引），
+但 `check_unit_collision(u)` 照做。床里手搓建筑时这两件事要分开处理。
+
+### 51. `immovable` 标志会被两处先后改写
+
+`set_unit_move_target()` 在改移动目标时**清掉** `status_flag_immovable`；
+路径层 `path_progress()` 算完后又按 `pf.is_stuck` **重新设上**（而且会把
+移动目标改成 `pf.destination`）。所以"单位不动"这个结果不是一条路径
+决定的，而是这两处的叠加。移植时漏掉任何一处，状态标志和移动目标都会差。
 
 ## 已知 zanc 缺陷
 
