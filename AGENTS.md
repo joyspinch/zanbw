@@ -26,10 +26,16 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/RegionsContours.zan` | contours（精细边界，短线寻路依赖） |
 | `src/RegionsDump.zan` | regions 层的 trace 输出（与 C++ 床同格式） |
 | `src/regions_main.zan` | regions 层对拍入口 |
+| `src/Pathfinder.zan` | 寻路入口：region 定位 + 长路径组装 |
+| `src/AStar.zan` | 长路径 A*（region 级）+ 二叉堆 |
+| `src/astar_main.zan` | 长路径 A* 对拍入口 |
 | `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
 | `tools/cppbed/regions_bed.cpp` | regions 层的 C++ 对照床 |
+| `tools/cppbed/astar_bed.cpp` | 长路径 A* 的 C++ 对照床 |
+| `tools/cppbed/astar_trace.cpp` | A* 逐步 trace 床（定位堆序问题用） |
 | `check.sh` | 运动学层一键逐位对拍 |
 | `check_regions.sh` | regions 层一键逐位对拍 |
+| `check_astar.sh` | 长路径 A* 一键逐位对拍 |
 
 ## 构建与验证
 
@@ -40,9 +46,13 @@ bash check.sh
 # regions 层对拍（7 个地形变体）
 bash check_regions.sh
 
+# 长路径 A* 对拍（7 个地形变体 × 12 个查询）
+bash check_astar.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
+bash check_astar.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -183,6 +193,45 @@ regions 层第一次只对上了粗区域，`split_regions` 恒为 0——因为
 contour 按 `(v[0], v[1])` 排序。Zan 侧用稳定插入排序——只要没有两个
 contour 的 `(v[0], v[1])` 相同，结果就与 `std::sort` 一致。移植前先确认
 参照输出里没有重复键（`sort | uniq -d`），否则得实现同形状的非稳定排序。
+
+### 13. 手写堆的上浮与下沉，比较条件天然相反
+
+openbw 的 `binary_heap_up` / `binary_heap_down`：
+
+```cpp
+// up
+if (compare(*parent, *element)) break;    // 父更小 → 已满足堆序，停止
+// down
+if (!compare(*child, *element)) break;     // 子不更小 → 已满足堆序，停止
+```
+
+上浮的条件是 `Less(parent, element)`，下沉是 `!Less(child, element)`——
+**一个是"是"、一个是"非"**。写反了堆序就不对，表现为 A* 弹出错误的节点，
+但路径可能仍然正确（因为代价相同时顺序不影响结果），**必须对比 nodes 数
+和 highest_open 才能发现**。
+
+### 14. 移植时区分"索引的两层"
+
+A* 里 `open` 堆存的是 **node 指针**，而 node 有 `region` 字段。移植到
+Zan 后：
+
+- `Open` 存 **Nodes 索引**
+- `Nodes[i].RegionIndex` 才是 **region 索引**
+- `Region.Index` 是 region 在 `regions` 数组里的下标
+
+三者含义不同但常常数值相等，写混了会在跨组二次搜索时静默走错。
+
+### 15. `fixed_point * int` 不等于 `fixed_point * fixed_point`
+
+openbw 里 `cost *= 2` 走的是 `fixed_point::operator*=(T integer_value)`，
+即 **raw 直接乘**，无移位。而 `fp8 * fp8` 走 64 位中间量再右移 8 位。
+两者差 256 倍。移植时逐个确认运算符重载落到哪个版本。
+
+### 16. 跨组二次搜索时 goal_node 会被覆盖
+
+`pathfinder_find_long_path` 在源与目标不同组时**反向搜一次**，若没直接
+到达再正向搜一次。`goal_node` 是两次搜索共用的变量，第二次搜索会覆盖它。
+移植时不能缓存第一次的 goal 区域。
 
 ## 已知 zanc 缺陷
 

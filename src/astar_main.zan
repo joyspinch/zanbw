@@ -1,0 +1,74 @@
+using System;
+
+// Entry point of the long-path (region level) A* differential test.
+//
+//   zanbw_astar.exe <terrain variant>
+//
+// The output format matches tools/cppbed/astar_bed.cpp exactly.
+
+public class AStarMain {
+    static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) {
+            variant = Convert.ToInt32(args[0]);
+        }
+        Terrain.Variant = variant;
+
+        Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
+        for (int y = 0; y < Terrain.TileHeight; y++) {
+            for (int x = 0; x < Terrain.TileWidth; x++) {
+                r.MegaTileIndex[y * Terrain.TileWidth + x] = Terrain.MegaTileIndex(x, y);
+                r.TileFlags[y * Terrain.TileWidth + x] = Terrain.TileFlags(x, y);
+            }
+        }
+        for (int i = 0; i < 16; i++) {
+            r.Vf4Flags[i] = 1;
+            r.Vf4Flags[16 + i] = 0;
+            r.Vf4Flags[32 + i] = (i / 4 >= 2) ? 1 : 0;
+        }
+
+        RegionsMain main = new RegionsMain(r);
+        main.RegionsCreate();
+
+        // The query set; it must match tools/cppbed/astar_bed.cpp exactly.
+        int[][] queries = new int[][] {
+            new int[] { 64, 64, 1984, 1984 },
+            new int[] { 64, 64, 100, 100 },
+            new int[] { 200, 200, 1800, 200 },
+            new int[] { 100, 100, 1500, 1500 },
+            new int[] { 64, 1984, 1984, 64 },
+            new int[] { 500, 500, 700, 700 },
+            new int[] { 900, 200, 1000, 200 },
+            new int[] { 1600, 1600, 300, 300 },
+            new int[] { 32, 32, 2000, 32 },
+            new int[] { 32, 2000, 2000, 2000 },
+            new int[] { 1000, 1000, 1000, 1000 },
+            new int[] { 1900, 1900, 64, 64 },
+        };
+
+        Pathfinder pf = new Pathfinder(r);
+        for (int q = 0; q < queries.Length; q++) {
+            int[] qq = queries[q];
+            bool ok = pf.FindLongPath(qq[0], qq[1], qq[2], qq[3]);
+            string line = "Q " + q
+                + " from=" + qq[0] + "," + qq[1]
+                + " to=" + qq[2] + "," + qq[3]
+                + " ok=" + (ok ? 1 : 0);
+            if (ok) {
+                line = line
+                    + " src_region=" + pf.SourceRegion
+                    + " dst_region=" + pf.DestinationRegion
+                    + " full=" + pf.FullLongPathSize
+                    + " path=" + pf.LongPath.Count
+                    + " nodes=" + pf.LongAllNodesSize
+                    + " highest_open=" + pf.Search.LongHighestOpenSize
+                    + " path:";
+                foreach (int ri in pf.LongPath) {
+                    line = line + " " + ri;
+                }
+            }
+            Console.WriteLine(line);
+        }
+        return 0;
+    }
+}

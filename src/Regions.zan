@@ -43,9 +43,15 @@ public class Region {
     public List<int> WalkableNeighbors;
     public List<int> NonWalkableNeighbors;
 
+    // The pathfinder's scratch slot on the region: the index of the A* node
+    // that currently represents this region, or -1. openbw stores a raw
+    // pointer here (regions_t::region::pathfinder_node).
+    public int PathfinderNode;
+
     public Region() {
         Flags = 0x1FFD;
         Index = -1;
+        PathfinderNode = -1;
     }
 
     // openbw: bool walkable() const { return flags != 0x1ffd; }

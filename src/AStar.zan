@@ -1,0 +1,406 @@
+using System;
+
+// The long-path (region level) A* search of openbw's pathfinder.
+//
+// Port of pathfinder_find_long_path() (openbw/bwgame.h 9191-9371) and the
+// binary heap helpers it uses (9373-9404).
+//
+// The search walks the region adjacency graph. A region carries a
+// `pathfinder_node` scratch pointer (openbw stores it in the region itself);
+// the port keeps the same layout in Region.PathfinderNode.
+
+public class AStarNode {
+    // index of the predecessor node in the node list, -1 for none
+    public int Prev;
+    public int PosXRaw;
+    public int PosYRaw;
+    public int RegionIndex;
+    public int TotalCostRaw;
+    public int EstimatedRemainingCostRaw;
+    public int EstimatedFinalCostRaw;
+    public bool Visited;
+
+    public AStarNode() {
+        Prev = -1;
+        RegionIndex = -1;
+        Visited = false;
+    }
+}
+
+public class AStar {
+    public Regions R;
+
+    // the node list; node i is Nodes[i]
+    public List<AStarNode> Nodes;
+    // the open list; holds indices into Nodes
+    public List<int> Open;
+
+    public int GoalNode;
+
+    public AStar(Regions r) {
+        R = r;
+        Nodes = new List<AStarNode>();
+        Open = new List<int>();
+        GoalNode = -1;
+        LongHighestOpenSize = 0;
+
+        // openbw clears the region scratch slots at the end of every search
+        // (bwgame.h 9367-9369); the port clears them up front so that the
+        // node indices never refer to a previous search's node list.
+        foreach (Region r in R.RegionsList) {
+            r.PathfinderNode = -1;
+        }
+    }
+
+    // ------------------------------------------------------------ helpers
+
+    // openbw: xy_length(xy vec) -- an integer approximation of the length.
+    public int XyLength(int vx, int vy) {
+        int x = vx < 0 ? -vx : vx;
+        int y = vy < 0 ? -vy : vy;
+        if (x < y) {
+            int t = x;
+            x = y;
+            y = t;
+        }
+        if (x / 4 < y) {
+            x = x - x / 16 + y * 3 / 8 - x / 64 + y * 3 / 256;
+        }
+        return x;
+    }
+
+    // openbw: xy_length(xy_fp8 vec) -> fp8::from_raw(...)
+    public int XyLengthFp8(int rawX, int rawY) {
+        return XyLength(rawX, rawY);
+    }
+
+    // openbw: binary_heap_up(element, begin, end, compare)
+    // The C++ code swaps the elements in place; the port does the same on the
+    // index list.
+    public void HeapUp(int element) {
+        int index = element;
+        while (index != 0) {
+            int parentIndex = (index - 1) 	/ 2;
+            // openbw: if (compare(*parent, *element)) break; -- the parent is
+            // already smaller, so the heap order holds and the element stays.
+            if (CostLess(Open[parentIndex], Open[index])) break;
+            Swap(Open, parentIndex, index);
+            index = parentIndex;
+        }
+    }
+
+    // openbw: binary_heap_down(element, begin, end, compare)
+    public void HeapDown(int element) {
+        int index = element;
+        int endIndex = Open.Count;
+        while (true) {
+            int childIndex = index * 2 + 1;
+            if (childIndex >= endIndex) break;
+            if (childIndex + 1 != endIndex) {
+                if (CostLess(Open[childIndex + 1], Open[childIndex])) {
+                    ++childIndex;
+                }
+            }
+            if (!CostLess(Open[childIndex], Open[index])) break;
+            Swap(Open, childIndex, index);
+            index = childIndex;
+        }
+    }
+
+    // openbw: cmp_node compares estimated_final_cost
+    public bool CostLess(int a, int b) {
+        return Nodes[a].EstimatedFinalCostRaw < Nodes[b].EstimatedFinalCostRaw;
+    }
+
+    public void Swap(List<int> list, int a, int b) {
+        int t = list[a];
+        list[a] = list[b];
+        list[b] = t;
+    }
+
+    // ------------------------------------------------------------- search
+
+    // The position a region contributes to the search, as raw fp8 values.
+    public int[] RegionPos(int regionIndex, int srcX, int srcY, int dstX, int dstY,
+                            int sourceRegion, int destinationRegion) {
+        if (regionIndex == sourceRegion) {
+            return new int[] { srcX * 256, srcY * 256 };
+        }
+        if (regionIndex == destinationRegion) {
+            return new int[] { dstX * 256, dstY * 256 };
+        }
+        Region r = R.RegionsList[regionIndex];
+        return new int[] { r.CenterXRaw, r.CenterYRaw };
+    }
+
+    // openbw: the find lambda of pathfinder_find_long_path
+    public void Find(int fromRegion, int toRegion,
+                     int srcX, int srcY, int dstX, int dstY,
+                     int sourceRegion, int destinationRegion) {
+        int[] toPos = RegionPos(toRegion, srcX, srcY, dstX, dstY, sourceRegion, destinationRegion);
+        int toPosX = toPos[0];
+        int toPosY = toPos[1];
+
+        Nodes = new List<AStarNode>();
+        Open = new List<int>();
+        GoalNode = -1;
+        LongHighestOpenSize = 0;
+
+        // openbw clears the region scratch slots at the end of every search
+        // (bwgame.h 9367-9369); the port clears them up front so that the
+        // node indices never refer to a previous search's node list.
+        foreach (Region r in R.RegionsList) {
+            r.PathfinderNode = -1;
+        }
+
+        AStarNode startNode = new AStarNode();
+        Nodes.Add(startNode);
+        int startNodeIndex = 0;
+        int[] startPos = RegionPos(fromRegion, srcX, srcY, dstX, dstY, sourceRegion, destinationRegion);
+        startNode.PosXRaw = startPos[0];
+        startNode.PosYRaw = startPos[1];
+        startNode.RegionIndex = fromRegion;
+        startNode.EstimatedRemainingCostRaw = Fp.Integer(128 * 128).RawValue();
+        startNode.EstimatedFinalCostRaw = startNode.EstimatedRemainingCostRaw;
+        R.RegionsList[fromRegion].PathfinderNode = startNodeIndex;
+
+        Open.Add(startNodeIndex);
+        HeapUp(Open.Count - 1);
+
+        while (Open.Count != 0) {
+            // openbw: cur = open.front(); swap with back; pop_back
+            int cur = Open[0];
+            Swap(Open, 0, Open.Count - 1);
+            Open.RemoveAt(Open.Count - 1);
+            HeapDown(0);
+
+            if (Nodes[cur].RegionIndex == toRegion) {
+                GoalNode = cur;
+                break;
+            }
+            Nodes[cur].Visited = true;
+
+            // the add lambda
+            int curRegion = Nodes[cur].RegionIndex;
+            Region nr = R.RegionsList[curRegion];
+            bool differentGroup = R.RegionsList[curRegion].GroupIndex
+                               != R.RegionsList[sourceRegion].GroupIndex;
+
+            foreach (int ni in nr.WalkableNeighbors) {
+                AddNode(ni, cur, toPosX, toPosY, sourceRegion, destinationRegion,
+                        srcX, srcY, dstX, dstY, differentGroup);
+            }
+            if (differentGroup) {
+                foreach (int ni in nr.NonWalkableNeighbors) {
+                    AddNode(ni, cur, toPosX, toPosY, sourceRegion, destinationRegion,
+                            srcX, srcY, dstX, dstY, differentGroup);
+                }
+            }
+            if (Open.Count > LongHighestOpenSize) {
+                LongHighestOpenSize = Open.Count;
+            }
+            if (Open.Count == 125) break;
+            if (Nodes.Count == 350) break;
+        }
+
+        if (GoalNode == -1 && Open.Count != 0) {
+            GoalNode = Open[0];
+        }
+
+        if (GoalNode == -1) {
+            // openbw uses start_node->region->center here, not region_pos
+            Region startRegion = R.RegionsList[fromRegion];
+            startNode.EstimatedRemainingCostRaw =
+                XyLengthFp8(toPosX - startRegion.CenterXRaw, toPosY - startRegion.CenterYRaw);
+            int bestCost = startNode.EstimatedRemainingCostRaw;
+            int bestNode = startNodeIndex;
+            for (int i = 1; i != Nodes.Count; ++i) {
+                if (Nodes[i].EstimatedRemainingCostRaw < bestCost) {
+                    bestCost = Nodes[i].EstimatedRemainingCostRaw;
+                    bestNode = i;
+                }
+            }
+            GoalNode = bestNode;
+        }
+    }
+
+    public int LongHighestOpenSize;
+
+    // A traced variant of Find(), used by the differential test to compare
+    // the search step by step with the C++ bed.
+    public void TraceFind(int fromRegion, int toRegion,
+                          int srcX, int srcY, int dstX, int dstY,
+                          int sourceRegion, int destinationRegion) {
+        int[] toPos = RegionPos(toRegion, srcX, srcY, dstX, dstY, sourceRegion, destinationRegion);
+        int toPosX = toPos[0];
+        int toPosY = toPos[1];
+
+        Nodes = new List<AStarNode>();
+        Open = new List<int>();
+        GoalNode = -1;
+        LongHighestOpenSize = 0;
+        foreach (Region r in R.RegionsList) { r.PathfinderNode = -1; }
+
+        AStarNode startNode = new AStarNode();
+        Nodes.Add(startNode);
+        int startNodeIndex = 0;
+        int[] startPos = RegionPos(fromRegion, srcX, srcY, dstX, dstY, sourceRegion, destinationRegion);
+        startNode.PosXRaw = startPos[0];
+        startNode.PosYRaw = startPos[1];
+        startNode.RegionIndex = fromRegion;
+        startNode.EstimatedRemainingCostRaw = Fp.Integer(128 * 128).RawValue();
+        startNode.EstimatedFinalCostRaw = startNode.EstimatedRemainingCostRaw;
+        R.RegionsList[fromRegion].PathfinderNode = startNodeIndex;
+
+        Open.Add(startNodeIndex);
+        HeapUp(Open.Count - 1);
+
+        int step = 0;
+        while (Open.Count != 0) {
+            int cur = Open[0];
+            Swap(Open, 0, Open.Count - 1);
+            Open.RemoveAt(Open.Count - 1);
+            HeapDown(0);
+
+            Console.WriteLine("STEP " + step + " pop region=" + Nodes[cur].RegionIndex
+                + " total=" + Nodes[cur].TotalCostRaw
+                + " rem=" + Nodes[cur].EstimatedRemainingCostRaw
+                + " final=" + Nodes[cur].EstimatedFinalCostRaw
+                + " open=" + Open.Count + " nodes=" + Nodes.Count);
+            step++;
+
+            if (Nodes[cur].RegionIndex == toRegion) { GoalNode = cur; break; }
+            Nodes[cur].Visited = true;
+
+            int curRegion = Nodes[cur].RegionIndex;
+            bool curDifferentGroup = R.RegionsList[curRegion].GroupIndex
+                                  != R.RegionsList[sourceRegion].GroupIndex;
+
+            foreach (int ni in R.RegionsList[curRegion].WalkableNeighbors) {
+                TraceAdd(ni, cur, toPosX, toPosY, sourceRegion, destinationRegion, srcX, srcY, dstX, dstY);
+            }
+            if (curDifferentGroup) {
+                foreach (int ni in R.RegionsList[curRegion].NonWalkableNeighbors) {
+                    TraceAdd(ni, cur, toPosX, toPosY, sourceRegion, destinationRegion, srcX, srcY, dstX, dstY);
+                }
+            }
+        }
+        Console.WriteLine("done steps=" + step + " nodes=" + Nodes.Count + " goal=" + (GoalNode >= 0 ? Nodes[GoalNode].RegionIndex : -1));
+    }
+
+    public void TraceAdd(int rIndex, int cur, int toPosX, int toPosY,
+                         int sourceRegion, int destinationRegion,
+                         int srcX, int srcY, int dstX, int dstY) {
+        if (Open.Count == 125) return;
+        if (Nodes.Count == 350) return;
+        int[] pos = RegionPos(rIndex, srcX, srcY, dstX, dstY, sourceRegion, destinationRegion);
+        int posX = pos[0];
+        int posY = pos[1];
+        int cost = XyLengthFp8(posX - Nodes[cur].PosXRaw, posY - Nodes[cur].PosYRaw);
+        if (R.RegionsList[rIndex].GroupIndex != R.RegionsList[sourceRegion].GroupIndex) {
+            cost = (Fp.FromRaw(cost) * 2).RawValue();
+        }
+        int totalCost = (Fp.FromRaw(Nodes[cur].TotalCostRaw) + Fp.FromRaw(cost)).RawValue();
+        int n = R.RegionsList[rIndex].PathfinderNode;
+        if (n == -1) {
+            AStarNode node = new AStarNode();
+            Nodes.Add(node);
+            n = Nodes.Count - 1;
+            node.Prev = cur;
+            node.PosXRaw = posX;
+            node.PosYRaw = posY;
+            node.RegionIndex = rIndex;
+            node.TotalCostRaw = totalCost;
+            node.EstimatedRemainingCostRaw = XyLengthFp8(toPosX - posX, toPosY - posY);
+            node.EstimatedFinalCostRaw = (Fp.FromRaw(node.TotalCostRaw) + Fp.FromRaw(node.EstimatedRemainingCostRaw)).RawValue();
+            node.Visited = false;
+            R.RegionsList[rIndex].PathfinderNode = n;
+            Open.Add(n);
+            HeapUp(Open.Count - 1);
+            Console.WriteLine("  ADD new region=" + rIndex + " cost=" + cost + " total=" + totalCost
+                + " rem=" + node.EstimatedRemainingCostRaw + " final=" + node.EstimatedFinalCostRaw);
+        } else if (Nodes[cur].Prev != n) {
+            Console.WriteLine("  UPDATE region=" + rIndex + " new_total=" + totalCost + " old_total=" + Nodes[n].TotalCostRaw);
+            if (totalCost < Nodes[n].TotalCostRaw) {
+                Nodes[n].Prev = cur;
+                Nodes[n].TotalCostRaw = totalCost;
+                int estimatedFinalCost = (Fp.FromRaw(Nodes[n].TotalCostRaw) + Fp.FromRaw(Nodes[n].EstimatedRemainingCostRaw)).RawValue();
+                if (Nodes[n].Visited) {
+                    Nodes[n].EstimatedFinalCostRaw = estimatedFinalCost;
+                    Nodes[n].Visited = false;
+                    Open.Add(n);
+                    HeapUp(Open.Count - 1);
+                } else {
+                    Nodes[n].EstimatedFinalCostRaw = estimatedFinalCost;
+                    int pos = Open.IndexOf(n);
+                    if (pos >= 0) HeapUp(pos);
+                }
+            }
+        }
+    }
+
+    public void AddNode(int rIndex, int cur, int toPosX, int toPosY,
+                        int sourceRegion, int destinationRegion,
+                        int srcX, int srcY, int dstX, int dstY, bool curDifferentGroup) {
+        if (Open.Count == 125) return;
+        if (Nodes.Count == 350) return;
+
+        int[] pos = RegionPos(rIndex, srcX, srcY, dstX, dstY, sourceRegion, destinationRegion);
+        int posX = pos[0];
+        int posY = pos[1];
+
+        // fp8 cost = xy_length(pos - cur->pos)
+        int cost = XyLengthFp8(posX - Nodes[cur].PosXRaw, posY - Nodes[cur].PosYRaw);
+        // openbw checks the group of the region being added, not of the
+        // region the search is currently at (bwgame.h:9256).
+        if (R.RegionsList[rIndex].GroupIndex != R.RegionsList[sourceRegion].GroupIndex) {
+            // fp8 cost *= 2 -- this is fixed_point * int, which multiplies the
+            // raw value without any shift (openbw/bwgame.h:9257).
+            cost = (Fp.FromRaw(cost) * 2).RawValue();
+        }
+        // fp8 total_cost = cur->total_cost + cost
+        int totalCost = (Fp.FromRaw(Nodes[cur].TotalCostRaw) + Fp.FromRaw(cost)).RawValue();
+
+        int n = R.RegionsList[rIndex].PathfinderNode;
+        if (n == -1) {
+            AStarNode node = new AStarNode();
+            Nodes.Add(node);
+            n = Nodes.Count - 1;
+            node.Prev = cur;
+            node.PosXRaw = posX;
+            node.PosYRaw = posY;
+            node.RegionIndex = rIndex;
+            node.TotalCostRaw = totalCost;
+            node.EstimatedRemainingCostRaw = XyLengthFp8(toPosX - posX, toPosY - posY);
+            node.EstimatedFinalCostRaw = (Fp.FromRaw(node.TotalCostRaw)
+                                         + Fp.FromRaw(node.EstimatedRemainingCostRaw)).RawValue();
+            node.Visited = false;
+            R.RegionsList[rIndex].PathfinderNode = n;
+            Open.Add(n);
+            HeapUp(Open.Count - 1);
+        } else if (Nodes[cur].Prev != n) {
+            if (totalCost < Nodes[n].TotalCostRaw) {
+                Nodes[n].Prev = cur;
+                Nodes[n].TotalCostRaw = totalCost;
+                int estimatedFinalCost = (Fp.FromRaw(Nodes[n].TotalCostRaw)
+                                       + Fp.FromRaw(Nodes[n].EstimatedRemainingCostRaw)).RawValue();
+                if (Nodes[n].Visited) {
+                    Nodes[n].EstimatedFinalCostRaw = estimatedFinalCost;
+                    Nodes[n].Visited = false;
+                    Open.Add(n);
+                    HeapUp(Open.Count - 1);
+                } else {
+                    if (estimatedFinalCost >= Nodes[n].EstimatedFinalCostRaw) {
+                        throw new Exception("unreachable; cost did not decrease");
+                    }
+                    Nodes[n].EstimatedFinalCostRaw = estimatedFinalCost;
+                    // openbw: binary_heap_up(std::find(open.begin(), open.end(), n), ...)
+                    int pos = Open.IndexOf(n);
+                    if (pos >= 0) {
+                        HeapUp(pos);
+                    }
+                }
+            }
+        }
+    }
+}

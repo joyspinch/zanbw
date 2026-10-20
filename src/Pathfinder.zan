@@ -1,0 +1,125 @@
+using System;
+
+// The pathfinder's long-path search: openbw/bwgame.h 9191-9371 plus the
+// public entry point at 10710.
+//
+// The long path is the coarse, region-level route. The short path search
+// later refines each hop; that part is a separate slice.
+
+public class Pathfinder {
+    public Regions R;
+    public AStar Search;
+
+    // the resulting path, as region indices
+    public List<int> LongPath;
+
+    public int FullLongPathSize;
+    public int LongAllNodesSize;
+    public int LongHighestOpenSize;
+
+    public int SourceRegion;
+    public int DestinationRegion;
+
+    public Pathfinder(Regions r) {
+        R = r;
+        Search = new AStar(r);
+        LongPath = new List<int>();
+    }
+
+    // openbw: get_region_at(xy pos)
+    public int GetRegionAt(int posX, int posY) {
+        int index = R.TileRegionIndex[(posY / 32) * 256 + (posX / 32)];
+        if (index >= 0x2000) {
+            int maskIndex = ((posY / 8) & 3) * 4 + ((posX / 8) & 3);
+            SplitRegion split = R.SplitRegions[index - 0x2000];
+            if ((split.Mask & (1 << maskIndex)) != 0) return split.B;
+            else return split.A;
+        }
+        return index;
+    }
+
+    // openbw: pathfinder_find_long_path(pf, from, to)
+    public bool FindLongPath(int srcX, int srcY, int dstX, int dstY) {
+        SourceRegion = GetRegionAt(srcX, srcY);
+        DestinationRegion = GetRegionAt(dstX, dstY);
+        LongAllNodesSize = 0;
+        LongHighestOpenSize = 0;
+        Search.LongHighestOpenSize = 0;
+
+        if (SourceRegion == DestinationRegion) {
+            LongPath = new List<int>();
+            LongPath.Add(SourceRegion);
+            FullLongPathSize = 1;
+            return true;
+        }
+        return FindLongPathInner(srcX, srcY, dstX, dstY);
+    }
+
+    // openbw: pathfinder_find_long_path(pathfinder& pf)
+    public bool FindLongPathInner(int srcX, int srcY, int dstX, int dstY) {
+        bool pathIsReversed;
+        if (R.RegionsList[SourceRegion].GroupIndex == R.RegionsList[DestinationRegion].GroupIndex) {
+            Search.Find(SourceRegion, DestinationRegion, srcX, srcY, dstX, dstY,
+                        SourceRegion, DestinationRegion);
+            pathIsReversed = false;
+        } else {
+            Search.Find(DestinationRegion, SourceRegion, srcX, srcY, dstX, dstY,
+                        SourceRegion, DestinationRegion);
+            pathIsReversed = true;
+            int goalRegion = Search.Nodes[Search.GoalNode].RegionIndex;
+            if (goalRegion != SourceRegion) {
+                for (int i = 0; i != Search.Nodes.Count; ++i) {
+                    R.RegionsList[Search.Nodes[i].RegionIndex].PathfinderNode = -1;
+                }
+                Search.Find(SourceRegion, goalRegion,
+                            srcX, srcY, dstX, dstY, SourceRegion, DestinationRegion);
+                pathIsReversed = false;
+            }
+        }
+
+        LongAllNodesSize = Search.Nodes.Count;
+
+        LongPath = new List<int>();
+        FullLongPathSize = 0;
+        int goalNode = Search.GoalNode;
+        int fullPathSize = 0;
+
+        if (pathIsReversed) {
+            int goalGroupIndex = R.RegionsList[Search.Nodes[goalNode].RegionIndex].GroupIndex;
+            int n = goalNode;
+            while (n != -1) {
+                if (R.RegionsList[Search.Nodes[n].RegionIndex].GroupIndex != goalGroupIndex) break;
+                if (LongPath.Count != 50) {
+                    LongPath.Add(R.RegionsList[Search.Nodes[n].RegionIndex].Index);
+                }
+                ++fullPathSize;
+                n = Search.Nodes[n].Prev;
+            }
+        } else {
+            int n = goalNode;
+            while (n != -1) {
+                ++fullPathSize;
+                n = Search.Nodes[n].Prev;
+            }
+            for (int i = fullPathSize; i > 50; --i) {
+                goalNode = Search.Nodes[goalNode].Prev;
+            }
+            // the C++ pushes to the front, so the path ends up reversed
+            List<int> reversed = new List<int>();
+            n = goalNode;
+            while (n != -1) {
+                reversed.Add(R.RegionsList[Search.Nodes[n].RegionIndex].Index);
+                n = Search.Nodes[n].Prev;
+            }
+            for (int i = reversed.Count - 1; i >= 0; --i) {
+                LongPath.Add(reversed[i]);
+            }
+        }
+        FullLongPathSize = fullPathSize;
+
+        for (int i = 0; i != Search.Nodes.Count; ++i) {
+            R.RegionsList[Search.Nodes[i].RegionIndex].PathfinderNode = -1;
+        }
+        return LongPath.Count != 0;
+    }
+}
