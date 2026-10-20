@@ -75,7 +75,15 @@ public class StateMain {
             (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 7,
             new Xy(8, 8), new Xy(8, 8));
 
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+
         Unit u = new Unit();
+        // openbw: create_unit() calls lcg_rand(14) before doing anything
+        // else, and initialize_unit() draws the wireframe randomizer from
+        // lcg_rand(15). Both advance the shared RNG state, so every later
+        // random draw in the run depends on them.
+        sim.Rng.Rand(14);
+        u.WireframeRandomizer = sim.Rng.Rand(15) & 0xff;
         u.UnitType = ut;
         u.FlingyType = ft;
         u.Owner = 0;
@@ -107,8 +115,6 @@ public class StateMain {
         // openbw: initialize_flingy calls set_flingy_move_target(f, pos), which
         // clears movement flag 4 and sets movement flag 1.
         u.MovementFlags = 1;
-
-        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
 
         PathProgress pp = new PathProgress(r, sim, u);
         pp.CurrentFrame = 0;
@@ -146,7 +152,7 @@ public class StateMain {
             frame = frame + 1;
             pp.CurrentFrame = frame;
 
-            if ((frame % 4) == 0) {
+            if (true) {
                 DumpUnit("F" + frame, u, pp);
             }
         }

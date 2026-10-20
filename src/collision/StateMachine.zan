@@ -71,7 +71,7 @@ public class StateMachine {
             return true;
         }
         if (U.UCollision() && U.UGroundUnit()) {
-            Pathing.Current = null;
+            Pathing.FreePath();
             U.MovementState = MovementStates.UM_CheckIllegal;
             return true;
         }
@@ -261,6 +261,70 @@ public class StateMachine {
         return R.RegionsList[fromRegion].GroupIndex == R.RegionsList[toRegion].GroupIndex;
     }
 
+    // openbw: bool get_unique_sided_positions_within_bounds(xy& from, xy& to, rect bounds) const
+    //
+    // Clips the segment (from, to) to the bounds, keeping the two ends on
+    // different sides of the box. False when the segment cannot be clipped
+    // to a unique side, which means the two ends would end up on the same
+    // side and the segment is not usable.
+    public bool GetUniqueSidedPositionsWithinBounds(
+            ref int fromX, ref int fromY, ref int toX, ref int toY,
+            int boundsFromX, int boundsFromY, int boundsToX, int boundsToY) {
+        int initialFromX = fromX;
+        int initialFromY = fromY;
+        int initialToX = toX;
+        int initialToY = toY;
+        int fromFlags = GetBoundsFlags(fromX, fromY, boundsFromX, boundsFromY, boundsToX, boundsToY);
+        int toFlags = GetBoundsFlags(toX, toY, boundsFromX, boundsFromY, boundsToX, boundsToY);
+        while (true) {
+            if ((fromFlags | toFlags) == 0) return true;
+            if ((fromFlags & toFlags) != 0) {
+                fromX = initialFromX;
+                fromY = initialFromY;
+                toX = initialToX;
+                toY = initialToY;
+                return false;
+            }
+            if (fromFlags != 0) {
+                VisitBounds(fromFlags, ref fromX, ref fromY, toX, toY,
+                    boundsFromX, boundsFromY, boundsToX, boundsToY);
+                fromFlags = GetBoundsFlags(fromX, fromY, boundsFromX, boundsFromY, boundsToX, boundsToY);
+            } else {
+                VisitBounds(toFlags, ref toX, ref toY, fromX, fromY,
+                    boundsFromX, boundsFromY, boundsToX, boundsToY);
+                toFlags = GetBoundsFlags(toX, toY, boundsFromX, boundsFromY, boundsToX, boundsToY);
+            }
+        }
+    }
+
+    // openbw: the get_flags lambda of get_unique_sided_positions_within_bounds
+    private int GetBoundsFlags(int posX, int posY, int boundsFromX, int boundsFromY, int boundsToX, int boundsToY) {
+        int r = 0;
+        if (posY < boundsFromY) r = r | 8;
+        if (posY > boundsToY) r = r | 4;
+        if (posX > boundsToX) r = r | 2;
+        if (posX < boundsFromX) r = r | 1;
+        return r;
+    }
+
+    // openbw: the visit lambda of get_unique_sided_positions_within_bounds
+    private void VisitBounds(int flags, ref int outX, ref int outY, int otherX, int otherY,
+            int boundsFromX, int boundsFromY, int boundsToX, int boundsToY) {
+        if ((flags & 8) != 0) {
+            outX = outX + (boundsFromY - outY) * (otherX - outX) / (otherY - outY);
+            outY = boundsFromY;
+        } else if ((flags & 4) != 0) {
+            outX = outX + (boundsToY - outY) * (otherX - outX) / (otherY - outY);
+            outY = boundsToY;
+        } else if ((flags & 2) != 0) {
+            outX = boundsToX;
+            outY = outY + (boundsToX - outX) * (otherY - outY) / (otherX - outX);
+        } else {
+            outX = boundsFromX;
+            outY = outY + (boundsFromX - outX) * (otherY - outY) / (otherX - outX);
+        }
+    }
+
     // openbw: bool unit_type_can_fit_at(const unit_type_t* unit_type, xy pos) const
     public bool UnitTypeCanFitAt(UnitType ut, int posX, int posY) {
         if (!IsInMapBounds(ut, posX, posY)) return false;
@@ -286,6 +350,29 @@ public class StateMachine {
     // does not fit.
     public bool IsBlocked(Unit u, int posX, int posY) {
         return Collision.IsBlocked(this, u, posX, posY);
+    }
+
+    // openbw: std::pair<bool, unit_t*> is_blocked(const unit_t* u, xy pos)
+    //
+    // The second value is the unit that blocks the way, or null when the
+    // terrain is the problem.
+    public bool IsBlockedWithUnit(Unit u, int posX, int posY, out Unit blockingUnit) {
+        return Collision.IsBlockedWithUnit(this, u, posX, posY, out blockingUnit);
+    }
+
+    // openbw: unit_t* check_ground_unit_movement_unit_collision(unit_t* u, const execute_movement_struct& ems) {
+    //     if (u_ground_unit(u)) {
+    //         return check_unit_movement_unit_collision(u, ems);
+    //     } else {
+    //         return nullptr;
+    //     }
+    // }
+    //
+    // The unit the moving unit runs into, or null. Only ground units
+    // collide with other units.
+    public Unit CheckGroundUnitMovementUnitCollision(int emsX, int emsY) {
+        if (!U.UGroundUnit()) return null;
+        return Collision.CheckUnitMovementUnitCollision(Sim, U, emsX, emsY);
     }
 
     // openbw: check_unit_movement_terrain_collision(u, movement)

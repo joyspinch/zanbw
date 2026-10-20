@@ -120,6 +120,24 @@ public class Collision {
 //
 // Whether the unit cannot be at the given position: either the position
 // is off the map, another unit is in the way, or the terrain does not fit.
+//
+// The second value is the unit that blocks the way, or null when the
+// terrain is the problem.
+public static bool IsBlockedWithUnit(StateMachine m, Unit u, int posX, int posY, out Unit blockingUnit) {
+    // openbw: unit_type_inner_bounding_box(u, origin) is
+    //     { origin - dimensions.from, origin + dimensions.to }
+    int fromX = posX - u.UnitType.DimensionsFrom.X;
+    int fromY = posY - u.UnitType.DimensionsFrom.Y;
+    int toX = posX + u.UnitType.DimensionsTo.X;
+    int toY = posY + u.UnitType.DimensionsTo.Y;
+    blockingUnit = null;
+    if (!m.IsInInnerMapBounds(fromX, fromY, toX, toY)) return true;
+    Unit largestUnit = GetLargestBlockingUnit(m.Sim, u, fromX, toX, fromY, toY);
+    if (largestUnit == null) return !m.UnitTypeCanFitAt(u.UnitType, posX, posY);
+    blockingUnit = largestUnit;
+    return true;
+}
+
 public static bool IsBlocked(StateMachine m, Unit u, int posX, int posY) {
     // openbw: unit_type_inner_bounding_box(u, origin) is
     //     { origin - dimensions.from, origin + dimensions.to }

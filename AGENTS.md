@@ -9,7 +9,7 @@ raw 值都必须与原 C++ 实现完全相同。
 
 | 路径 | 内容 |
 |------|------|
-| `src/core/` | 核心实体与全局状态：`Unit`、`Sim`、`UnitFinder`、`Kinematics`、`Scenario`、`Enums` |
+| `src/core/` | 核心实体与全局状态：`Unit`、`Sim`、`UnitFinder`、`Kinematics`、`Scenario`、`Enums`；`Sim` 还持有路径对象池（`FreePaths`） |
 | `src/math/` | 定点数（`Fp`）、方向（`Dir`）、静态表（`Tables`）、矩形（`Box`） |
 | `src/regions/` | regions 层：区域划分、contours、split regions、合成地形 |
 | `src/pathfind/` | 寻路：长路径 A*、短路径 contour 搜索、`path_t` 生命周期 |
@@ -76,6 +76,9 @@ bash check_path.sh
 # 运动状态机对拍（7 个地形变体 × 16 个场景）
 bash check_state.sh
 
+# 单位间碰撞层对拍（7 个地形变体 × 17 场景，两单位对撞）
+bash check_collide.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -83,6 +86,7 @@ bash check_astar.sh 3
 bash check_shortpath.sh 3
 bash check_path.sh 3
 bash check_state.sh 3
+bash check_collide.sh 5 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -483,6 +487,138 @@ openbw 是 `uy * game_st.map_tile_width + ux`，写死 128 在 64 宽的床上
 单位卡在墙里时，C++ 会**搜索**一个合法位置并用
 `create_single_step_path` 走过去，而不是原地卡死。跳过这段 ⇒
 单位永远停在非法位置，两侧状态机立刻分叉。
+
+## 碰撞层（unit finder / UM_FixCollision / UM_WaitFree / 路径续算）
+
+对应 openbw/bwgame.h 11465-11983。参照床 `tools/cppbed/collide_bed.cpp`，
+Zan 侧 `src/collision/`，检查脚本 `check_collide.sh`（7 变体 × 17 场景）。
+
+### 39. 路径对象是**池化**的，字段会跨路径残留
+
+```cpp
+path_t* new_path() {
+    // We need a (first-in-last-out) free list of paths since
+    // last_collision_unit is reused.
+    if (!st.free_paths.empty()) { ...pop_front... }
+    ...
+}
+void free_path(path_t* path) { st.free_paths.push_front(*path); }
+```
+
+`new_path()` 复用对象时**只重置一部分字段**：`delay` / `creation_frame` /
+`state_flags` / `long_path` / `short_path` / `current_*_index` / `source` /
+`destination` / `next` 被写了，而 `last_collision_unit`、
+`last_collision_speed`、`slide_free_direction` **保留上一次的值**。
+
+Zan 侧若每次 `new Path()`，`last_collision_unit` 恒为空 ⇒
+`UM_TurnAndStart` / `UM_Repath` 取不到"上次撞到的单位" ⇒ 新路径不绕开它。
+必须照抄 free list（先入后出）。
+
+**为什么隐蔽**：这个字段只在"单位撞到别人后重规划"时才有值，路径层
+（单单位床）永远测不到；只有两单位对撞的床才会暴露。
+
+### 40. `consider_collision_with_moving_units` 是路径层的第四个参数
+
+```cpp
+bool unit_path_to(unit_t* u, xy to,
+    const unit_t* consider_collision_with_unit = nullptr,
+    bool consider_collision_with_moving_units = false)
+```
+
+`pathfinder_unit_can_collide_with` 里：
+
+```cpp
+if (target != consider_collision_with_unit && !consider_collision_with_moving_units) {
+    if (!unit_is_at_move_target(target)) return false;   // 移动中的单位不算障碍
+}
+```
+
+只有 `UM_RepathMovers` 传 `true`（"给挡路的 movers 重新规划"），
+其余状态（`UM_FollowPath` / `UM_StartPath` / `UM_Repath` / `UM_TurnAndStart`）
+都传默认 `false`。**漏传 ⇒ 路径不绕开正在移动的单位 ⇒ 两侧路径分叉。**
+
+### 41. `check_unit_collision` 不能省
+
+`UM_MoveToLegal` 里：
+
+```cpp
+if (move()) {
+    ...
+    check_unit_collision(u);                    // ← 少这一行就分叉
+    u_set_status_flag(u, unit_t::status_flag_collision);
+    u->movement_state = movement_states::UM_CheckIllegal;
+}
+```
+
+`check_unit_collision` 把**互相挡路的单位**都打上 `status_flag_collision`
+（不只被打的那个）。它影响下一个 frame 的
+`unit_update_path_movement_state`（`u_collision(u) && u_ground_unit(u)`
+⇒ 直接转 `UM_CheckIllegal`），少一行 ⇒ 一个 frame 后状态机分道扬镳。
+
+### 42. 碰撞判定的**顺序**是行为的一部分
+
+同一个"撞上了"判定里，单位碰撞和地形碰撞的先后会改变结果：
+
+| 位置 | C++ 顺序 |
+|---|---|
+| `UM_FollowPath` | 先地形（`check_unit_movement_terrain_collision`），再单位（`check_ground_unit_movement_unit_collision`） |
+| `UM_FixTerrain` | 先地形，后单位 |
+| `UM_TerrainSlide` | **先单位，后地形** |
+
+`UM_TerrainSlide` 是唯一一个单位碰撞在前的地方。顺序写反 ⇒ 该滑开的
+时候没滑开，或者不该撞的时候撞了。
+
+### 43. `create_unit` 会消耗 **两次** RNG
+
+```cpp
+u->wireframe_randomizer = lcg_rand(15) & 0xff;   // initialize_unit 里
+```
+加上 `create_unit` 开头的 `lcg_rand(14)`，一个单位就推进两次 RNG 状态。
+床里手搓单位时漏掉 ⇒ 后续所有 `lcg_rand(50, ...)` 的取值全部错位 ⇒
+"找合法位置"的方向和长度不同 ⇒ 两侧停在不同的位置。
+
+### 44. `path_t` 的 `long_path` 是 `circular_vector`，`resize` 保留首元素
+
+`create_single_step_path` 里 `path->long_path.resize(1)`：vector 已有元素时
+`resize` 只销毁尾部，**保留 `long_path[0]`**；空 vector 才补一个 nullptr。
+Zan 侧 `List` 没有这个语义，要显式写"只留第一个"。
+
+### 45. 逐位对拍的定位顺序：先比**状态链**，再比**路径**，最后比**数值**
+
+`execute_movement` 一帧内会跑完多个状态（`FixCollision → WaitFree → ...`），
+只看帧末的状态会漏掉分叉点。打印**每帧的状态序列**（C++ 侧在
+`switch` 前抓一次状态、break 前记一次），第一个不同的帧就是分叉点。
+
+分叉点的三类典型症状与下一步：
+
+| 症状 | 去查 |
+|---|---|
+| 某状态多/少了一次 | 该状态内部的判定顺序、缺移植的分支 |
+| 状态相同但 `waypoint`/`path` 不同 | 路径生成（对象池残留、moving-units 标志、长路径索引） |
+| 状态相同、路径相同，但坐标/速度不同 | RNG 消耗数、fp8 字面量语义 |
+
+### 46. `Fp.RawLiteral`：C++ 的 `_fp8` 字面量是**原始值**
+
+`1_fp8` = raw 1（= 1/256 像素），`256_fp8` = raw 256（= 1.0），
+`192_fp8` = raw 192。C++ 里 `fp8::integer(x)` 才是"x 个整像素"（raw = x*256）。
+两者差 256 倍。C++ 源里 `fp8::integer(...)` 和 `_fp8` 字面量混用，
+照抄时必须逐个核对，不能统一按"像素"理解。
+
+Zan 侧用 `Fp.RawLiteral(n)`（raw n）和 `Fp.Integer(n)`（raw n*256）区分。
+
+### 47. `out` 参数：调用点必须显式写 `out`，且不做重载
+
+```java
+Collision.IsBlockedWithUnit(this, u, posX, posY, out blockingUnit);   // 对
+Collision.IsBlockedWithUnit(this, u, posX, posY, blockingUnit);        // 段错误
+```
+
+漏写 `out` 时参数按值传，`out` 的写回落到临时对象上 → 崩在调用表达式处
+（函数体一行都没执行）。
+
+另外**不要用 `out` 做方法重载**，Zan 的重载解析在 `out` 参数上不可靠：
+带 `out` 的版本起一个**独立名字**（`IsBlocked` / `IsBlockedWithUnit`），
+不要写成 `IsBlocked` 的两个重载。
 
 ## 已知 zanc 缺陷
 

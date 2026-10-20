@@ -34,23 +34,52 @@ public class Pathfinder {
     public bool HasConsiderCollisionWithUnit;
     public int ConsiderCollisionWithUnitId;
 
-    // openbw: bool pathfinder_unit_can_collide_with(const unit_t* u, const unit_t* target, ...)
+    // openbw: pf.consider_collision_with_moving_units -- when this is set,
+    // a unit that is on the move counts as an obstacle too.
+    public bool ConsiderCollisionWithMovingUnits;
+
+    // openbw: bool pathfinder_unit_can_collide_with(const unit_t* u, const unit_t* target, const unit_t* consider_collision_with_unit, bool consider_collision_with_moving_units) const {
+    //     if (target != consider_collision_with_unit && !consider_collision_with_moving_units) {
+    //         if (!unit_is_at_move_target(target)) return false;
+    //     }
+    //     if (unit_is(target, UnitTypes::Special_Upper_Level_Door)) return false;
+    //     if (unit_is(target, UnitTypes::Special_Right_Upper_Level_Door)) return false;
+    //     if (unit_is(target, UnitTypes::Special_Pit_Door)) return false;
+    //     if (unit_is(target, UnitTypes::Special_Right_Pit_Door)) return false;
+    //     return unit_can_collide_with(u, target);
+    // }
     //
     // The pathfinder only treats a unit as an obstacle when the unit stands
     // still on its own move target: a unit that is on its way somewhere else
     // is not in the way. The consider unit is the one the path was blocked
     // by last time, so the new path goes around it even when it moves.
     public bool UnitCanCollideWith(Sim sim, Unit u, Unit target) {
-        if (!HasConsiderCollisionWithUnit
-            || sim.GetUnitId(target) != ConsiderCollisionWithUnitId) {
+        bool isConsiderUnit = HasConsiderCollisionWithUnit
+            && sim.GetUnitId(target) == ConsiderCollisionWithUnitId;
+        if (!isConsiderUnit && !ConsiderCollisionWithMovingUnits) {
             if (!target.IsAtMoveTarget()) return false;
         }
+        return UnitCanCollideWithIgnoringMoveTarget(sim, u, target);
+    }
+
+    // openbw: bool pathfinder_unit_can_collide_with(const unit_t* u, const unit_t* target, const unit_t* consider_collision_with_unit, bool consider_collision_with_moving_units)
+    //
+    // The explicit form. A target that is not the consider unit and moving
+    // units are not obstacles only when consider_collision_with_moving_units
+    // is false.
+    public static bool UnitCanCollideWithIgnoringMoveTarget(Sim sim, Unit u, Unit target) {
         // The doors are never in the way.
         if (target.UnitType.Id == (int)UnitTypes.SpecialUpperLevelDoor) return false;
         if (target.UnitType.Id == (int)UnitTypes.SpecialRightUpperLevelDoor) return false;
         if (target.UnitType.Id == (int)UnitTypes.SpecialPitDoor) return false;
         if (target.UnitType.Id == (int)UnitTypes.SpecialRightPitDoor) return false;
         return sim.UnitCanCollideWith(u, target);
+    }
+
+    // The unit is not the consider unit, so the move target does not
+    // matter: a moving unit is in the way too.
+    public static bool UnitCanCollideWithMoving(Sim sim, Unit u, Unit target) {
+        return UnitCanCollideWithIgnoringMoveTarget(sim, u, target);
     }
 
     // the index into LongPath that the next short path hop starts from

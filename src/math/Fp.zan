@@ -32,6 +32,15 @@ public struct Fp {
 
     public static Fp FromRaw(int raw) { return new Fp(raw); }
 
+    // openbw: static inline constexpr fp8 operator ""_fp8(unsigned long long int value) {
+    //     return fp8::from_raw((fp8::raw_type)value);
+    // }
+    //
+    // The C++ literal suffix builds the value from the raw word, not from
+    // a scaled number: 1_fp8 is the raw value 1 (that is 1/256 of a
+    // pixel), and 256_fp8 is the raw value 256 (that is one whole pixel).
+    public static Fp RawLiteral(int raw) { return new Fp(raw); }
+
     public int RawValue() { return Raw; }
 
     // ---- integer_part / fractional_part ------------------------------------

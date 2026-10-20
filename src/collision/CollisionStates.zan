@@ -284,7 +284,7 @@ public class CollisionStates {
         Unit collisionUnit = Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y);
         if (collisionUnit != null) {
             if (U.NextVelocityDirection == Kin.XyDirection(U.NextMovementWaypoint - U.Position)) {
-                Pathing.Current = null;
+                Pathing.FreePath();
             }
         } else {
             if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
@@ -299,10 +299,14 @@ public class CollisionStates {
 
     // openbw: bool movement_UM_RepathMovers(unit_t* u, execute_movement_struct& ems)
     public bool UmRepathMovers(Ems ems) {
-        Pathing.Current = null;
+        Pathing.FreePath();
         int moveTargetX = U.MoveTargetPos.X;
         int moveTargetY = U.MoveTargetPos.Y;
-        if (!Pathing.UnitPathTo(moveTargetX, moveTargetY) || U.HasStatusFlag(StatusFlag.Immovable)) {
+        // openbw: unit_path_to(u, move_target.pos, st.consider_collision_with_unit_bug, true)
+        // The moving units count as obstacles too.
+        if (!Pathing.UnitPathTo(moveTargetX, moveTargetY,
+                Sim.HasConsiderCollisionWithUnit, Sim.ConsiderCollisionWithUnitId, true)
+            || U.HasStatusFlag(StatusFlag.Immovable)) {
             U.MoveTargetPos = new Xy(moveTargetX, moveTargetY);
             U.MovementState = MovementStates.UM_TurnAndStart;
             return false;

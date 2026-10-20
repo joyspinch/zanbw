@@ -45,6 +45,19 @@ public class PathProgress {
     public void UnsetMovementFlag(int flag) { U.MovementFlags = U.MovementFlags & ~flag; }
     public bool MovementFlag(int flag) { return (U.MovementFlags & flag) != 0; }
 
+    // openbw: void free_path(unit_t* u) {
+    //     if (!u->path) return;
+    //     free_path(u->path);
+    //     u->path = nullptr;
+    // }
+    //
+    // The path goes back into the pool; the unit keeps no path.
+    public void FreePath() {
+        if (Current == null) return;
+        Sim.FreePath(Current);
+        Current = null;
+    }
+
     // openbw: is_moving_along_path(u)
     public bool IsMovingAlongPath() {
         if (Current == null) return false;
@@ -190,17 +203,19 @@ public class PathProgress {
 
     // openbw: path_progress(u, to, ...)
     public bool PathProgressTo(int toX, int toY) {
-        return PathProgressTo(toX, toY, false, 0);
+        return PathProgressTo(toX, toY, false, 0, false);
     }
 
-    // openbw: path_progress(u, to, consider_collision_with_unit)
-    public bool PathProgressTo(int toX, int toY, bool hasConsiderCollision, int considerCollisionId) {
+    // openbw: path_progress(u, to, consider_collision_with_unit, consider_collision_with_moving_units)
+    public bool PathProgressTo(int toX, int toY, bool hasConsiderCollision, int considerCollisionId,
+                               bool considerCollisionWithMovingUnits) {
         UnsetMovementFlag(0x40);
         SetMovementFlag(0x10);
 
         Pathfinder pf = new Pathfinder(R);
         pf.HasConsiderCollisionWithUnit = hasConsiderCollision;
         pf.ConsiderCollisionWithUnitId = considerCollisionId;
+        pf.ConsiderCollisionWithMovingUnits = considerCollisionWithMovingUnits;
         bool findNewPath = true;
         if (Current != null) {
             Current.CurrentShortPathIndex++;
@@ -216,6 +231,7 @@ public class PathProgress {
                 pf.CurrentLongPathIndex = Current.CurrentLongPathIndex;
                 pf.ShortPath = Current.ShortPath;
                 pf.ShortPathIndex = Current.CurrentShortPathIndex;
+                Sim.FreePath(Current);
                 Current = null;
                 if (pf.CurrentLongPathIndex + 1 < pf.LongPath.Count) {
                     if (pf.FullLongPathSize == pf.LongPath.Count
@@ -260,7 +276,10 @@ public class PathProgress {
                 }
             }
 
-            Path path = new Path();
+            // openbw: new_path() -- the path comes from the pool, so the
+            // fields a new path does not set keep the values they had in
+            // the path the object held before.
+            Path path = Sim.NewPath();
             path.Delay = 0;
             path.CreationFrame = CurrentFrame;
             path.StateFlags = 0;
@@ -301,17 +320,21 @@ public class PathProgress {
 
     // openbw: create_single_step_path(source, destination)
     public Path CreateSingleStepPath(int sourceX, int sourceY, int destX, int destY) {
-        Path path = new Path();
+        // openbw: new_path() -- the path comes from the pool.
+        Path path = Sim.NewPath();
         path.Delay = 0;
         // creation_frame is not set here (openbw leaves it uninitialised)
         path.StateFlags = 0;
 
         // long_path[0] is uninitialised in openbw, so the behaviour is
-        // reproduced by the branch below.
+        // reproduced by the branch below. The resize keeps the first
+        // element of a path that already had a long path.
         if (path.ShortPath.Count <= 1) {
-            path.LongPath.Add(-1);
+            if (path.LongPath.Count == 0) path.LongPath.Add(-1);
+            else while (path.LongPath.Count > 1) path.LongPath.RemoveAt(path.LongPath.Count - 1);
         } else {
             int index = path.ShortPath[1][0];
+            path.LongPath = new List<int>();
             if (index >= 0 && index < R.RegionsList.Count) {
                 path.LongPath.Add(R.RegionsList[index].Index);
             } else {
@@ -335,19 +358,26 @@ public class PathProgress {
 
     // openbw: unit_path_to(u, to, ...)
     public bool UnitPathTo(int toX, int toY) {
-        return UnitPathTo(toX, toY, false, 0);
+        return UnitPathTo(toX, toY, false, 0, false);
     }
 
-    // openbw: unit_path_to(u, to, consider_collision_with_unit)
+    // openbw: unit_path_to(u, to, consider_collision_with_unit, consider_collision_with_moving_units)
     public bool UnitPathTo(int toX, int toY, bool hasConsiderCollision, int considerCollisionId) {
+        return UnitPathTo(toX, toY, hasConsiderCollision, considerCollisionId, false);
+    }
+
+    public bool UnitPathTo(int toX, int toY, bool hasConsiderCollision, int considerCollisionId,
+                           bool considerCollisionWithMovingUnits) {
         if (IsMovingAlongPath()) return true;
         if (!U.UGroundUnit()) {
             SetUnitMoveTarget(toX, toY);
+            FreePath();
             Current = CreateSingleStepPath(U.Position.X, U.Position.Y, toX, toY);
             if (Current == null) return false;
             return true;
         }
-        if (!PathProgressTo(toX, toY, hasConsiderCollision, considerCollisionId)) return false;
+        if (!PathProgressTo(toX, toY, hasConsiderCollision, considerCollisionId,
+                            considerCollisionWithMovingUnits)) return false;
         Path p = Current;
         if (U.NextTargetWaypoint.X != p.NextX || U.NextTargetWaypoint.Y != p.NextY) {
             U.NextTargetWaypoint = new Xy(p.NextX, p.NextY);

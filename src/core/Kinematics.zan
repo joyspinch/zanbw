@@ -312,7 +312,16 @@ public class Kin {
     //     set_current_speed(u, speed);
     // }
     public static void UpdateCurrentSpeedTowardsWaypoint(Unit u) {
-        if (u.FlingyMovementType == 1) {
+        if (u.FlingyMovementType == 0) {
+            // openbw: the 192_fp8 literal is the raw value 192.
+            if (u.IsAtMoveTarget() && u.NextSpeed < Fp.RawLiteral(192)) {
+                if (!u.MovementFlag(0x20) && !u.MovementFlag(0x10)) {
+                    u.UnsetMovementFlag(4);
+                    SetCurrentSpeed(u, Fp.Zero());
+                    return;
+                }
+            }
+        } else if (u.FlingyMovementType == 1) {
             if (u.IsAtMoveTarget()) {
                 u.UnsetMovementFlag(4);
                 SetCurrentSpeed(u, Fp.Zero());
@@ -330,7 +339,8 @@ public class Kin {
                     // equal, so the raw value carries over unchanged.
                     Fp headingError = Fp.ExtendFromDir(
                         (u.Heading - u.DesiredVelocityDirection).RawValue()).Abs();
-                    if (headingError >= Fp.Integer(32)) {
+                    // openbw: 32_fp8 is the raw value 32.
+                    if (headingError >= Fp.RawLiteral(32)) {
                         if (u.MovementFlag(2)) {
                             u.UnsetMovementFlag(2);
                             u.UnsetMovementFlag(4);
@@ -357,7 +367,10 @@ public class Kin {
                 (u.DesiredVelocityDirection - u.CurrentVelocityDirection).RawValue()).Abs();
 
             // fp8::divide_multiply(diff * 2 + turn_rate - 1_fp8, turn_rate, next_speed)
-            Fp scaled = Fp.MulFp8(diff * Fp.Integer(2), Fp.One()) + turnRate - Fp.One();
+            // openbw: diff * 2 + turn_rate - 1_fp8. The multiply by 2 is
+            // a raw one (the C++ multiplies a fixed point by an int), and
+            // the 1_fp8 literal is the raw value 1, not one whole pixel.
+            Fp scaled = diff * 2 + turnRate - Fp.RawLiteral(1);
             Fp quotient = Fp.DivideMultiply(scaled, turnRate, u.NextSpeed);
             uint val = (uint)quotient.IntegerPart();
             if ((uint)(val * 3 / 2) <= (uint)d) accelerate = true;

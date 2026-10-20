@@ -66,6 +66,29 @@ public class Sim {
     public bool HasConsiderCollisionWithUnit;
     public int ConsiderCollisionWithUnitId;
 
+    // openbw: st.free_paths -- the pool of free path objects.
+    //
+    // The path objects are reused, and the reuse is visible: the fields
+    // that a new path does not set -- the last collision unit and the
+    // last collision speed -- keep the values of the path the object
+    // held before. The pool is first in, last out.
+    public List<Path> FreePaths;
+
+    // openbw: path_t* new_path()
+    public Path NewPath() {
+        if (FreePaths.Count != 0) {
+            Path p = FreePaths[0];
+            FreePaths.RemoveAt(0);
+            return p;
+        }
+        return new Path();
+    }
+
+    // openbw: void free_path(path_t* path)
+    public void FreePath(Path path) {
+        FreePaths.Insert(0, path);
+    }
+
     // openbw: state::current_frame
     public int CurrentFrame;
 
@@ -84,6 +107,7 @@ public class Sim {
         MaxUnitHeight = 64;
         Finder = new UnitFinder();
         Units = new List<Unit>();
+        FreePaths = new List<Path>();
         CurrentFrame = 0;
         Alliances = new int[12 * 12];
         for (int i = 0; i < 12; ++i) {
@@ -127,6 +151,40 @@ public class Sim {
             return false;
         }
         return true;
+    }
+
+    // openbw: void check_unit_collision(unit_t* u) {
+    //     for (unit_t* nu : find_units(unit_sprite_inner_bounding_box(u))) {
+    //         if (u_grounded_building(nu)) {
+    //             u_set_status_flag(u, unit_t::status_flag_collision);
+    //         }
+    //         else if (!u_flying(nu) && (!u_gathering(nu) || u_grounded_building(u))) {
+    //             if (unit_finder_units_intersecting(u, nu)) {
+    //                 u_set_status_flag(nu, unit_t::status_flag_collision);
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // Marks the units that stand in each other's way. A grounded building
+    // marks the unit that runs into it; two overlapping ordinary units
+    // mark each other.
+    public void CheckUnitCollision(Unit u) {
+        Box inner = u.InnerBoxAt(u.Sprite.Position.X, u.Sprite.Position.Y);
+        List<Unit> found = Finder.Find(this, inner.FromX, inner.ToX, inner.FromY, inner.ToY, true);
+        for (int i = 0; i < found.Count; ++i) {
+            Unit nu = found[i];
+            if (nu.HasStatusFlag(StatusFlag.GroundedBuilding)) {
+                u.SetStatus(StatusFlag.Collision);
+            } else if (!nu.HasStatusFlag(StatusFlag.Flying)
+                && (!nu.HasStatusFlag(StatusFlag.Gathering) || u.HasStatusFlag(StatusFlag.GroundedBuilding))) {
+                // openbw: unit_finder_units_intersecting(u, nu)
+                if (u.UnitFinderFromX <= nu.UnitFinderToX && nu.UnitFinderFromX <= u.UnitFinderToX
+                    && u.UnitFinderFromY <= nu.UnitFinderToY && nu.UnitFinderFromY <= u.UnitFinderToY) {
+                    nu.SetStatus(StatusFlag.Collision);
+                }
+            }
+        }
     }
 
     // openbw: unit_t* get_unit(unit_id id)

@@ -48,7 +48,13 @@ public class PathMain {
             (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 7,
             new Xy(8, 8), new Xy(8, 8));
 
+        // openbw: create_unit() calls lcg_rand(14) before doing anything
+        // else, and initialize_unit() takes one more random number for the
+        // wireframe randomizer.
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+        sim.Rng.Rand(14);
         Unit u = new Unit();
+        u.WireframeRandomizer = sim.Rng.Rand(15) & 0xff;
         u.UnitType = ut;
         u.FlingyType = ft;
         u.Owner = 0;
@@ -73,8 +79,6 @@ public class PathMain {
         // openbw: initialize_flingy calls set_flingy_move_target(f, pos), which
         // clears movement flag 4 and sets movement flag 1.
         u.MovementFlags = 1;
-
-        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
 
         PathProgress pp = new PathProgress(r, sim, u);
         pp.MoveTargetX = sx;

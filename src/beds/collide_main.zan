@@ -103,7 +103,12 @@ public class CollideMain {
     // openbw: create_unit() plus the two things show_unit() does that the
     // bed needs: the unit becomes visible and enters the unit finder.
     static Unit MakeUnit(Sim sim, Regions r, UnitType ut, FlingyType ft, int x, int y) {
+        // openbw: create_unit() calls lcg_rand(14) before doing anything
+        // else, and initialize_unit() takes one more random number for the
+        // wireframe randomizer.
+        sim.Rng.Rand(14);
         Unit u = new Unit();
+        u.WireframeRandomizer = sim.Rng.Rand(15) & 0xff;
         u.UnitType = ut;
         u.FlingyType = ft;
         u.Owner = 0;
@@ -141,6 +146,14 @@ public class CollideMain {
         int toY = u.Position.Y + ut.DimensionsTo.Y;
         sim.Finder.Insert(u, fromX, toX, fromY, toY);
         return u;
+    }
+
+    static string PathInfo(PathProgress pp) {
+        Path p = pp.Current;
+        if (p == null) return "next=(-1,-1) idx=-1 sz=-1 dst=(-1,-1)";
+        return "next=(" + p.NextX + "," + p.NextY + ") idx=" + p.CurrentShortPathIndex
+            + " sz=" + p.ShortPath.Count
+            + " dst=(" + p.DestinationX + "," + p.DestinationY + ")";
     }
 
     static string ChainText(List<int> chain) {

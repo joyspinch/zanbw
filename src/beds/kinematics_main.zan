@@ -161,7 +161,7 @@ public class Program {
     //     reset_movement_state(u);
     // }
     static void RefreshUnitPosition(Sim sim, Unit u) {
-        u.Sprite.Flags = u.Sprite.Flags & ~SpriteFlag.Hidden;
+        u.Sprite.UnsetFlag(SpriteFlag.Hidden);
         u.MovementState = MovementStates.UM_Init;
         if (u.Sprite.ElevationLevel < 12) u.PathingFlags = u.PathingFlags | 1;
         else u.PathingFlags = u.PathingFlags & ~1;
