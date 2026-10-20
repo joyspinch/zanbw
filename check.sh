@@ -6,6 +6,10 @@
 #
 # Builds both sides, runs them over the same frames, and diffs the traces.
 # Any difference (including the RNG audit line) is a hard failure.
+#
+# The regions layer has its own script (check_regions.sh) because it is a
+# separate, non-frame-based comparison.
+
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

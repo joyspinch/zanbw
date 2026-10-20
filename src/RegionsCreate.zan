@@ -1,0 +1,286 @@
+using System;
+
+// Port of game_load_functions::regions_create() (openbw/bwgame.h 20035-20826).
+//
+// The C++ original is one long function with nested lambdas. The port keeps
+// the same order of operations and the same index arithmetic; the lambdas
+// become methods of RegionsState.
+
+public class RegionsState {
+    public Regions R;
+
+    // scratch values of the C++ lambdas
+    public int RegionTileIndex;
+    public int RegionX;
+    public int RegionY;
+
+    public RegionsState(Regions r) {
+        R = r;
+    }
+
+    // ---------------------------------------------------------- unwalkable
+
+    // openbw: set_unwalkable_flags()
+    public void SetUnwalkableFlags() {
+        for (int y = 0; y != R.MapTileHeight; ++y) {
+            for (int x = 0; x != R.MapTileWidth; ++x) {
+                int megaTileIndex = R.MegaTileIndex[y * R.MapTileWidth + x];
+                for (int sy = 0; sy != 4; ++sy) {
+                    for (int sx = 0; sx != 4; ++sx) {
+                        int f = R.Vf4Flags[megaTileIndex * 16 + (sy * 4 + sx)];
+                        if ((~f & 1) != 0) {
+                            R.SetUnwalkable(x * 4 + sx, y * 4 + sy);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mark the bottom part of the map which is covered by the UI as
+        // unwalkable.
+        if (R.MapWalkHeight >= 8) {
+            for (int y = R.MapWalkHeight - 8; y != R.MapWalkHeight; ++y) {
+                for (int x = 0; x != 20; ++x) {
+                    R.SetUnwalkable(x, y);
+                }
+                if (R.MapWalkWidth >= 20) {
+                    for (int x = R.MapWalkWidth - 20; x != R.MapWalkWidth; ++x) {
+                        R.SetUnwalkable(x, y);
+                    }
+                }
+                if (y >= R.MapWalkHeight - 4) {
+                    for (int x = 0; x != R.MapWalkWidth; ++x) {
+                        R.SetUnwalkable(x, y);
+                    }
+                }
+            }
+        }
+
+        if (R.MapWalkWidth == 0 || R.MapWalkHeight == 0) {
+            throw new Exception("map width/height is zero");
+        }
+
+        for (int y = 0; y != R.MapWalkHeight; ++y) {
+            for (int x = 0; x != R.MapWalkWidth; ++x) {
+                if (R.IsUnwalkable(x, y)) continue;
+                if (y == 0 || R.IsUnwalkable(x, y - 1)) R.SetDirUnwalkable(x, y, 0);
+                if (x == R.MapWalkWidth - 1 || R.IsUnwalkable(x + 1, y)) R.SetDirUnwalkable(x, y, 1);
+                if (y == R.MapWalkHeight - 1 || R.IsUnwalkable(x, y + 1)) R.SetDirUnwalkable(x, y, 2);
+                if (x == 0 || R.IsUnwalkable(x - 1, y)) R.SetDirUnwalkable(x, y, 3);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- regions
+
+    // openbw: create_region(area)
+    public Region CreateRegion(int fromX, int fromY, int toX, int toY) {
+        Region r = new Region();
+        R.RegionsList.Add(r);
+        int flags = R.TileRegionIndex[fromY * 256 + fromX];
+        r.Flags = flags;
+        r.TileAreaFromX = fromX;
+        r.TileAreaFromY = fromY;
+        r.TileAreaToX = toX;
+        r.TileAreaToY = toY;
+        r.TileCenterX = (fromX + toX) / 2;
+        r.TileCenterY = (fromY + toY) / 2;
+        r.Index = R.RegionsList.Count - 1;
+        int tileCount = 0;
+        int index = r.Index;
+        for (int y = fromY; y != toY; ++y) {
+            for (int x = fromX; x != toX; ++x) {
+                R.TileRegionIndex[y * 256 + x] = index;
+                ++tileCount;
+            }
+        }
+        r.TileCount = tileCount;
+        return r;
+    }
+
+    // openbw: create_unreachable_bottom_region()
+    public void CreateUnreachableBottomRegion() {
+        Region r = CreateRegion(0, R.MapTileHeight - 1, R.MapTileWidth, R.MapTileHeight);
+        r.AreaFromX = 0;
+        r.AreaFromY = R.MapHeight - 32;
+        r.AreaToX = R.MapWidth;
+        r.AreaToY = R.MapHeight;
+        r.CenterXRaw = (Fp.Integer(r.AreaFromX).RawValue() + Fp.Integer(r.AreaToX).RawValue()) / 2;
+        r.CenterYRaw = (Fp.Integer(r.AreaFromY).RawValue() + Fp.Integer(r.AreaToY).RawValue()) / 2;
+        r.Flags = 0x1FFD;
+        r.GroupIndex = 0x4000;
+    }
+
+    // openbw: find_empty_region(x, y)
+    public bool FindEmptyRegion(int x, int y) {
+        int bbToX = R.MapTileWidth;
+        int bbToY = R.MapTileHeight;
+        if (x >= bbToX) {
+            x = 0;
+            y = y + 1 >= bbToY ? 0 : y + 1;
+        }
+        int startX = x;
+        int startY = y;
+        while (true) {
+            int index = R.TileRegionIndex[y * 256 + x];
+            if (index >= 5000) {
+                RegionTileIndex = index;
+                RegionX = x;
+                RegionY = y;
+                return true;
+            }
+            ++x;
+            if (x >= bbToX) {
+                x = 0;
+                y = y + 1 >= bbToY ? 0 : y + 1;
+            }
+            if (x == startX && y == startY) return false;
+        }
+    }
+
+    // openbw: find_area(begin_x, begin_y, index)
+    // Returns the area as 4 packed ints (fromX, fromY, toX, toY).
+    public int[] FindArea(int beginX, int beginY, int index) {
+        int maxEndX = beginX + 8 < R.MapTileWidth ? beginX + 8 : R.MapTileWidth;
+        int maxEndY = beginY + 7 < R.MapTileHeight ? beginY + 7 : R.MapTileHeight;
+
+        int endX = beginX + 1;
+        int endY = beginY + 1;
+        bool xIsGood = true;
+        bool yIsGood = true;
+        bool itsAllGood = true;
+        while ((xIsGood || yIsGood) && (endX != maxEndX && endY != maxEndY)) {
+            if (xIsGood) {
+                for (int y = beginY; y != endY; ++y) {
+                    if (R.TileRegionIndex[y * 256 + endX] != index) {
+                        xIsGood = false;
+                        break;
+                    }
+                }
+            }
+            if (yIsGood) {
+                for (int x = beginX; x != endX; ++x) {
+                    if (R.TileRegionIndex[endY * 256 + x] != index) {
+                        yIsGood = false;
+                        break;
+                    }
+                }
+            }
+            if (R.TileRegionIndex[endY * 256 + endX] != index) {
+                itsAllGood = false;
+            }
+            if (itsAllGood) {
+                if (yIsGood) ++endY;
+                if (xIsGood) ++endX;
+            } else {
+                if (yIsGood) ++endY;
+                else if (xIsGood) ++endX;
+            }
+        }
+
+        int width = endX - beginX;
+        int height = endY - beginY;
+        if (width > height * 3) width = height * 3;
+        else if (height > width * 3) height = width * 3;
+        endX = beginX + width;
+        endY = beginY + height;
+
+        return new int[] { beginX, beginY, endX, endY };
+    }
+
+    // openbw: expand(r)
+    public void ExpandRegion(Region r) {
+        if (r.TileAreaFromX > 0) --r.TileAreaFromX;
+        if (r.TileAreaFromY > 0) --r.TileAreaFromY;
+        if (r.TileAreaToX < R.MapTileWidth) ++r.TileAreaToX;
+        if (r.TileAreaToY < R.MapTileHeight) ++r.TileAreaToY;
+
+        int flags = r.Flags;
+        int index = r.Index;
+
+        for (int i = 0; i < 2; ++i) {
+            for (int y = r.TileAreaFromY; y != r.TileAreaToY; ++y) {
+                for (int x = r.TileAreaFromX; x != r.TileAreaToX; ++x) {
+                    if (R.TileRegionIndex[y * 256 + x] == flags && IsNeighbor(x, y, index)) {
+                        R.TileRegionIndex[y * 256 + x] = index;
+                    }
+                }
+            }
+        }
+    }
+
+    // The is_neighbor lambda of expand()
+    public bool IsNeighbor(int x, int y, int index) {
+        if (x != 0 && R.TileRegionIndex[y * 256 + x - 1] == index) return true;
+        if (x != R.MapTileWidth - 1 && R.TileRegionIndex[y * 256 + x + 1] == index) return true;
+        if (y != 0 && R.TileRegionIndex[(y - 1) * 256 + x] == index) return true;
+        if (y != R.MapTileHeight - 1 && R.TileRegionIndex[(y + 1) * 256 + x] == index) return true;
+        return false;
+    }
+
+    // openbw: create_regions()
+    public void CreateRegions() {
+        int nextX = 0;
+        int nextY = 0;
+        bool hasExpandedAll = false;
+        int initialRegionsSize = R.RegionsList.Count;
+        int prevSize = 7 * 8;
+
+        while (true) {
+            int startX = nextX;
+            int startY = nextY;
+            if (startX >= R.MapTileWidth) {
+                startX = 0;
+                ++startY;
+                if (startY >= R.MapTileHeight) startY = 0;
+            }
+            if (FindEmptyRegion(startX, startY)) {
+                int[] area = FindArea(RegionX, RegionY, RegionTileIndex);
+
+                int size = (area[2] - area[0]) * (area[3] - area[1]);
+                if (size < prevSize) {
+                    int[] bestArea = area;
+                    int bestSize = size;
+
+                    for (int n = 0; n != 25; ++n) {
+                        if (!FindEmptyRegion(area[2], RegionY)) break;
+                        area = FindArea(RegionX, RegionY, RegionTileIndex);
+                        size = (area[2] - area[0]) * (area[3] - area[1]);
+                        if (size > bestSize) {
+                            bestSize = size;
+                            bestArea = area;
+                            if (size >= prevSize) break;
+                        }
+                    }
+
+                    area = bestArea;
+                    size = bestSize;
+                }
+
+                prevSize = size;
+
+                nextX = area[2];
+                nextY = area[1];
+
+                if (R.RegionsList.Count >= 5000) {
+                    throw new Exception("too many regions (nooks and crannies)");
+                }
+
+                Region r = CreateRegion(area[0], area[1], area[2], area[3]);
+                ExpandRegion(r);
+
+                if (size <= 6 && !hasExpandedAll) {
+                    hasExpandedAll = true;
+                    for (int i = initialRegionsSize; i != R.RegionsList.Count; ++i) {
+                        ExpandRegion(R.RegionsList[i]);
+                    }
+                }
+            } else {
+                if (R.RegionsList.Count >= 5000) {
+                    throw new Exception("too many regions (nooks and crannies)");
+                }
+                break;
+            }
+        }
+    }
+}

@@ -1,0 +1,126 @@
+using System;
+
+// Synthetic terrain for the regions layer.
+//
+// The regions layer (regions_t) is normally built from the original game's
+// Tileset/*.vf4 terrain data plus a map's tile layout. Driving it with a
+// synthetic terrain lets the layer be developed and diffed against the C++
+// reference bed without the MPQ assets.
+//
+// The rules below are mirrored exactly by tools/cppbed/regions_bed.cpp.
+// If you change one, change the other -- otherwise the two sides compute
+// different terrain and every diff is noise.
+public class Terrain {
+    public static int TileWidth = 64;
+    public static int TileHeight = 64;
+
+    // Which synthetic terrain to build. Both sides use the same index.
+    //
+    //   0  open field with a block, a vertical wall, a horizontal wall and a
+    //      diagonal staircase
+    //   1  a spiral corridor
+    //   2  a checkerboard of pillars
+    //   3  a single narrow gap between two large walls
+    //   4  fully open (no walls at all)
+    //   5  a maze of nested rooms
+    public static int Variant = 0;
+
+    // A solid block in the middle of an otherwise open field, a vertical wall,
+    // a horizontal wall and a diagonal staircase, so that the region splitter
+    // produces regions of different shapes, flags and neighbour topologies.
+    public static bool TileIsWall(int tx, int ty) {
+        if (Variant == 0) {
+            if (tx >= 28 && tx < 36 && ty >= 28 && ty < 36) return true;
+            if (tx >= 48 && tx < 50 && ty >= 8 && ty < 40) return true;
+            if (ty >= 48 && ty < 50 && tx >= 8 && tx < 40) return true;
+            if ((tx + ty) % 17 == 0 && tx >= 8 && tx < 56 && ty >= 8 && ty < 56) return true;
+            return false;
+        }
+        if (Variant == 1) {
+            // spiral corridor: four arms separated by walls
+            bool armX = ty >= 12 && ty < 16;
+            bool armY = tx >= 12 && tx < 16;
+            if (armX && (tx < 20 || tx > 44)) return true;
+            if (armY && (ty < 20 || ty > 44)) return true;
+            if (!armX && !armY && tx >= 20 && tx < 44 && ty >= 20 && ty < 44) {
+                // hollow centre
+                return !(tx >= 26 && tx < 38 && ty >= 26 && ty < 38);
+            }
+            return false;
+        }
+        if (Variant == 2) {
+            // checkerboard of pillars
+            return (tx % 8 == 0) != (ty % 8 == 0);
+        }
+        if (Variant == 3) {
+            // two large walls with a single gap
+            if (ty >= 20 && ty < 44) {
+                if (tx >= 8 && tx < 30) return true;
+                if (tx >= 34 && tx < 56) return true;
+            }
+            return false;
+        }
+        if (Variant == 4) {
+            return false;
+        }
+        // nested rooms
+        if (tx >= 8 && tx < 56 && ty >= 8 && ty < 56) {
+            int ring = (tx < 16 || tx >= 48 || ty < 16 || ty >= 48) ? 0
+                     : ((tx < 24 || tx >= 40 || ty < 24 || ty >= 40) ? 1 : 2);
+            if (ring == 0) {
+                // outer ring wall with doorways
+                bool door = (ty == 16 && tx >= 24 && tx < 32) || (ty == 48 && tx >= 24 && tx < 32)
+                         || (tx == 16 && ty >= 24 && ty < 32) || (tx == 48 && ty >= 24 && ty < 32);
+                return !door;
+            }
+            if (ring == 1) {
+                bool door = (ty == 24 && tx >= 28 && tx < 36) || (ty == 40 && tx >= 28 && tx < 36)
+                         || (tx == 24 && ty >= 28 && ty < 36) || (tx == 40 && ty >= 28 && ty < 36);
+                return !door;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    // "Middle level" ground is a distinct tile flag, so that the region
+    // splitter sees more than one flag value.
+    public static bool TileIsMiddle(int tx, int ty) {
+        return TileIsWall(tx, ty);
+    }
+
+    // The tile flags of the synthetic map, in tile order.
+    //   flag_walkable = 1, flag_middle = 0x200,
+    //   flag_partially_walkable = 0x2000
+    public static int TileFlags(int tx, int ty) {
+        if (Variant == 6) {
+            // partially walkable tiles: the split region pass has to split
+            // them into two regions each
+            return 0x2000 | 1;
+        }
+        if (TileIsMiddle(tx, ty)) return 0x200;
+        return 1;
+    }
+
+    // The mega tile index of each tile: 0 = fully walkable, 1 = fully blocked,
+    // 2 = partially walkable (only the lower half of the 4x4 walk cells).
+    public static int MegaTileIndex(int tx, int ty) {
+        if (Variant == 6) {
+            // a field of partially walkable tiles
+            return 2;
+        }
+        return TileIsWall(tx, ty) ? 1 : 0;
+    }
+
+    // The 16 walkability flags of each mega tile.
+    //   entry 0: fully walkable
+    //   entry 1: fully blocked
+    //   entry 2: the lower two rows walkable, the upper two blocked
+    public static int Vf4Flag(int megaTile, int cell) {
+        if (megaTile == 0) return 1;
+        if (megaTile == 1) return 0;
+        // cell is sy * 4 + sx
+        int sy = cell / 4;
+        return sy >= 2 ? 1 : 0;
+    }
+}

@@ -1,0 +1,293 @@
+using System;
+
+// The top-level driver of the regions layer, mirroring
+// game_load_functions::regions_create() (openbw/bwgame.h 20035-20826).
+
+public class RegionsMain {
+    public Regions R;
+    public RegionsState S;
+    public RegionsRefresh Refresh;
+
+    public RegionsMain(Regions r) {
+        R = r;
+        S = new RegionsState(r);
+        Refresh = new RegionsRefresh(S);
+    }
+
+    // openbw: regions_create()
+    public void RegionsCreate() {
+        SetUnwalkableFlags();
+        InitTileRegionIndex();
+        S.CreateUnreachableBottomRegion();
+        S.CreateRegions();
+        Refresh.RefreshRegions();
+        MergeSmallRegions();
+        ReindexRegions();
+        Refresh.RefreshRegions();
+        CreateSplitRegions();
+        RegionsContours contours = new RegionsContours(R);
+        contours.CreateContours();
+    }
+
+    // openbw: set_unwalkable_flags()
+    public void SetUnwalkableFlags() {
+        S.SetUnwalkableFlags();
+    }
+
+    // The initial tile_region_index values come from the tile flags.
+    public void InitTileRegionIndex() {
+        for (int y = 0; y != R.MapTileHeight; ++y) {
+            for (int x = 0; x != R.MapTileWidth; ++x) {
+                int index = R.TileRegionIndex[y * 256 + x];
+                int flags = R.TileFlags[y * R.MapTileWidth + x];
+                if ((~flags & 1) != 0) index = 0x1FFD;          // not walkable
+                else if ((flags & 0x200) != 0) index = 0x1FF9;    // flag_middle
+                else if ((flags & 0x400) != 0) index = 0x1FFA;    // flag_high
+                else index = 0x1FFB;
+                R.TileRegionIndex[y * 256 + x] = index;
+            }
+        }
+    }
+
+    // openbw: the merge loop that folds small regions into their smallest
+    // neighbour of the same flags.
+    public void MergeSmallRegions() {
+        for (int n = 6; ; n += 2) {
+            // The C++ code walks the region list in reverse.
+            for (int ri = R.RegionsList.Count - 1; ri >= 0; --ri) {
+                Region r = R.RegionsList[ri];
+                if (r.TileCount == 0 || r.TileCount >= n || r.GroupIndex >= 0x4000) continue;
+
+                // The smallest neighbour of the same flags to merge into.
+                // -1 means "none yet"; regions are structs in Zan, so the
+                // C++ pointer is represented by an index.
+                int smallestNeighbor = -1;
+                foreach (int ni in r.WalkableNeighbors) {
+                    Region nr = R.RegionsList[ni];
+                    if (nr.TileCount == 0 || nr.GroupIndex >= 0x4000 || nr.Flags != r.Flags) continue;
+                    if (smallestNeighbor == -1 || nr.TileCount < R.RegionsList[smallestNeighbor].TileCount) {
+                        smallestNeighbor = ni;
+                    }
+                }
+                foreach (int ni in r.NonWalkableNeighbors) {
+                    Region nr = R.RegionsList[ni];
+                    if (nr.TileCount == 0 || nr.GroupIndex >= 0x4000 || nr.Flags != r.Flags) continue;
+                    if (smallestNeighbor == -1 || nr.TileCount < R.RegionsList[smallestNeighbor].TileCount) {
+                        smallestNeighbor = ni;
+                    }
+                }
+
+                if (smallestNeighbor != -1) {
+                    Region mergeInto = R.RegionsList[smallestNeighbor];
+                    for (int y = r.AreaFromY / 32; y != r.AreaToY / 32; ++y) {
+                        for (int x = r.AreaFromX / 32; x != r.AreaToX / 32; ++x) {
+                            int index = R.TileRegionIndex[y * 256 + x];
+                            if (index == r.Index) index = mergeInto.Index;
+                            R.TileRegionIndex[y * 256 + x] = index;
+                        }
+                    }
+                    mergeInto.TileCount += r.TileCount;
+                    r.TileCount = 0;
+                    r.Flags = 0x1FFF;
+                    if (r.AreaFromX < mergeInto.AreaFromX) mergeInto.AreaFromX = r.AreaFromX;
+                    if (r.AreaFromY < mergeInto.AreaFromY) mergeInto.AreaFromY = r.AreaFromY;
+                    if (r.AreaToX > mergeInto.AreaToX) mergeInto.AreaToX = r.AreaToX;
+                    if (r.AreaToY > mergeInto.AreaToY) mergeInto.AreaToY = r.AreaToY;
+                }
+            }
+
+            int nNonEmptyRegions = 0;
+            foreach (Region r in R.RegionsList) {
+                if (r.TileCount != 0) ++nNonEmptyRegions;
+            }
+            if (nNonEmptyRegions < 2500) break;
+        }
+    }
+
+    // openbw: the reindex pass that compacts the region list.
+    public void ReindexRegions() {
+        int[] reindex = new int[5000];
+        int newRegionCount = 0;
+        for (int i = 0; i != R.RegionsList.Count; ++i) {
+            Region r = R.RegionsList[i];
+            r.WalkableNeighbors = new List<int>();
+            r.NonWalkableNeighbors = new List<int>();
+            if (r.TileCount == 0) continue;
+            int newIndex = newRegionCount++;
+            reindex[i] = newIndex;
+            if (i != newIndex) {
+                r.Index = newIndex;
+                R.RegionsList[newIndex] = r;
+            }
+        }
+        for (int y = 0; y != R.MapTileHeight; ++y) {
+            for (int x = 0; x != R.MapTileWidth; ++x) {
+                int index = R.TileRegionIndex[y * 256 + x];
+                index = reindex[index];
+                R.TileRegionIndex[y * 256 + x] = index;
+            }
+        }
+        // resize the region list
+        List<Region> compacted = new List<Region>();
+        for (int i = 0; i != newRegionCount; ++i) {
+            compacted.Add(R.RegionsList[i]);
+        }
+        R.RegionsList = compacted;
+    }
+
+    // openbw: the split region pass, which refines partially walkable tiles
+    // into two regions each.
+    public void CreateSplitRegions() {
+        R.SplitRegions = new List<SplitRegion>();
+
+        for (int y = 0; y != R.MapTileHeight; ++y) {
+            for (int x = 0; x != R.MapTileWidth; ++x) {
+                int index = y * R.MapTileWidth + x;
+                int tileFlags = R.TileFlags[index];
+                // flag_partially_walkable = 0x2000
+                if ((~tileFlags & 0x2000) != 0) continue;
+
+                int[] neighbors = Refresh.GetNeighbors(x, y);
+                Region r = R.RegionsList[R.TileRegionIndex[y * 256 + x]];
+
+                int walkX = x * 4;
+                int walkY = y * 4;
+
+                int mask = 0;
+                int megaTileIndex = R.MegaTileIndex[index];
+                for (int sy = 0; sy != 4; ++sy) {
+                    for (int sx = 0; sx != 4; ++sx) {
+                        int flags = R.Vf4Flags[megaTileIndex * 16 + (sy * 4 + sx)];
+                        mask >>= 1;
+                        if ((~flags & 1) != 0) {
+                            mask |= 0x8000;
+                        }
+                    }
+                }
+
+                // The second region of the split; -1 means "none".
+                int r2 = -1;
+                if (!r.Walkable()) {
+                    int[] nWalkable = new int[4];
+                    nWalkable[0] = Count4x1Walkable(walkX, walkY);
+                    nWalkable[1] = Count1x4Walkable(walkX, walkY);
+                    nWalkable[2] = Count1x4Walkable(walkX + 3, walkY);
+                    nWalkable[3] = Count4x1Walkable(walkX, walkY + 3);
+                    int highestN = 0;
+                    int highestNIndex = 0;
+                    for (int i = 4; i != 0;) {
+                        --i;
+                        int n = nWalkable[i];
+                        if (n <= highestN) continue;
+                        int nindex = neighbors[i];
+                        if (nindex == r.Index) continue;
+                        if (nindex < 0x2000) {
+                            if (nindex >= 5000) continue;
+                            Region nr = R.RegionsList[nindex];
+                            if (nr.Walkable()) {
+                                highestN = n;
+                                highestNIndex = nindex;
+                            }
+                        } else {
+                            bool marked = false;
+                            if (i == 0 && Count4x1Walkable(walkX, walkY - 1) != 0) marked = true;
+                            if (i == 1 && Count1x4Walkable(walkX - 1, walkY) != 0) marked = true;
+                            if (i == 2 && Count1x4Walkable(walkX + 4, walkY) != 0) marked = true;
+                            if (i == 3 && Count4x1Walkable(walkX, walkY + 4) != 0) marked = true;
+                            if (marked) {
+                                highestN = n;
+                                highestNIndex = nindex;
+                            }
+                        }
+                    }
+                    if (highestN != 0) {
+                        if (highestNIndex < 0x2000) r2 = highestNIndex;
+                        else r2 = R.SplitRegions[highestNIndex - 0x2000].A;
+                    }
+                } else {
+                    int[] nUnwalkable = new int[8];
+                    nUnwalkable[0] = 4 - Count4x1Walkable(walkX, walkY);
+                    nUnwalkable[1] = 4 - Count1x4Walkable(walkX, walkY);
+                    nUnwalkable[2] = 4 - Count1x4Walkable(walkX + 3, walkY);
+                    nUnwalkable[3] = 4 - Count4x1Walkable(walkX, walkY + 3);
+                    nUnwalkable[4] = IsWalkableCell(walkX, walkY) ? 0 : 1;
+                    nUnwalkable[5] = IsWalkableCell(walkX + 3, walkY) ? 0 : 1;
+                    nUnwalkable[6] = IsWalkableCell(walkX, walkY + 3) ? 0 : 1;
+                    nUnwalkable[7] = IsWalkableCell(walkX + 3, walkY + 3) ? 0 : 1;
+                    int highestN = 0;
+                    int highestNIndex = 0;
+                    for (int i = 8; i != 0;) {
+                        --i;
+                        int n = nUnwalkable[i];
+                        if (n <= highestN) continue;
+                        int nindex = neighbors[i];
+                        if (nindex == r.Index) continue;
+                        if (nindex < 0x2000) {
+                            if (nindex >= 5000) continue;
+                            Region nr = R.RegionsList[nindex];
+                            if (!nr.Walkable()) {
+                                highestN = n;
+                                highestNIndex = nindex;
+                            }
+                        } else {
+                            bool marked = false;
+                            if (i == 0 && Count4x1Walkable(walkX, walkY - 1) != 4) marked = true;
+                            if (i == 1 && Count1x4Walkable(walkX - 1, walkY) != 4) marked = true;
+                            if (i == 2 && Count1x4Walkable(walkX + 4, walkY) != 4) marked = true;
+                            if (i == 3 && Count4x1Walkable(walkX, walkY + 4) != 4) marked = true;
+                            if (i == 4 && !IsWalkableCell(walkX - 1, walkY - 1)) marked = true;
+                            if (i == 5 && !IsWalkableCell(walkX + 4, walkY - 1)) marked = true;
+                            if (i == 6 && !IsWalkableCell(walkX - 1, walkY + 4)) marked = true;
+                            if (i == 7 && !IsWalkableCell(walkX + 4, walkY + 4)) marked = true;
+                            if (marked) {
+                                highestN = n;
+                                highestNIndex = nindex;
+                            }
+                        }
+                    }
+                    if (highestN != 0) {
+                        if (highestNIndex < 0x2000) r2 = highestNIndex;
+                        else r2 = R.SplitRegions[highestNIndex - 0x2000].B;
+                    }
+                }
+
+                if (r2 == -1 || r2 == r.Index) mask = r.Walkable() ? 0 : 0xffff;
+                else if (!r.Walkable() && !R.RegionsList[r2].Walkable()) mask = 0xffff;
+
+                SplitRegion sr = new SplitRegion();
+                sr.Mask = mask;
+                R.TileRegionIndex[y * 256 + x] = 0x2000 + R.SplitRegions.Count;
+                if (r.Walkable()) {
+                    sr.A = r.Index;
+                    sr.B = r2 != -1 ? r2 : r.Index;
+                } else {
+                    sr.A = r2 != -1 ? r2 : r.Index;
+                    sr.B = r.Index;
+                }
+                R.SplitRegions.Add(sr);
+            }
+        }
+    }
+
+    public int Count4x1Walkable(int walkX, int walkY) {
+        int r = 0;
+        if (IsWalkableCell(walkX, walkY)) ++r;
+        if (IsWalkableCell(walkX + 1, walkY)) ++r;
+        if (IsWalkableCell(walkX + 2, walkY)) ++r;
+        if (IsWalkableCell(walkX + 3, walkY)) ++r;
+        return r;
+    }
+
+    public int Count1x4Walkable(int walkX, int walkY) {
+        int r = 0;
+        if (IsWalkableCell(walkX, walkY)) ++r;
+        if (IsWalkableCell(walkX, walkY + 1)) ++r;
+        if (IsWalkableCell(walkX, walkY + 2)) ++r;
+        if (IsWalkableCell(walkX, walkY + 3)) ++r;
+        return r;
+    }
+
+    public bool IsWalkableCell(int walkX, int walkY) {
+        return R.IsWalkable(walkX, walkY);
+    }
+}

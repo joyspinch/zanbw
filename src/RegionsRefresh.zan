@@ -1,0 +1,200 @@
+using System;
+
+// Port of the refresh_regions() lambda and the surrounding passes of
+// game_load_functions::regions_create() (openbw/bwgame.h 20340-20531).
+
+public class RegionsRefresh {
+    public RegionsState S;
+
+    public RegionsRefresh(RegionsState s) {
+        S = s;
+    }
+
+    public Regions R { get { return S.R; } }
+
+    // openbw: get_neighbors(tile_x, tile_y) -> 8 region indices.
+    // 0x1fff marks "no neighbour in this direction". The order matters: the
+    // pathfinder and the region splitter both rely on it.
+    public int[] GetNeighbors(int tileX, int tileY) {
+        int[] r = new int[8];
+        int n = 0;
+        if (!(tileY > 0)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[(tileY - 1) * 256 + tileX];
+
+        if (!(tileX > 0)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[tileY * 256 + (tileX - 1)];
+
+        if (!(tileX + 1 < R.MapTileWidth)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[tileY * 256 + (tileX + 1)];
+
+        if (!(tileY + 1 < R.MapTileHeight)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[(tileY + 1) * 256 + tileX];
+
+        if (!(tileY > 0 && tileX > 0)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[(tileY - 1) * 256 + (tileX - 1)];
+
+        if (!(tileY > 0 && tileX + 1 < R.MapTileWidth)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[(tileY - 1) * 256 + (tileX + 1)];
+
+        if (!(tileY + 1 < R.MapTileHeight && tileX > 0)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[(tileY + 1) * 256 + (tileX - 1)];
+
+        if (!(tileY + 1 < R.MapTileHeight && tileX + 1 < R.MapTileWidth)) r[n++] = 0x1fff;
+        else r[n++] = R.TileRegionIndex[(tileY + 1) * 256 + (tileX + 1)];
+
+        return r;
+    }
+
+    // openbw: refresh_regions()
+    public void RefreshRegions() {
+        // reset areas and tile counts
+        foreach (Region r in R.RegionsList) {
+            r.AreaFromX = int.MaxValue;
+            r.AreaFromY = int.MaxValue;
+            r.AreaToX = int.MinValue;
+            r.AreaToY = int.MinValue;
+            r.TileCount = 0;
+        }
+
+        for (int y = 0; y != R.MapTileHeight; ++y) {
+            for (int x = 0; x != R.MapTileWidth; ++x) {
+                int index = R.TileRegionIndex[y * 256 + x];
+                if (index < 5000) {
+                    Region r = R.RegionsList[index];
+                    ++r.TileCount;
+                    if (r.AreaFromX > x * 32) r.AreaFromX = x * 32;
+                    if (r.AreaFromY > y * 32) r.AreaFromY = y * 32;
+                    if (r.AreaToX < (x + 1) * 32) r.AreaToX = (x + 1) * 32;
+                    if (r.AreaToY < (y + 1) * 32) r.AreaToY = (y + 1) * 32;
+                }
+            }
+        }
+
+        foreach (Region r in R.RegionsList) {
+            if (r.TileCount == 0) r.Flags = 0x1FFF;
+        }
+
+        foreach (Region r in R.RegionsList) {
+            if (r.TileCount == 0) continue;
+
+            r.WalkableNeighbors = new List<int>();
+            r.NonWalkableNeighbors = new List<int>();
+
+            for (int y = r.AreaFromY / 32; y != r.AreaToY / 32; ++y) {
+                for (int x = r.AreaFromX / 32; x != r.AreaToX / 32; ++x) {
+                    if (R.TileRegionIndex[y * 256 + x] != r.Index) continue;
+                    int[] neighbors = GetNeighbors(x, y);
+                    for (int i = 0; i != 8; ++i) {
+                        int nindex = neighbors[i];
+                        if (nindex == 0x1FFF || nindex == r.Index) continue;
+                        if (nindex >= 5000) continue;
+                        Region nr = R.RegionsList[nindex];
+                        bool add = false;
+                        if (i < 4 || !r.Walkable() || !nr.Walkable()) {
+                            add = true;
+                        } else {
+                            // The diagonal neighbour is only walkable if the
+                            // two 2x2 blocks that would have to be crossed are
+                            // walkable and at least one of the two shortcut
+                            // blocks is walkable as well.
+                            int walkX = x * 4;
+                            int walkY = y * 4;
+                            if (i == 4) {
+                                if (Is2x2Walkable(walkX - 2, walkY - 2) && Is2x2Walkable(walkX, walkY)) {
+                                    if (Is2x2Walkable(walkX - 2, walkY)) add = true;
+                                    else if (Is2x2Walkable(walkX, walkY - 2)) add = true;
+                                }
+                            } else if (i == 5) {
+                                if (Is2x2Walkable(walkX + 4, walkY - 2) && Is2x2Walkable(walkX + 2, walkY)) {
+                                    if (Is2x2Walkable(walkX + 2, walkY - 2)) add = true;
+                                    else if (Is2x2Walkable(walkX + 4, walkY)) add = true;
+                                }
+                            } else if (i == 6) {
+                                if (Is2x2Walkable(walkX, walkY + 2) && Is2x2Walkable(walkX - 2, walkY + 4)) {
+                                    if (Is2x2Walkable(walkX - 2, walkY + 2)) add = true;
+                                    else if (Is2x2Walkable(walkX, walkY + 4)) add = true;
+                                }
+                            } else if (i == 7) {
+                                if (Is2x2Walkable(walkX + 2, walkY + 2) && Is2x2Walkable(walkX + 4, walkY + 4)) {
+                                    if (Is2x2Walkable(walkX + 4, walkY + 2)) add = true;
+                                    else if (Is2x2Walkable(walkX + 2, walkY + 4)) add = true;
+                                }
+                            }
+                        }
+                        if (add) {
+                            // The C++ code only records a neighbour once.
+                            if (nr.Walkable()) {
+                                if (!r.WalkableNeighbors.Contains(nr.Index)) {
+                                    r.WalkableNeighbors.Add(nr.Index);
+                                }
+                            } else {
+                                if (!r.NonWalkableNeighbors.Contains(nr.Index)) {
+                                    r.NonWalkableNeighbors.Add(nr.Index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // openbw: the first region (regions.front()) is swapped to the back
+            // of the non-walkable neighbour list. The C++ loop keeps going
+            // after the swap, so the port does not break out of it.
+            List<int> nwn = r.NonWalkableNeighbors;
+            for (int i = 0; i != nwn.Count; ++i) {
+                if (nwn[i] == 0 && i != nwn.Count - 1) {
+                    int last = nwn[nwn.Count - 1];
+                    nwn[nwn.Count - 1] = nwn[i];
+                    nwn[i] = last;
+                }
+            }
+        }
+
+        // centres
+        foreach (Region r in R.RegionsList) {
+            r.CenterXRaw = Fp.Integer(r.TileCenterX * 32 + 16).RawValue();
+            r.CenterYRaw = Fp.Integer(r.TileCenterY * 32 + 16).RawValue();
+        }
+
+        // group assignment: flood fill over the walkable / non-walkable
+        // neighbour graphs
+        foreach (Region r in R.RegionsList) {
+            if (r.GroupIndex < 0x4000) r.GroupIndex = 0;
+        }
+
+        List<Region> stack = new List<Region>();
+        int nextGroupIndex = 1;
+        foreach (Region r in R.RegionsList) {
+            if (r.GroupIndex == 0 && r.TileCount != 0) {
+                int groupIndex = nextGroupIndex++;
+                r.GroupIndex = groupIndex;
+                stack.Add(r);
+                while (stack.Count != 0) {
+                    Region cr = stack[stack.Count - 1];
+                    stack.RemoveAt(stack.Count - 1);
+                    List<int> nbrs = cr.Walkable() ? cr.WalkableNeighbors : cr.NonWalkableNeighbors;
+                    foreach (int ni in nbrs) {
+                        Region nr = R.RegionsList[ni];
+                        if (nr.GroupIndex == 0) {
+                            nr.GroupIndex = groupIndex;
+                            stack.Add(nr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // openbw: is_2x2_walkable(walk_x, walk_y) inside refresh_regions
+    public bool Is2x2Walkable(int walkX, int walkY) {
+        return IsWalkableCell(walkX, walkY)
+            && IsWalkableCell(walkX + 1, walkY)
+            && IsWalkableCell(walkX, walkY + 1)
+            && IsWalkableCell(walkX + 1, walkY + 1);
+    }
+
+    // The refresh_regions lambda uses the 8x8 cell grid's is_walkable.
+    public bool IsWalkableCell(int walkX, int walkY) {
+        return R.IsWalkable(walkX, walkY);
+    }
+}

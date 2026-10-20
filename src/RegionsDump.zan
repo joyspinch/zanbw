@@ -1,0 +1,87 @@
+using System;
+
+// Dumps the regions layer in exactly the format of the C++ reference bed
+// (tools/cppbed/regions_bed.cpp), so the two traces can be diffed directly.
+
+public class RegionsDump {
+    public Regions R;
+
+    public RegionsDump(Regions r) {
+        R = r;
+    }
+
+    public void Dump() {
+        Console.WriteLine("regions: " + R.RegionsList.Count);
+        for (int i = 0; i < R.RegionsList.Count; i++) {
+            Region r = R.RegionsList[i];
+            Console.WriteLine("R " + i
+                + " idx=" + r.Index
+                + " flags=0x" + Hex4(r.Flags)
+                + " tile_center=" + r.TileCenterX + "," + r.TileCenterY
+                + " tile_area=" + r.TileAreaFromX + "," + r.TileAreaFromY
+                + "," + r.TileAreaToX + "," + r.TileAreaToY
+                + " center=" + r.CenterXRaw + "," + r.CenterYRaw
+                + " area=" + r.AreaFromX + "," + r.AreaFromY
+                + "," + r.AreaToX + "," + r.AreaToY
+                + " tiles=" + r.TileCount
+                + " group=" + r.GroupIndex
+                + " wn=" + r.WalkableNeighbors.Count
+                + " nwn=" + r.NonWalkableNeighbors.Count
+                + " walkable=" + (r.Walkable() ? 1 : 0));
+        }
+
+        for (int i = 0; i < R.RegionsList.Count; i++) {
+            Region r = R.RegionsList[i];
+            string line = "N " + i + " w:";
+            foreach (int n in r.WalkableNeighbors) {
+                line = line + " " + n;
+            }
+            line = line + " nw:";
+            foreach (int n in r.NonWalkableNeighbors) {
+                line = line + " " + n;
+            }
+            Console.WriteLine(line);
+        }
+
+        string tri = "TRI";
+        for (int y = 0; y < R.MapTileHeight; y++) {
+            for (int x = 0; x < R.MapTileWidth; x++) {
+                tri = tri + " " + R.TileRegionIndex[y * 256 + x];
+            }
+        }
+        Console.WriteLine(tri);
+
+        Console.WriteLine("split_regions: " + R.SplitRegions.Count);
+        for (int i = 0; i < R.SplitRegions.Count; i++) {
+            SplitRegion s = R.SplitRegions[i];
+            Console.WriteLine("S " + i + " mask=0x" + Hex4(s.Mask)
+                + " a=" + s.A + " b=" + s.B);
+        }
+
+        for (int d = 0; d < 4; d++) {
+            List<Contour> c = R.Contours[d];
+            Console.WriteLine("C " + d + " count=" + c.Count);
+            for (int i = 0; i < c.Count; i++) {
+                Contour ct = c[i];
+                Console.WriteLine("C " + d + " " + i
+                    + " " + ct.V0 + "," + ct.V1 + "," + ct.V2
+                    + " dir=" + ct.Dir
+                    + " flags=0x" + Hex2(ct.Flags));
+            }
+        }
+    }
+
+    public string Hex4(int v) {
+        string s = Hex2(v >> 8);
+        return s + Hex2(v & 0xff);
+    }
+
+    public string Hex2(int v) {
+        string digits = "0123456789abcdef";
+        string s = "";
+        for (int i = 1; i >= 0; i--) {
+            s = s + digits[(v >> (i * 4)) & 0xf];
+        }
+        return s;
+    }
+}

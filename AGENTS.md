@@ -18,17 +18,31 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/Sim.zan` | movement 状态机（UM_*）、repulse 场、边界钳制 |
 | `src/Scenario.zan` | 场景描述与解析（两侧共用同一字符串格式） |
 | `src/main.zan` | 无头仿真主循环 + trace 输出 |
+| `src/Terrain.zan` | 合成地形规格（regions 层用，与 C++ 床逐条对应） |
+| `src/Regions.zan` | regions 层数据结构（region / split_region / contour） |
+| `src/RegionsCreate.zan` | `regions_create()` 的粗区域划分部分 |
+| `src/RegionsRefresh.zan` | `refresh_regions()`：面积、tile 数、邻居、连通组 |
+| `src/RegionsMain.zan` | 主流程 + 合并小区域 + reindex + split_regions |
+| `src/RegionsContours.zan` | contours（精细边界，短线寻路依赖） |
+| `src/RegionsDump.zan` | regions 层的 trace 输出（与 C++ 床同格式） |
+| `src/regions_main.zan` | regions 层对拍入口 |
 | `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
-| `check.sh` | 一键逐位对拍 |
+| `tools/cppbed/regions_bed.cpp` | regions 层的 C++ 对照床 |
+| `check.sh` | 运动学层一键逐位对拍 |
+| `check_regions.sh` | regions 层一键逐位对拍 |
 
 ## 构建与验证
 
 ```bash
-# 全部场景对拍（9 个场景 × 900 帧）
+# 运动学层对拍（9 个场景 × 900 帧）
 bash check.sh
 
-# 单场景
+# regions 层对拍（7 个地形变体）
+bash check_regions.sh
+
+# 单场景 / 单变体
 bash check.sh s6 900
+bash check_regions.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -120,6 +134,55 @@ trace 末尾的审计行（各 source 调用次数 + 最终状态）是对拍的
 
 `xy_direction(xy)` 用 `fp8::integer(pos.y) / pos.x`——**整数除法**，
 不是 fp8 除法。两者结果差 256 倍。
+
+### 8. 移植时优先选 class 而非 struct：值语义会静默丢写
+
+C++ 里 `regions_t::region` 全程以指针传递（`region*` 放进邻居表、就地改字段）。
+Zan 的 `struct` 是**值语义**——`Region r = list[i]` 拿到的是**副本**，
+`++r.TileCount` 改的是副本，编译器一声不吭。移植这类"实体被到处传引用"的
+C++ 结构时，一律用 `class`（引用语义）。
+
+判据：**C++ 里如果这个类型是指针参数或存进指针容器，就用 class。**
+
+### 9. 同一模块里有两个不同粒度的"可走"概念
+
+regions 层里同时存在：
+
+- **8×8 单元网格**（`unwalkable_flags`，`is_walkable(walk_x, walk_y)`）——
+  由 mega tile 的 vf4 位展开而来，**region 划分、邻居判定、contour 都用它**
+- **tile 级**（`is_walkable(xy)`，读 `st.tiles[].flags`）——
+  用于单位能否站在某 tile 上
+
+混淆两者会让 split_regions / 邻居判定全错。移植时逐个调用点确认用的是哪个。
+
+### 10. tile flag 的位值不要凭记忆
+
+`tile_t` 的标志位是：
+
+| 标志 | 值 |
+|------|-----|
+| `flag_walkable` | 0x1 |
+| `flag_has_creep` | 0x40 |
+| `flag_very_high` | 0x100 |
+| `flag_middle` | 0x200 |
+| `flag_high` | 0x400 |
+| `flag_occupied` | 0x800 |
+| `flag_partially_walkable` | **0x2000** |
+
+`flag_partially_walkable` 不是 0x800（那是 `flag_occupied`）。写错会让
+split_regions 整条路径静默不执行——**测试要专门覆盖它**。
+
+### 11. 合成数据也要覆盖"少见路径"
+
+regions 层第一次只对上了粗区域，`split_regions` 恒为 0——因为合成地形里
+没有 partially-walkable tile。**覆盖缺口不会自己暴露**，要主动设计地形变体
+（螺旋、棋盘、窄门、嵌套房间、部分可走）去逼出不同代码路径。
+
+### 12. `std::sort` 不稳定，但只在有重复键时才要紧
+
+contour 按 `(v[0], v[1])` 排序。Zan 侧用稳定插入排序——只要没有两个
+contour 的 `(v[0], v[1])` 相同，结果就与 `std::sort` 一致。移植前先确认
+参照输出里没有重复键（`sort | uniq -d`），否则得实现同形状的非稳定排序。
 
 ## 已知 zanc 缺陷
 

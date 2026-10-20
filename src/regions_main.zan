@@ -1,0 +1,39 @@
+using System;
+
+// Entry point of the regions-layer differential test.
+//
+//   zanbw.exe regions            -- build the regions and dump them
+//
+// The output format matches tools/cppbed/regions_bed.cpp exactly.
+
+public class RegionsMainProgram {
+    static int Main(string[] args) {
+        if (args.Length >= 1) {
+            Terrain.Variant = Convert.ToInt32(args[0]);
+        }
+
+        Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
+
+        for (int y = 0; y < Terrain.TileHeight; y++) {
+            for (int x = 0; x < Terrain.TileWidth; x++) {
+                r.MegaTileIndex[y * Terrain.TileWidth + x] = Terrain.MegaTileIndex(x, y);
+                r.TileFlags[y * Terrain.TileWidth + x] = Terrain.TileFlags(x, y);
+            }
+        }
+
+        // Synthetic vf4: entry 0 walkable, entry 1 blocked, entry 2 partially
+        // walkable (lower two rows of walk cells only).
+        for (int i = 0; i < 16; i++) {
+            r.Vf4Flags[i] = 1;
+            r.Vf4Flags[16 + i] = 0;
+            r.Vf4Flags[32 + i] = (i / 4 >= 2) ? 1 : 0;
+        }
+
+        RegionsMain main = new RegionsMain(r);
+        main.RegionsCreate();
+
+        RegionsDump dump = new RegionsDump(r);
+        dump.Dump();
+        return 0;
+    }
+}

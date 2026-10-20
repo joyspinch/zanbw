@@ -1,0 +1,170 @@
+using System;
+
+// The regions layer (openbw's regions_t) is the input of the pathfinder.
+//
+// This is a direct port of game_load_functions::regions_create() in
+// openbw/bwgame.h (lines 20035-20826), including its sub-steps:
+//
+//   set_unwalkable_flags()   -> the 8x8 walk-cell grid
+//   create_unreachable_bottom_region()
+//   create_regions()         -> the coarse region split
+//   refresh_regions()        -> areas, tile counts, neighbours, groups
+//   split region pass        -> the fine 8x8 refinement
+//   create_contours()        -> the contour edges
+//
+// The C++ original works on 256-wide rows of tile_region_index and on
+// size_t counters; the port keeps the same layout so that the indices line
+// up one to one.
+
+// openbw's regions_t::region is manipulated through pointers everywhere
+// (the splitter hands region* to the neighbour lists and rewrites their
+// fields in place), so the port models it as a *class* (reference semantics)
+// rather than a struct (value semantics). Using a struct here would silently
+// copy on every list access and lose the writes.
+public class Region {
+    public int Flags;
+    public int Index;
+    public int TileCenterX;
+    public int TileCenterY;
+    public int TileAreaFromX;
+    public int TileAreaFromY;
+    public int TileAreaToX;
+    public int TileAreaToY;
+    public int CenterXRaw;
+    public int CenterYRaw;
+    public int AreaFromX;
+    public int AreaFromY;
+    public int AreaToX;
+    public int AreaToY;
+    public int TileCount;
+    public int GroupIndex;
+
+    // neighbour region indices, in the order the C++ code builds them
+    public List<int> WalkableNeighbors;
+    public List<int> NonWalkableNeighbors;
+
+    public Region() {
+        Flags = 0x1FFD;
+        Index = -1;
+    }
+
+    // openbw: bool walkable() const { return flags != 0x1ffd; }
+    public bool Walkable() {
+        return Flags != 0x1FFD;
+    }
+}
+
+// openbw's regions_t::split_region holds region pointers, so the port uses a
+// class (reference semantics) as well.
+public class SplitRegion {
+    public int Mask;
+    public int A;
+    public int B;
+}
+
+public struct Contour {
+    public int V0;
+    public int V1;
+    public int V2;
+    public int Dir;
+    public int Flags;
+}
+
+public class Regions {
+    // The 8x8 walk-cell grid: one byte per cell, bit 0x80 = unwalkable,
+    // bits 0..3 = "this direction is unwalkable".
+    public byte[] UnwalkableFlags;
+
+    // tile_region_index: 256 columns per row, indexed by tile.
+    public int[] TileRegionIndex;
+
+    public List<Region> RegionsList;
+    public List<SplitRegion> SplitRegions;
+    public List<List<Contour>> Contours;
+
+    public int MapTileWidth;
+    public int MapTileHeight;
+    public int MapWalkWidth;
+    public int MapWalkHeight;
+    public int MapWidth;
+    public int MapHeight;
+
+    // Synthetic vf4-like terrain: per tile, a mega tile index; each mega tile
+    // has 16 walkability flags.
+    public int[] MegaTileIndex;
+    public int[] Vf4Flags;   // 2 entries * 16 flags
+    public int[] TileFlags;
+
+    public Regions(int tileWidth, int tileHeight) {
+        MapTileWidth = tileWidth;
+        MapTileHeight = tileHeight;
+        MapWalkWidth = tileWidth * 4;
+        MapWalkHeight = tileHeight * 4;
+        MapWidth = tileWidth * 32;
+        MapHeight = tileHeight * 32;
+
+        UnwalkableFlags = new byte[256 * 4 * 256 * 4];
+        TileRegionIndex = new int[256 * 256];
+        RegionsList = new List<Region>();
+        SplitRegions = new List<SplitRegion>();
+        Contours = new List<List<Contour>>();
+        for (int i = 0; i < 4; i++) {
+            Contours.Add(new List<Contour>());
+        }
+        MegaTileIndex = new int[tileWidth * tileHeight];
+        TileFlags = new int[tileWidth * tileHeight];
+        Vf4Flags = new int[3 * 16];
+    }
+
+    // ---------------------------------------------------------------- flags
+
+    public bool IsUnwalkable(int walkX, int walkY) {
+        return (UnwalkableFlags[walkY * 256 * 4 + walkX] & 0x80) != 0;
+    }
+
+    public bool IsWalkable(int walkX, int walkY) {
+        return (~UnwalkableFlags[walkY * 256 * 4 + walkX] & 0x80) != 0;
+    }
+
+    public void SetUnwalkable(int walkX, int walkY) {
+        UnwalkableFlags[walkY * 256 * 4 + walkX] |= 0x80;
+    }
+
+    public bool IsDirWalkable(int walkX, int walkY, int dir) {
+        return (~UnwalkableFlags[walkY * 256 * 4 + walkX] & (1 << dir)) != 0;
+    }
+
+    public bool IsDirUnwalkable(int walkX, int walkY, int dir) {
+        return (UnwalkableFlags[walkY * 256 * 4 + walkX] & (1 << dir)) != 0;
+    }
+
+    public void SetDirUnwalkable(int walkX, int walkY, int dir) {
+        UnwalkableFlags[walkY * 256 * 4 + walkX] |= (byte)(1 << dir);
+    }
+
+    public void FlipDirWalkable(int walkX, int walkY, int dir) {
+        UnwalkableFlags[walkY * 256 * 4 + walkX] ^= (byte)(1 << dir);
+    }
+
+    public bool IsEveryDirWalkable(int walkX, int walkY) {
+        return (UnwalkableFlags[walkY * 256 * 4 + walkX] & 0x7f) == 0;
+    }
+
+    // openbw: is_walkable(xy pos) -- the tile level variant used by the
+    // region splitter. It consults the tile flags and, for partially
+    // walkable tiles, the vf4 terrain bits.
+    public bool IsWalkableTile(int posX, int posY) {
+        int index = posY * MapTileWidth + posX;
+        int flags = TileFlags[index];
+        if ((flags & 0x40) != 0) return true;              // flag_has_creep
+        if ((flags & 0x2000) != 0) {                        // flag_partially_walkable
+            int mega = MegaTileIndex[index];
+            int ux = posX;
+            int uy = posY;
+            int f = Vf4Flags[mega * 16 + (uy / 8 % 4 * 4 + ux / 8 % 4)];
+            return (f & 1) != 0;                             // vf4 flag_walkable
+        }
+        if ((flags & 1) != 0) return true;                  // flag_walkable
+        return false;
+    }
+}

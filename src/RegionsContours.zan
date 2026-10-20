@@ -1,0 +1,196 @@
+using System;
+
+// Port of the create_contours() lambda of
+// game_load_functions::regions_create() (openbw/bwgame.h 20669-20803).
+//
+// Contours are the fine-grained edges of the walkable area; the short-path
+// search of the pathfinder walks along them.
+
+public class RegionsContours {
+    public Regions R;
+
+    public RegionsContours(Regions r) {
+        R = r;
+    }
+
+    public void CreateContours() {
+        for (int i = 0; i < 4; i++) {
+            R.Contours[i] = new List<Contour>();
+        }
+
+        int nextX = 0;
+        int nextY = 0;
+
+        // The C++ "next" lambda: find the next contour start point.
+        // Returns false when the whole map has been scanned.
+        bool more = true;
+        while (more) {
+            int x = nextX;
+            int y = nextY;
+            if (x >= R.MapWalkWidth) {
+                x = 0;
+                ++y;
+                if (y >= R.MapWalkHeight) y = 0;
+            }
+            x = x / 4 * 4;
+            int startX = x;
+            int startY = y;
+            bool wrapped = false;
+            while (R.IsEveryDirWalkable(x, y) && R.IsEveryDirWalkable(x + 1, y)
+                   && R.IsEveryDirWalkable(x + 2, y) && R.IsEveryDirWalkable(x + 3, y)) {
+                x += 4;
+                if (x == R.MapWalkWidth) {
+                    x = 0;
+                    ++y;
+                    if (y == R.MapWalkHeight) {
+                        y = 0;
+                    }
+                }
+                if (x == startX && y == startY) {
+                    wrapped = true;
+                    break;
+                }
+            }
+            if (wrapped) {
+                more = false;
+                break;
+            }
+            while (!R.IsWalkable(x, y) || R.IsEveryDirWalkable(x, y)) {
+                ++x;
+                if (x == R.MapWalkWidth) {
+                    more = false;
+                    break;
+                }
+            }
+            if (!more) break;
+
+            nextX = x;
+            nextY = y;
+
+            int[] clut = new int[] { -1, -1, 8, -1, 8, 8, -1, 8, 0, -1, 8, 0, 7, 8, -1, 7 };
+            int[] nlut = new int[] { 8, -1, 8, 8, -1, 8, -1, -1, 7, -1, 8, 7, 0, 8, -1, 0 };
+
+            if (R.IsDirWalkable(x, y, 0) && R.IsDirWalkable(x, y, 1) && R.IsDirUnwalkable(x, y, 2)) {
+                ++y;
+                --x;
+            }
+            int firstUnwalkableDir = 0;
+            int lut1val = (R.IsDirUnwalkable(x, y, 0) && R.IsDirUnwalkable(x, y, 3)) ? 0 : 1;
+            for (int i = 0; i < 4; ++i) {
+                if (R.IsDirUnwalkable(x, y, i)) {
+                    firstUnwalkableDir = i;
+                    break;
+                }
+            }
+
+            int clutIndex = firstUnwalkableDir + 4 * lut1val;
+            int startCx = clut[clutIndex * 2] + x * 8;
+            int startCy = clut[clutIndex * 2 + 1] + y * 8;
+
+            R.FlipDirWalkable(x, y, firstUnwalkableDir);
+
+            int cx = startCx;
+            int cy = startCy;
+
+            int curDir = firstUnwalkableDir;
+            while (true) {
+                int nextDir = (curDir + 1) & 3;
+                int relx = nextDir == 1 ? 1 : nextDir == 3 ? -1 : 0;
+                int rely = nextDir == 0 ? -1 : nextDir == 2 ? 1 : 0;
+                R.FlipDirWalkable(x, y, curDir);
+                int nextWalkable = 0;
+                if (R.IsDirWalkable(x, y, nextDir)) {
+                    nextWalkable = 1;
+                    while (R.IsDirUnwalkable(x + relx, y + rely, curDir)) {
+                        x += relx;
+                        y += rely;
+                        R.FlipDirWalkable(x, y, curDir);
+                        if (R.IsDirUnwalkable(x, y, nextDir)) {
+                            nextWalkable = 0;
+                            break;
+                        }
+                    }
+                }
+                int nlutIndex = curDir + 4 * nextWalkable;
+
+                int nx = nlut[nlutIndex * 2] + x * 8;
+                int ny = nlut[nlutIndex * 2 + 1] + y * 8;
+
+                int flags0 = curDir ^ 2 * lut1val ^ ((~(2 * curDir)) & 3);
+                int flags1 = curDir ^ 2 * (nextWalkable ^ (curDir & 1)) ^ 1;
+
+                Contour c = new Contour();
+                c.Dir = curDir;
+                if (curDir == 0) {
+                    c.Flags = (flags0 & 3) | 4 * ((flags1 & 3) | 4 * (lut1val | 2 * nextWalkable));
+                    c.V0 = cy; c.V1 = cx; c.V2 = nx;
+                } else if (curDir == 1) {
+                    c.Flags = (flags0 & 3) | 4 * ((flags1 & 3) | 4 * (lut1val | 2 * nextWalkable));
+                    c.V0 = cx; c.V1 = cy; c.V2 = ny;
+                } else if (curDir == 2) {
+                    c.Flags = (flags1 & 3) | 4 * ((flags0 & 3) | 4 * (nextWalkable | 2 * lut1val));
+                    c.V0 = cy; c.V1 = nx; c.V2 = cx;
+                } else {
+                    c.Flags = (flags1 & 3) | 4 * ((flags0 & 3) | 4 * (nextWalkable | 2 * lut1val));
+                    c.V0 = cx; c.V1 = ny; c.V2 = cy;
+                }
+                R.Contours[curDir].Add(c);
+
+                if (!nextWalkable) {
+                    curDir = nextDir;
+                } else {
+                    int[] nrelX = new int[] { 1, 1, -1, -1 };
+                    int[] nrelY = new int[] { -1, 1, 1, -1 };
+                    x += nrelX[curDir];
+                    y += nrelY[curDir];
+                    if (curDir == 0) curDir = 3;
+                    else --curDir;
+                }
+                cx = nx;
+                cy = ny;
+                lut1val = nextWalkable;
+
+                if (cx == startCx && cy == startCy) break;
+            }
+
+            R.FlipDirWalkable(x, y, curDir);
+        }
+
+        // sort each contour list by (v[0], v[1])
+        for (int d = 0; d != 4; ++d) {
+            SortContours(R.Contours[d]);
+        }
+    }
+
+    // openbw: std::sort by (v[0], then v[1]).
+    // The C++ std::sort is not stable, so the port uses the same
+    // comparison-based merge sort shape; equal elements keep their relative
+    // order only if the comparison never distinguishes them, which is the
+    // same situation as in the original.
+    public void SortContours(List<Contour> list) {
+        List<Contour> sorted = new List<Contour>();
+        List<Contour> pending = new List<Contour>();
+        foreach (Contour c in list) {
+            pending.Add(c);
+        }
+        // insertion into a sorted list, mirroring the comparison of the
+        // original: v[0] first, then v[1]
+        foreach (Contour c in pending) {
+            int pos = 0;
+            while (pos < sorted.Count) {
+                Contour o = sorted[pos];
+                if (o.V0 != c.V0) {
+                    if (o.V0 < c.V0) { ++pos; continue; }
+                    break;
+                }
+                if (o.V1 < c.V1) { ++pos; continue; }
+                break;
+            }
+            sorted.Insert(pos, c);
+        }
+        list.Clear();
+        foreach (Contour c in sorted) {
+            list.Add(c);
+        }
+    }
+}
