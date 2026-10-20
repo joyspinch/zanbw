@@ -40,6 +40,7 @@ public class Pathfinder {
         R = r;
         Search = new AStar(r);
         LongPath = new List<int>();
+        ShortPath = new List<int[]>();
     }
 
     // openbw: get_region_at(xy pos)
@@ -107,6 +108,8 @@ public class Pathfinder {
 
         LongPath = new List<int>();
         FullLongPathSize = 0;
+        // openbw: pf.current_long_path_index = (size_t)0 - 1;
+        CurrentLongPathIndex = -1;
         int goalNode = Search.GoalNode;
         int fullPathSize = 0;
 

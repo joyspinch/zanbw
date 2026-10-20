@@ -1,0 +1,329 @@
+using System;
+
+// The path lifecycle: planning a route for a unit, handing it over as a
+// path_t, and re-planning when the unit runs out of waypoints.
+//
+// Port of openbw/bwgame.h:
+//   path_progress()             10773-10859
+//   create_single_step_path()   10861-10888
+//   unit_path_to()              10890-10906
+//   is_moving_along_path()      9147-9160
+//   set_unit_move_target()      8580-8592
+//   set_flingy_move_target()    8571-8578
+//   restrict_move_target_to_valid_bounds()  763-765
+//   pathfinder_find()           10729-10747
+
+public class PathProgress {
+    public Regions R;
+    public Sim Sim;
+    public Unit U;
+
+    // The unit's path, or null when it has none.
+    public Path Current;
+
+    public int CurrentFrame;
+    public bool Trace;
+
+    // The move target the unit was last ordered to. The unit's own
+    // MoveTargetPos is the single source of truth; these are shortcuts.
+    public int MoveTargetX;
+    public int MoveTargetY;
+
+    // openbw: st.consider_collision_with_unit_bug
+    public bool HasCollisionUnit;
+    public int CollisionUnitId;
+
+    public PathProgress(Regions r, Sim sim, Unit u) {
+        R = r;
+        Sim = sim;
+        U = u;
+        Current = null;
+    }
+
+    // openbw: u_set_movement_flag / u_unset_movement_flag
+    public void SetMovementFlag(int flag) { U.MovementFlags = U.MovementFlags | flag; }
+    public void UnsetMovementFlag(int flag) { U.MovementFlags = U.MovementFlags & ~flag; }
+    public bool MovementFlag(int flag) { return (U.MovementFlags & flag) != 0; }
+
+    // openbw: is_moving_along_path(u)
+    public bool IsMovingAlongPath() {
+        if (Current == null) return false;
+        if (Current.NextX == U.Position.X && Current.NextY == U.Position.Y) return false;
+        if (Current.NextX == U.MoveTargetPos.X && Current.NextY == U.MoveTargetPos.Y) return true;
+        if (U.FlingyMovementType != 0) return true;
+        int remainingDistance = XyLength(Current.NextX - U.Position.X, Current.NextY - U.Position.Y);
+        if (remainingDistance > 16) return true;
+        // openbw: fp8::extend(u->desired_velocity_direction -
+        //                      u->next_velocity_direction).abs()
+        int turn = Fp.ExtendFromDir(U.DesiredVelocityDirection.RawValue()
+                                    - U.NextVelocityDirection.RawValue()).Abs().RawValue();
+        if (turn <= remainingDistance * 2) return true;
+        if (Current.CurrentShortPathIndex >= Current.ShortPath.Count - 1) {
+            int region = R.RegionsList[GetRegionAt(U.Position.X, U.Position.Y)].Index;
+            if (region != Current.LongPath[Current.CurrentLongPathIndex]) return true;
+        }
+        return false;
+    }
+
+    // openbw: int xy_length(xy vec) const {
+    //     unsigned int x = std::abs(vec.x);
+    //     unsigned int y = std::abs(vec.y);
+    //     if (x < y) std::swap(x, y);
+    //     if (x / 4 < y) x = x - x / 16 + y * 3 / 8 - x / 64 + y * 3 / 256;
+    //     return x;
+    // }
+    //
+    // This is an approximation, not an exact square root -- using an exact
+    // sqrt here changes the waypoint decisions.
+    public static int XyLength(int vx, int vy) {
+        int x = vx < 0 ? -vx : vx;
+        int y = vy < 0 ? -vy : vy;
+        if (x < y) {
+            int t = x;
+            x = y;
+            y = t;
+        }
+        if (x / 4 < y) {
+            x = x - x / 16 + y * 3 / 8 - x / 64 + y * 3 / 256;
+        }
+        return x;
+    }
+
+    // openbw: get_region_at(xy pos)
+    public int GetRegionAt(int posX, int posY) {
+        int index = R.TileRegionIndex[(posY / 32) * 256 + (posX / 32)];
+        if (index >= 0x2000) {
+            int maskIndex = ((posY / 8) & 3) * 4 + ((posX / 8) & 3);
+            SplitRegion split = R.SplitRegions[index - 0x2000];
+            if ((split.Mask & (1 << maskIndex)) != 0) return split.B;
+            else return split.A;
+        }
+        return index;
+    }
+
+    // openbw: restrict_move_target_to_valid_bounds(ut, move_target)
+    public int[] RestrictMoveTarget(int posX, int posY) {
+        // The bounds are map_bounds() + { {0, 0}, {0, -32} }.
+        Xy res = Sim.RestrictUnitPosToBounds(new Xy(posX, posY), U.UnitType,
+                                            new Xy(0, 0), new Xy(Sim.MapWidth, Sim.MapHeight - 32));
+        return new int[] { res.X, res.Y };
+    }
+
+    // openbw: set_unit_move_target(u, move_target)
+    public void SetUnitMoveTarget(int posX, int posY) {
+        if (U.MoveTargetPos.X == posX && U.MoveTargetPos.Y == posY) return;
+        if (Current != null) Current.StateFlags = Current.StateFlags | 1;
+        int[] restricted = RestrictMoveTarget(posX, posY);
+        SetFlingyMoveTarget(restricted[0], restricted[1]);
+        if (U.HasStatusFlag(StatusFlag.Immovable)) U.ClearStatus(StatusFlag.Immovable);
+        U.MoveTargetTimer = 15;
+    }
+
+    // openbw: set_flingy_move_target(u, target_pos)
+    public void SetFlingyMoveTarget(int posX, int posY) {
+        if (U.MoveTargetPos.X == posX && U.MoveTargetPos.Y == posY) return;
+        U.MoveTargetPos = new Xy(posX, posY);
+        U.NextMovementWaypoint = new Xy(posX, posY);
+        UnsetMovementFlag(4);
+        SetMovementFlag(1);
+    }
+
+    // openbw: pathfinder_find(pf, short_path_only)
+    private bool PathfinderFind(Pathfinder pf, bool shortPathOnly) {
+        pf.SourceRegion = GetRegionAt(pf.Source, pf.SourceY);
+        pf.DestinationRegion = GetRegionAt(pf.Destination, pf.DestinationY);
+        pf.ShortHighestOpenSize = 0;
+        pf.ShortAllNodesSize = 0;
+        pf.LongAllNodesSize = 0;
+        pf.LongHighestOpenSize = 0;
+        pf.DestinationReached = false;
+        pf.IsStuck = false;
+        if (shortPathOnly) {
+            ShortPathNext next = new ShortPathNext(R, pf);
+            next.DimFromX = U.UnitType.DimensionsFrom.X;
+            next.DimFromY = U.UnitType.DimensionsFrom.Y;
+            next.DimToX = U.UnitType.DimensionsTo.X;
+            next.DimToY = U.UnitType.DimensionsTo.Y;
+            next.Trace = Trace;
+            return next.FindNextShortPath();
+        }
+        if (pf.SourceRegion == pf.DestinationRegion) {
+            pf.LongPath = new List<int>();
+            pf.LongPath.Add(pf.SourceRegion);
+            pf.FullLongPathSize = 1;
+            pf.CurrentLongPathIndex = -1;
+        } else {
+            // openbw: pathfinder_find_long_path(pf) -- the source and the
+            // destination regions are already set.
+            if (!pf.FindLongPathInner(pf.Source, pf.SourceY, pf.Destination, pf.DestinationY)) {
+                return false;
+            }
+        }
+        ShortPathNext next = new ShortPathNext(R, pf);
+        next.DimFromX = U.UnitType.DimensionsFrom.X;
+        next.DimFromY = U.UnitType.DimensionsFrom.Y;
+        next.DimToX = U.UnitType.DimensionsTo.X;
+        next.DimToY = U.UnitType.DimensionsTo.Y;
+        next.Trace = Trace;
+        return next.FindNextShortPath();
+    }
+
+    // openbw: path_progress(u, to, ...)
+    public bool PathProgressTo(int toX, int toY) {
+        UnsetMovementFlag(0x40);
+        SetMovementFlag(0x10);
+
+        Pathfinder pf = new Pathfinder(R);
+        bool findNewPath = true;
+        if (Current != null) {
+            Current.CurrentShortPathIndex++;
+            if (Current.CurrentShortPathIndex < Current.ShortPath.Count) {
+                findNewPath = false;
+            } else {
+                pf.Source = U.Position.X;
+                pf.SourceY = U.Position.Y;
+                pf.Destination = Current.DestinationX;
+                pf.DestinationY = Current.DestinationY;
+                pf.LongPath = Current.LongPath;
+                pf.FullLongPathSize = Current.FullLongPathSize;
+                pf.CurrentLongPathIndex = Current.CurrentLongPathIndex;
+                pf.ShortPath = Current.ShortPath;
+                pf.ShortPathIndex = Current.CurrentShortPathIndex;
+                Current = null;
+                if (pf.CurrentLongPathIndex + 1 < pf.LongPath.Count) {
+                    if (pf.FullLongPathSize == pf.LongPath.Count
+                        || pf.CurrentLongPathIndex + 4 < pf.LongPath.Count) {
+                        if (pf.Source != pf.Destination || pf.SourceY != pf.DestinationY) {
+                            if (PathfinderFind(pf, true)) {
+                                if (pf.LongPath.Count != 0 && pf.ShortPath.Count != 0) findNewPath = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (findNewPath) {
+            pf.Source = U.Position.X;
+            pf.SourceY = U.Position.Y;
+            pf.Destination = toX;
+            pf.DestinationY = toY;
+            PathfinderFind(pf, false);
+            if (pf.LongPath.Count == 0 || pf.ShortPath.Count == 0) return false;
+        }
+
+        if (Current == null) {
+            if (pf.DestinationReached) {
+                if (toX != pf.Destination || toY != pf.DestinationY) {
+                    toX = pf.Destination;
+                    toY = pf.DestinationY;
+                    SetFlingyMoveTarget(toX, toY);
+                    if (pf.IsStuck) U.SetStatus(StatusFlag.Immovable);
+                    else U.ClearStatus(StatusFlag.Immovable);
+                }
+            }
+
+            // openbw: the path is trimmed so that the total number of points
+            // stays below 48.
+            if ((pf.LongPath.Count + pf.ShortPath.Count * 2 + 2 - 1) / 2 * 2 > 48) {
+                if (pf.ShortPath.Count >= 24) {
+                    TrimShortPath(pf.ShortPath, 23);
+                    TrimLongPath(pf.LongPath, 1);
+                } else {
+                    TrimLongPath(pf.LongPath, (24 - pf.ShortPath.Count) * 2);
+                }
+            }
+
+            Path path = new Path();
+            path.Delay = 0;
+            path.CreationFrame = CurrentFrame;
+            path.StateFlags = 0;
+            path.LongPath = pf.LongPath;
+            path.FullLongPathSize = pf.FullLongPathSize;
+            int minIndex = pf.CurrentLongPathIndex;
+            if (minIndex > path.LongPath.Count) minIndex = path.LongPath.Count;
+            path.CurrentLongPathIndex = minIndex;
+            path.ShortPath = pf.ShortPath;
+            path.CurrentShortPathIndex = 0;
+            path.SourceX = U.Position.X;
+            path.SourceY = U.Position.Y;
+            path.DestinationX = toX;
+            path.DestinationY = toY;
+            Current = path;
+        }
+
+        Path p = Current;
+        p.NextX = p.ShortPath[p.CurrentShortPathIndex][0];
+        p.NextY = p.ShortPath[p.CurrentShortPathIndex][1];
+        if (p.NextX == U.MoveTargetPos.X && p.NextY == U.MoveTargetPos.Y) {
+            UnsetMovementFlag(0x10);
+        } else if (XyLength(p.DestinationX - p.NextX, p.DestinationY - p.NextY) < 16) {
+            SetMovementFlag(0x40);
+        }
+        return true;
+    }
+
+    // openbw: a_circular_vector::resize(count) -- the vector keeps its size
+    // and the new slots are default-constructed.
+    public static void TrimShortPath(List<int[]> path, int count) {
+        while (path.Count > count) path.RemoveAt(path.Count - 1);
+    }
+
+    public static void TrimLongPath(List<int> path, int count) {
+        while (path.Count > count) path.RemoveAt(path.Count - 1);
+    }
+
+    // openbw: create_single_step_path(source, destination)
+    public Path CreateSingleStepPath(int sourceX, int sourceY, int destX, int destY) {
+        Path path = new Path();
+        path.Delay = 0;
+        // creation_frame is not set here (openbw leaves it uninitialised)
+        path.StateFlags = 0;
+
+        // long_path[0] is uninitialised in openbw, so the behaviour is
+        // reproduced by the branch below.
+        if (path.ShortPath.Count <= 1) {
+            path.LongPath.Add(-1);
+        } else {
+            int index = path.ShortPath[1][0];
+            if (index >= 0 && index < R.RegionsList.Count) {
+                path.LongPath.Add(R.RegionsList[index].Index);
+            } else {
+                path.LongPath.Add(-1);
+            }
+        }
+
+        path.FullLongPathSize = 1;
+        path.CurrentLongPathIndex = 0;
+        path.ShortPath = new List<int[]>();
+        path.ShortPath.Add(new int[] { destX, destY });
+        path.CurrentShortPathIndex = 0;
+        path.SourceX = sourceX;
+        path.SourceY = sourceY;
+        path.DestinationX = destX;
+        path.DestinationY = destY;
+        path.NextX = destX;
+        path.NextY = destY;
+        return path;
+    }
+
+    // openbw: unit_path_to(u, to, ...)
+    public bool UnitPathTo(int toX, int toY) {
+        if (IsMovingAlongPath()) return true;
+        if (!U.UGroundUnit()) {
+            SetUnitMoveTarget(toX, toY);
+            Current = CreateSingleStepPath(U.Position.X, U.Position.Y, toX, toY);
+            if (Current == null) return false;
+            return true;
+        }
+        if (!PathProgressTo(toX, toY)) return false;
+        Path p = Current;
+        if (U.NextTargetWaypoint.X != p.NextX || U.NextTargetWaypoint.Y != p.NextY) {
+            U.NextTargetWaypoint = new Xy(p.NextX, p.NextY);
+        }
+        if (U.NextMovementWaypoint.X != p.NextX || U.NextMovementWaypoint.Y != p.NextY) {
+            U.NextMovementWaypoint = new Xy(p.NextX, p.NextY);
+            SetMovementFlag(1);
+        }
+        return true;
+    }
+}

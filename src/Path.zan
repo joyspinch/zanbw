@@ -1,0 +1,43 @@
+using System;
+
+// The path object a unit carries while it walks.
+//
+// Port of openbw's path_t (game_types.h 526) and the path lifecycle in
+// bwgame.h: new_path() / free_path() (10751-10771), path_progress()
+// (10773-10859), create_single_step_path() (10861-10888) and
+// unit_path_to() (10890-10906).
+
+public class Path {
+    public int Delay;
+    public int CreationFrame;
+    public int StateFlags;
+
+    // The coarse route, as region indices. -1 stands for the nullptr region
+    // that create_single_step_path can produce.
+    public List<int> LongPath;
+    public int FullLongPathSize;
+
+    // The fine route, as pixel coordinates.
+    public List<int[]> ShortPath;
+
+    public int CurrentLongPathIndex;
+    public int CurrentShortPathIndex;
+
+    public int SourceX;
+    public int SourceY;
+    public int DestinationX;
+    public int DestinationY;
+    public int NextX;
+    public int NextY;
+
+    public Path() {
+        LongPath = new List<int>();
+        ShortPath = new List<int[]>();
+        Delay = 0;
+        CreationFrame = 0;
+        StateFlags = 0;
+        FullLongPathSize = 0;
+        CurrentLongPathIndex = 0;
+        CurrentShortPathIndex = 0;
+    }
+}

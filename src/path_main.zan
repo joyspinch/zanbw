@@ -1,0 +1,194 @@
+using System;
+
+// Entry point of the path execution layer differential test.
+//
+//   zanbw_path.exe <terrain variant> <scenario>
+//
+// The output format matches tools/cppbed/path_bed.cpp exactly.
+
+public class PathMain {
+    static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+        int scen = 0;
+        if (args.Length >= 2) scen = Convert.ToInt32(args[1]);
+        Terrain.Variant = variant;
+
+        Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
+        for (int y = 0; y < Terrain.TileHeight; y++) {
+            for (int x = 0; x < Terrain.TileWidth; x++) {
+                r.MegaTileIndex[y * Terrain.TileWidth + x] = Terrain.MegaTileIndex(x, y);
+                r.TileFlags[y * Terrain.TileWidth + x] = Terrain.TileFlags(x, y);
+            }
+        }
+        for (int i = 0; i < 16; i++) {
+            r.Vf4Flags[i] = 1;
+            r.Vf4Flags[16 + i] = 0;
+            r.Vf4Flags[32 + i] = (i / 4 >= 2) ? 1 : 0;
+        }
+
+        RegionsMain rm = new RegionsMain(r);
+        rm.RegionsCreate();
+
+        // The scenarios must match the C++ bed one for one.
+        string[] names = new string[] {
+            "straight", "diagonal", "around", "multistep", "back",
+            "wallhit", "same", "near", "turnback", "longway",
+        };
+        int[] startX = new int[] { 100, 100, 100, 100, 600, 100, 100, 100, 400, 100 };
+        int[] startY = new int[] { 100, 100, 100, 100, 600, 100, 100, 100, 400, 100 };
+        int[][] steps = new int[][] {
+            new int[] { 800, 100, 4 },
+            new int[] { 700, 700, 4 },
+            new int[] { 400, 400, 3, 100, 700, 3 },
+            new int[] { 300, 100, 2, 300, 300, 2, 100, 600, 2 },
+            new int[] { 200, 200, 3 },
+            new int[] { 1000, 1000, 4 },
+            new int[] { 0, 0, 3 },
+            new int[] { 12, 12, 2 },
+            new int[] { 600, 100, 3, 100, 100, 3 },
+            new int[] { 1800, 1800, 4 },
+        };
+        int[] stepCount = new int[] { 1, 1, 2, 3, 1, 1, 1, 1, 2, 1 };
+
+        if (scen < 0 || scen >= names.Length) return 1;
+        string name = names[scen];
+        int sx = startX[scen];
+        int sy = startY[scen];
+        int[] sc = steps[scen];
+        int nsteps = stepCount[scen];
+
+        // The unit: a ground unit with the same dimensions as the C++ bed.
+        FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
+                                       Fp.Integer(512), Fp.Integer(8), 0);
+
+        UnitType ut = new UnitType(0, ft, 0,
+            (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 7,
+            new Xy(-8, -8), new Xy(8, 8));
+
+        Unit u = new Unit();
+        u.UnitType = ut;
+        u.FlingyType = ft;
+        u.Owner = 0;
+        u.Position = new Xy(sx, sy);
+        u.ExactPosition = Kin.ToXyFp8(u.Position);
+        u.MoveTargetPos = new Xy(sx, sy);
+        u.NextMovementWaypoint = new Xy(sx, sy);
+        u.NextTargetWaypoint = new Xy(sx, sy);
+        u.NextSpeed = ft.TopSpeed;
+        u.CurrentSpeed = ft.TopSpeed;
+        u.FlingyTopSpeed = ft.TopSpeed;
+        u.FlingyAcceleration = ft.Acceleration;
+        u.FlingyTurnRate = ft.TurnRate;
+        u.FlingyMovementType = 0;
+        u.NextVelocityDirection = Dir.FromRaw(64);
+        u.CurrentVelocityDirection = Dir.FromRaw(64);
+        u.DesiredVelocityDirection = Dir.FromRaw(64);
+        u.Sprite = new Sprite();
+        u.Sprite.Position = u.Position;
+        // openbw: initialize_unit sets the ground unit flag.
+        u.SetStatus(StatusFlag.GroundUnit);
+        // openbw: initialize_flingy calls set_flingy_move_target(f, pos), which
+        // clears movement flag 4 and sets movement flag 1.
+        u.MovementFlags = 1;
+
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+
+        PathProgress pp = new PathProgress(r, sim, u);
+        pp.MoveTargetX = sx;
+        pp.MoveTargetY = sy;
+        pp.CurrentFrame = 0;
+
+        Console.WriteLine("INITIAL flags=0x" + Hex(u.MovementFlags)
+            + " move_target=" + u.MoveTargetPos.X + "," + u.MoveTargetPos.Y
+            + " next_waypoint=" + u.NextMovementWaypoint.X + "," + u.NextMovementWaypoint.Y
+            + " next_target=" + u.NextTargetWaypoint.X + "," + u.NextTargetWaypoint.Y);
+        Console.WriteLine("scenario=" + name + " variant=" + variant);
+
+        int step = 0;
+        int frame = 0;
+        int totalFrames = 0;
+        for (int i = 0; i < nsteps; i++) totalFrames = totalFrames + sc[i * 3 + 2];
+        totalFrames = totalFrames + 8;
+        int[] waits = new int[8];
+
+        while (frame < totalFrames) {
+            if (step < nsteps) {
+                bool issue = (step == 0) || (waits[step - 1] >= sc[(step - 1) * 3 + 2]);
+                if (issue) {
+                    int toX = sx + sc[step * 3];
+                    int toY = sy + sc[step * 3 + 1];
+                    bool moving = pp.IsMovingAlongPath();
+                    // The order sets the move target first, then the movement
+                    // state machine asks for a path towards it.
+                    pp.SetUnitMoveTarget(toX, toY);
+                    bool ok = pp.UnitPathTo(u.MoveTargetPos.X, u.MoveTargetPos.Y);
+                    Console.WriteLine("S " + step + " frame=" + frame + " to=" + toX + "," + toY
+                        + " moving=" + (moving ? 1 : 0) + " path_to=" + (ok ? 1 : 0)
+                        + " mt=" + u.MoveTargetPos.X + "," + u.MoveTargetPos.Y
+                        + " waypoint=" + u.NextMovementWaypoint.X + "," + u.NextMovementWaypoint.Y
+                        + " flags=0x" + Hex(u.MovementFlags));
+                    DumpPath("  P", pp);
+                    step = step + 1;
+                } else {
+                    waits[step - 1] = waits[step - 1] + 1;
+                }
+            }
+
+            // Advance the unit one frame with the real movement integration.
+            Ems ems = new Ems();
+            sim.UpdateUnitMovementValues(u, ems);
+            u.Position = ems.Position;
+            u.ExactPosition = ems.ExactPosition;
+            u.Sprite.Position = ems.Position;
+            u.NextSpeed = ems.Speed;
+
+            frame = frame + 1;
+            pp.CurrentFrame = frame;
+        }
+
+        DumpPath("FINAL", pp);
+        Console.WriteLine("pos=" + u.Position.X + "," + u.Position.Y
+            + " mt=" + u.MoveTargetPos.X + "," + u.MoveTargetPos.Y);
+        return 0;
+    }
+
+    static void DumpPath(string tag, PathProgress pp) {
+        Path p = pp.Current;
+        if (p == null) {
+            Console.WriteLine(tag + " has_path=0");
+            return;
+        }
+        string longPart = "";
+        foreach (int r in p.LongPath) {
+            longPart = longPart + " " + r;
+        }
+        string shortPart = "";
+        foreach (int[] pt in p.ShortPath) {
+            shortPart = shortPart + " " + pt[0] + "," + pt[1];
+        }
+        Console.WriteLine(tag + " has_path=1"
+            + " delay=" + p.Delay
+            + " state_flags=" + p.StateFlags
+            + " cli=" + p.CurrentLongPathIndex
+            + " csi=" + p.CurrentShortPathIndex
+            + " full=" + p.FullLongPathSize
+            + " source=" + p.SourceX + "," + p.SourceY
+            + " destination=" + p.DestinationX + "," + p.DestinationY
+            + " next=" + p.NextX + "," + p.NextY
+            + " long:" + longPart
+            + " short:" + shortPart);
+    }
+
+    static string Hex(int v) {
+        if (v == 0) return "0";
+        string digits = "0123456789abcdef";
+        string r = "";
+        int x = v;
+        while (x != 0) {
+            r = digits[x & 0xf] + r;
+            x = x >> 4;
+        }
+        return r;
+    }
+}

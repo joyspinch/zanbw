@@ -135,8 +135,13 @@ public class ShortPathNext {
     // Returns {found, x, y}: whether the target could be placed on walkable
     // ground, and the adjusted target.
     public int[] AdjustTargetPos(int targetX, int targetY) {
-        int bx = targetX + DimFromX;
-        int by = targetY + DimFromY;
+        // openbw: unit_type_inner_bounding_box() returns
+        //     { -unit_type->dimensions.from, unit_type->dimensions.to }
+        // and translate_rect() shifts it by the target, so the box around
+        // the target is { target - from, target + to } -- note that the
+        // 'from' side is negated.
+        int bx = targetX - DimFromX;
+        int by = targetY - DimFromY;
         int tx = targetX + DimToX;
         int ty = targetY + DimToY;
         for (int width = 1; width < 10; width += 2) {
@@ -165,22 +170,22 @@ public class ShortPathNext {
                     }
                     targetX += CardinalX[dir] * 8;
                     targetY += CardinalY[dir] * 8;
-                    bx = targetX + DimFromX;
-                    by = targetY + DimFromY;
+                    bx = targetX - DimFromX;
+                    by = targetY - DimFromY;
                     tx = targetX + DimToX;
                     ty = targetY + DimToY;
                 }
                 targetX -= CardinalX[dir] * 8;
                 targetY -= CardinalY[dir] * 8;
-                bx = targetX + DimFromX;
-                by = targetY + DimFromY;
+                bx = targetX - DimFromX;
+                by = targetY - DimFromY;
                 tx = targetX + DimToX;
                 ty = targetY + DimToY;
             }
             targetX -= 8;
             targetY -= 8;
-            bx = targetX + DimFromX;
-            by = targetY + DimFromY;
+            bx = targetX - DimFromX;
+            by = targetY - DimFromY;
             tx = targetX + DimToX;
             ty = targetY + DimToY;
         }
@@ -204,7 +209,10 @@ public class ShortPathNext {
         for (int width = 1; width < 16; width += 2) {
             for (int dir = 0; dir != 4; ++dir) {
                 for (int n = 0; n != width; ++n) {
-                    if (targetX >= 0 && targetX < R.MapTileWidth && targetY >= 0 && targetY < R.MapTileHeight) {
+                    // openbw casts to size_t, so a negative target compares as
+                    // a huge number and the branch is skipped.
+                    if (targetX >= 0 && targetY >= 0
+                        && targetX < R.MapTileWidth && targetY < R.MapTileHeight) {
                         int r = Pf.GetRegionAtPreferWalkable(targetX * 32, targetY * 32);
                         if (r == sourceRegion) {
                             return new int[] { targetX * 32 + 16, targetY * 32 + 16 };

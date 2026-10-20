@@ -36,6 +36,9 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/ShortPathRun.zan` | 短路径主循环 + `pf_generate_neighbors` + `pf_add_local_terrain` |
 | `src/ShortPathNext.zan` | `pathfinder_find_next_short_path` + 两个 target 调整函数 |
 | `src/shortpath_main.zan` | 短路径对拍入口 |
+| `src/Path.zan` | `path_t`：单位携带的路径对象（长路径 + 短路径 + 索引） |
+| `src/PathProgress.zan` | `path_progress` / `unit_path_to` / `create_single_step_path` |
+| `src/path_main.zan` | 路径执行层对拍入口 |
 | `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
 | `tools/cppbed/regions_bed.cpp` | regions 层的 C++ 对照床 |
 | `tools/cppbed/astar_bed.cpp` | 长路径 A* 的 C++ 对照床 |
@@ -43,10 +46,12 @@ raw 值都必须与原 C++ 实现完全相同。
 | `tools/cppbed/shortpath_bed.cpp` | 短路径的 C++ 对照床 |
 | `tools/cppbed/openbw_traced.h` | **加 trace 钩子的 openbw 副本**（由脚本从真源码生成） |
 | `tools/cppbed/shortpath_trace2.cpp` | 短路径逐步 trace 床（编译 traced 副本） |
+| `tools/cppbed/path_bed.cpp` | 路径执行层的 C++ 对照床（真 create_unit + 真移动积分） |
 | `check.sh` | 运动学层一键逐位对拍 |
 | `check_regions.sh` | regions 层一键逐位对拍 |
 | `check_astar.sh` | 长路径 A* 一键逐位对拍 |
 | `check_shortpath.sh` | 短路径搜索一键逐位对拍 |
+| `check_path.sh` | 路径执行层一键逐位对拍 |
 
 ## 构建与验证
 
@@ -357,6 +362,68 @@ for (auto* nr : move_to_region->walkable_neighbors) {
 `openbw_traced.h`（只在关键行插 `printf` 钩子），trace 床编译这份副本。
 
 这样 trace 床的每一步都保证来自真实现，Zan 侧逐行 diff 才有意义。
+
+## 路径执行层（path_t / path_progress / unit_path_to）
+
+对应 openbw/bwgame.h 10751-10906。参照床 `tools/cppbed/path_bed.cpp`，
+Zan 侧 `src/Path.zan` + `src/PathProgress.zan`，检查脚本 `check_path.sh`
+（7 变体 × 10 场景）。
+
+### 25. `pathfinder_adjust_target_pos` 的包围盒是 `-from`，不是 `+from`
+
+```cpp
+rect unit_type_inner_bounding_box(const unit_type_t* unit_type) const {
+    return {-unit_type->dimensions.from, unit_type->dimensions.to};
+}
+```
+
+`from` 是**负的**（如 -8），取负后变成 +8，于是目标周围的盒是
+`{target - from, target + to}` = `{target + 8, target + 8}`。写成
+`target + from` 会让盒偏移到反方向，落在墙里时调整结果完全不同。
+
+**为什么隐蔽**：前几层的 10 条查询全部落在可走地面上，`adjust_target_pos`
+第一次真正生效是在路径执行层——所有更早的测试都覆盖不到这个符号。
+
+### 26. `pathfinder_find_long_path` 末尾把 `current_long_path_index` 置 -1
+
+```cpp
+pf.current_long_path_index = (size_t)0 - 1;
+```
+
+紧接着 `pathfinder_find_next_short_path` 先 `++` 再用，所以同 region 分支
+实际从 0 开始。漏掉这行 ⇒ 索引停在末尾 ⇒ `++` 后越界 ⇒ 短路径为空。
+
+### 27. `unit_type_inner_bounding_box` 与 `unit_type_bounding_box` 差 1
+
+前者是 `{-from, to}`，后者是 `{origin - from, origin + to + xy(1,1)}`。
+两个都叫 bounding box，差一个像素，用错会让贴边判定差 1 像素。
+
+### 28. 移动目标只有一份真相：`unit.move_target.pos`
+
+C++ 里 `u->move_target.pos` 和 `u->sprite->position` 分离；Zan 侧 `Unit`
+把 `MoveTargetPos` 放在 unit 上，路径层如果自己再存一份 move target，
+会和 `Sim.IsAtMoveTarget()`（比较 `Sprite.Position == MoveTargetPos`）
+脱节 ⇒ 单位以为自己到了目标就停下。路径层一律读 `U.MoveTargetPos`。
+
+### 29. 短路径的路径点裁剪：`path[49] = path.back(); path.resize(50)`
+
+Zan 侧 `List` 没有 `resize`，且**不能**边遍历边替换自身
+（`ShortPathPoints = new List<>()` 之后原列表已丢）。必须先写
+`points[49]`，再新建列表装前 50 项。
+
+### 30. 参照床必须用真 `create_unit`，不能手搓 unit_t
+
+`unit_path_to` 读 `u->sprite->position`，手搓的 `unit_t` 没有 sprite ⇒
+段错误。而且 `create_unit` 会顺带设好初始 movement flag（`0x1`）、
+`move_target`、`next_movement_waypoint`——这些初始状态直接决定
+第一帧的行为，必须让两侧一致。
+
+### 31. 参照床的地形必须与 `src/Terrain.zan` 逐条对齐
+
+包括 `tile_flags` 和 `mega_tile_index` 两个函数：variant 6 是
+"partially walkable"地形，flag 是 `flag_partially_walkable | flag_walkable`、
+mega tile 是 2，漏了会让 region 数量完全不同——**床和被测物不一致时，
+对拍失败会被误判成移植缺陷**。两边都从 `Terrain.zan` 取，别复制一份。
 
 ## 已知 zanc 缺陷
 
