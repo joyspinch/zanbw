@@ -29,13 +29,24 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/Pathfinder.zan` | 寻路入口：region 定位 + 长路径组装 |
 | `src/AStar.zan` | 长路径 A*（region 级）+ 二叉堆 |
 | `src/astar_main.zan` | 长路径 A* 对拍入口 |
+| `src/ShortPath.zan` | 短路径核心结构（contour / neighbor / visited 列） |
+| `src/ShortPathNeighbors.zan` | `expand_inner/outer`、`pf_local_edges_find`、`pf_add_neighbor`、`visit_area` |
+| `src/ShortPathAddNeighbors.zan` | `add_neighbors` 四方向逐段移植（约 400 行） |
+| `src/ShortPathSearch.zan` | `pf_mark_visited` / `pf_remove_visited_flags`（列式 visited 区） |
+| `src/ShortPathRun.zan` | 短路径主循环 + `pf_generate_neighbors` + `pf_add_local_terrain` |
+| `src/ShortPathNext.zan` | `pathfinder_find_next_short_path` + 两个 target 调整函数 |
+| `src/shortpath_main.zan` | 短路径对拍入口 |
 | `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
 | `tools/cppbed/regions_bed.cpp` | regions 层的 C++ 对照床 |
 | `tools/cppbed/astar_bed.cpp` | 长路径 A* 的 C++ 对照床 |
 | `tools/cppbed/astar_trace.cpp` | A* 逐步 trace 床（定位堆序问题用） |
+| `tools/cppbed/shortpath_bed.cpp` | 短路径的 C++ 对照床 |
+| `tools/cppbed/openbw_traced.h` | **加 trace 钩子的 openbw 副本**（由脚本从真源码生成） |
+| `tools/cppbed/shortpath_trace2.cpp` | 短路径逐步 trace 床（编译 traced 副本） |
 | `check.sh` | 运动学层一键逐位对拍 |
 | `check_regions.sh` | regions 层一键逐位对拍 |
 | `check_astar.sh` | 长路径 A* 一键逐位对拍 |
+| `check_shortpath.sh` | 短路径搜索一键逐位对拍 |
 
 ## 构建与验证
 
@@ -49,10 +60,14 @@ bash check_regions.sh
 # 长路径 A* 对拍（7 个地形变体 × 12 个查询）
 bash check_astar.sh
 
+# 短路径搜索对拍（7 个地形变体 × 10 个查询）
+bash check_shortpath.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
 bash check_astar.sh 3
+bash check_shortpath.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -232,6 +247,116 @@ openbw 里 `cost *= 2` 走的是 `fixed_point::operator*=(T integer_value)`，
 `pathfinder_find_long_path` 在源与目标不同组时**反向搜一次**，若没直接
 到达再正向搜一次。`goal_node` 是两次搜索共用的变量，第二次搜索会覆盖它。
 移植时不能缓存第一次的 goal 区域。
+
+### 17. 短路径：搜索目标不是最终目标，而是长路径的第 i+2 跳
+
+`pathfinder_find` 走的是 `pathfinder_find_next_short_path`，它**只算一跳**：
+
+- `target = pf.destination`，但若 `long_path.size() - current_long_path_index > 3`，
+  目标改成 `long_path[index + 2]` 的**区域中心**（fp8 → 像素要右移 8）。
+- `target_region = long_path[index + 1]`（`index` 是长路径最后一跳时为 null）。
+- `current_long_path_index` 在 `pathfinder_find_long_path` 末尾被设成
+  `(size_t)0 - 1`，进入下一跳时先 `++`。
+
+移植时直接把 `target` 设成最终目标，短路径会一路搜到终点——路径点数、
+节点数全错，而**长路径完全正确**，很容易误判成"短路径层没问题"。
+
+### 18. 短路径：`target_is_destination` 是坐标比较，不是区域比较
+
+```cpp
+bool target_is_destination = target == pf.destination;
+```
+
+它参与 `is_exhausted` 的判定：
+
+```cpp
+if (n_open_nodes_in_target_region <= 0 || has_found_goal
+    || (target_is_destination && all_nodes.size() < 150)) {
+    is_exhausted = is_tired;      // 不强制耗尽
+} else {
+    is_exhausted = true; is_tired = true;
+}
+```
+
+写成"目标区域 == 源区域"会让搜索在碰到目标区域时提前停住，
+路径只剩 3 个点而不是 7 个。
+
+### 19. 短路径：`w.inner` / `w.outer` 来自单位尺寸，不是常量
+
+```cpp
+w.inner[0] = unit_type->dimensions.from.y;   w.outer[0] = from.y + 1;
+w.inner[1] = -unit_type->dimensions.to.x;    w.outer[1] = -to.x - 1;
+w.inner[2] = -unit_type->dimensions.to.y;    w.outer[2] = -to.y - 1;
+w.inner[3] = unit_type->dimensions.from.x;   w.outer[3] = from.x + 1;
+```
+
+它们是 contour 的膨胀量，直接决定每个邻居的位置。硬编码成 ±1 会让
+路径整体偏移（实测 375 vs 366，差 outer 与 inner 的 9 像素）。
+
+### 20. 短路径：`ShortContour` 必须是 class，但 expand_* 必须复制
+
+C++ 的 `regions_t::contour` 是**值类型**，`expand_inner(c)` / `expand_outer(c)`
+按值收参、返回**改过的副本**。Zan 侧 `ShortContour` 是 class（引用语义），
+直接在 `c.V0 += ...` 上改会把 `local_edges` 里的**源 contour 永久改掉**。
+
+症状：第一次展开后源 contour 的坐标被污染，后续所有方向的邻居都偏移。
+修法：`expand_*` 里新建一个对象逐字段拷贝后加偏移。
+
+**判据：C++ 里按值传参并就地改的 POD，改成 class 后必须显式复制。**
+
+### 21. 短路径：visited 区是"列式"结构，插列要复制 y 区间
+
+`pf_area_visited` 是 `a_vector<visited>`，每列存 `x` 和该列的 y 区间列表。
+`pf_mark_visited` 插入新列时是 `insert(next, {area.from.x, cur->y})`——
+**复制当前列的 y 区间**，不是留空。留空会让 `pf_remove_visited_flags`
+的 mask 算错，搜索多探出几十个节点。
+
+合并区间时 C++ 写的是 `t = std::prev(cur->y.erase(n))`——erase 后 `t`
+停在被删元素的**前一个**位置，循环继续看同一槽位。移植成"erase 后 `t`
+不动"会漏合并一段。
+
+### 22. 短路径：找不到 goal 时的 best_node 选择按加权代价，不是总代价
+
+```cpp
+fp8 cost = i->estimated_remaining_cost;
+if (i->region == destination_region || i->region == target_region) {
+    cost += i->total_cost / 2;
+} else {
+    if (i->region->pathfinder_flag) cost = cost * 3 / 2;
+    else if (i->region == source_region) cost *= 2;
+    else cost *= 4;
+}
+if (i->visited) cost *= 32;
+```
+
+只有 `n_unvisited_nodes == 0 && n_open_nodes_in_target_region == 0` 时才
+`is_stuck = true`；否则 `is_stuck` 保持 false。按总代价挑 best_node 会选错，
+终点落在另一个像素上。
+
+### 23. 短路径：`pathfinder_flag` 初始值是 1，且只清 move_to_region 的邻居
+
+```cpp
+for (auto* nr : move_to_region->walkable_neighbors) {
+    if (nr == source_region) continue;
+    nr->pathfinder_flag = 1;      // 开头置 1
+}
+...
+for (auto* nr : move_to_region->walkable_neighbors) {
+    if (nr == source_region) continue;
+    nr->pathfinder_flag = 0;      // 结尾只清这些
+}
+```
+
+`pathfinder_flag != 0` 决定节点是不是"neighbor region"节点，直接影响
+`is_exhausted` 的触发时机。写成 0 会让搜索退化。
+
+### 24. 逐步 trace 床要编译 openbw 的**副本**，不要手抄
+
+短路径的 `add_neighbors` 有 400 多行、四个方向各不相同的边界逻辑，手抄
+进 trace 床必然与真实现分叉。做法：用脚本从 `openbw/bwgame.h` 生成一份
+`openbw_traced.h`（只在关键行插 `printf` 钩子），trace 床编译这份副本。
+
+这样 trace 床的每一步都保证来自真实现，Zan 侧逐行 diff 才有意义。
 
 ## 已知 zanc 缺陷
 

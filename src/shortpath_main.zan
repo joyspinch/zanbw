@@ -1,0 +1,96 @@
+using System;
+
+// Entry point of the short-path (contour) search differential test.
+//
+//   zanbw_shortpath.exe <terrain variant>
+//
+// The output format matches tools/cppbed/shortpath_bed.cpp exactly.
+
+public class ShortPathMain {
+    static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) {
+            variant = Convert.ToInt32(args[0]);
+        }
+        Terrain.Variant = variant;
+
+        Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
+        for (int y = 0; y < Terrain.TileHeight; y++) {
+            for (int x = 0; x < Terrain.TileWidth; x++) {
+                r.MegaTileIndex[y * Terrain.TileWidth + x] = Terrain.MegaTileIndex(x, y);
+                r.TileFlags[y * Terrain.TileWidth + x] = Terrain.TileFlags(x, y);
+            }
+        }
+        for (int i = 0; i < 16; i++) {
+            r.Vf4Flags[i] = 1;
+            r.Vf4Flags[16 + i] = 0;
+            r.Vf4Flags[32 + i] = (i / 4 >= 2) ? 1 : 0;
+        }
+
+        RegionsMain rm = new RegionsMain(r);
+        rm.RegionsCreate();
+
+        Pathfinder pf = new Pathfinder(r);
+
+        int[][] queries = new int[][] {
+            new int[] { 100, 100, 1800, 1800 },
+            new int[] { 100, 100, 400, 400 },
+            new int[] { 100, 100, 1900, 100 },
+            new int[] { 100, 100, 100, 1900 },
+            new int[] { 100, 100, 1600, 1600 },
+            new int[] { 100, 100, 100, 100 },
+            new int[] { 100, 100, 900, 100 },
+            new int[] { 100, 100, 100, 900 },
+            new int[] { 100, 100, 1984, 1984 },
+            new int[] { 100, 100, 500, 1200 },
+        };
+
+        for (int q = 0; q < queries.Length; q++) {
+            int[] qq = queries[q];
+            int srcX = qq[0];
+            int srcY = qq[1];
+            int dstX = qq[2];
+            int dstY = qq[3];
+
+            pf.Source = srcX;
+            pf.SourceY = srcY;
+            pf.Destination = dstX;
+            pf.DestinationY = dstY;
+            pf.SourceRegion = pf.GetRegionAt(srcX, srcY);
+            pf.DestinationRegion = pf.GetRegionAt(dstX, dstY);
+            pf.LongPath = new List<int>();
+            pf.DestinationReached = false;
+            pf.IsStuck = false;
+
+            bool ok = pf.FindLongPath(srcX, srcY, dstX, dstY);
+            if (!ok) {
+                Console.WriteLine("Q " + q + " from=" + srcX + "," + srcY + " to=" + dstX + "," + dstY + " ok=0");
+                continue;
+            }
+
+            // The short path search: one hop of the long path.
+            pf.CurrentLongPathIndex = -1;
+            ShortPathNext spn = new ShortPathNext(r, pf);
+            spn.DimFromX = -8;
+            spn.DimFromY = -8;
+            spn.DimToX = 8;
+            spn.DimToY = 8;
+            bool found = spn.FindNextShortPath();
+            List<int[]> points = pf.ShortPath;
+
+            string line = "Q " + q + " from=" + srcX + "," + srcY + " to=" + dstX + "," + dstY + " ok=1";
+            line = line + " reached=" + (pf.DestinationReached ? 1 : 0)
+                        + " stuck=" + (pf.IsStuck ? 1 : 0);
+            line = line + " dest=" + pf.Destination + "," + pf.DestinationY;
+            line = line + " long=" + pf.LongPath.Count + " short=" + points.Count;
+            line = line + " short_nodes=" + pf.ShortAllNodesSize
+                        + " short_open=" + pf.ShortHighestOpenSize;
+            line = line + " short_path:";
+            foreach (int[] p in points) {
+                line = line + " " + p[0] + "," + p[1];
+            }
+            Console.WriteLine(line);
+        }
+        return 0;
+    }
+}

@@ -1,0 +1,676 @@
+using System;
+
+// The main search loop of the short path.
+//
+// Port of pathfinder_find_short_path() (openbw/bwgame.h 9421-10560). The
+// parts that need a live unit list (pf_add_local_units) are omitted: the
+// reference bed has no other units, so the unit finder lists are empty and
+// that code path produces no edges.
+
+public class ShortPathRun {
+    public ShortPath S;
+    public ShortPathSearch SR;
+    public ShortPathNeighbors N;
+    public ShortPathAddNeighbors AN;
+
+    public List<ShortNode> Nodes;
+    public List<int> Open;
+
+    public bool HasFoundGoal;
+    public bool IsTired;
+
+    public ShortPathRun(ShortPath s) {
+        S = s;
+        SR = new ShortPathSearch(s);
+        N = SR.N;
+        AN = SR.AN;
+        Nodes = new List<ShortNode>();
+        Open = new List<int>();
+    }
+
+    public Regions R { get { return S.R; } }
+
+    // the short path result
+    public List<int[]> ShortPathPoints;
+
+    public int HighestOpenSize;
+
+    // ---------------------------------------------------------- heap helpers
+
+    public bool CostLess(int a, int b) {
+        return Nodes[a].EstimatedFinalCostRaw < Nodes[b].EstimatedFinalCostRaw;
+    }
+
+    public void Swap(int a, int b) {
+        int t = Open[a];
+        Open[a] = Open[b];
+        Open[b] = t;
+    }
+
+    // openbw: binary_heap_up(element, begin, end, compare)
+    public void HeapUp(int element) {
+        int index = element;
+        while (index != 0) {
+            int parentIndex = (index - 1) / 2;
+            if (CostLess(Open[parentIndex], Open[index])) break;
+            Swap(parentIndex, index);
+            index = parentIndex;
+        }
+    }
+
+    // openbw: binary_heap_down(element, begin, end, compare)
+    public void HeapDown(int element) {
+        int index = element;
+        int endIndex = Open.Count;
+        while (true) {
+            int childIndex = index * 2 + 1;
+            if (childIndex >= endIndex) break;
+            if (childIndex + 1 != endIndex) {
+                if (CostLess(Open[childIndex + 1], Open[childIndex])) {
+                    ++childIndex;
+                }
+            }
+            if (!CostLess(Open[childIndex], Open[index])) break;
+            Swap(childIndex, index);
+            index = childIndex;
+        }
+    }
+
+    // ------------------------------------------------------ local edge setup
+
+    // openbw: merge_local_edge(i, c) -- the edge list is the one of the
+    // direction currently being filled.
+    public bool MergeLocalEdge(int dir, int i, ShortContour c) {
+        List<ShortContour> edges = S.LocalEdges[dir];
+        ShortContour target = edges[i];
+        if (c.V1 + S.Inner[c.Flags & 3] <= target.V2 + S.Inner[(target.Flags >> 2) & 3]) {
+            if (c.V2 + S.Inner[(c.Flags >> 2) & 3] >= target.V1 + S.Inner[target.Flags & 3] - 1) {
+                if (c.V1 < target.V1) target.V1 = c.V1;
+                if (c.V2 > target.V2) target.V2 = c.V2;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // openbw: pf_add_local_edge(n, c)
+    public void AddLocalEdge(int n, ShortContour c) {
+        List<ShortContour> edges = S.LocalEdges[n];
+        int i = N.LowerBoundByV0(edges, c.V0);
+        while (i != edges.Count && edges[i].V0 == c.V0) {
+            if (MergeLocalEdge(n, i, c)) return;
+            if (c.V1 + S.Inner[c.Flags & 3] <= edges[i].V2 + S.Inner[(edges[i].Flags >> 2) & 3]) break;
+            ++i;
+        }
+        edges.Insert(i, c);
+    }
+
+    // openbw: pf_push_back_local_edge(n, c)
+    public void PushBackLocalEdge(int n, ShortContour c) {
+        List<ShortContour> edges = S.LocalEdges[n];
+        if (edges.Count != 0 && edges[edges.Count - 1].V0 == c.V0) {
+            int last = edges.Count - 1;
+            if (MergeLocalEdge(n, last, c)) return;
+            if (c.V1 + S.Inner[c.Flags & 3] <= edges[last].V2 + S.Inner[(edges[last].Flags >> 2) & 3]) {
+                edges.Insert(last, c);
+            } else {
+                edges.Add(c);
+            }
+        } else {
+            edges.Add(c);
+        }
+    }
+
+    // openbw: pf_add_local_terrain()
+    //
+    // The four directions each scan the contour list in their own way: 0 and 3
+    // use lower_bound (the scan starts at or before the limit), 1 and 2 use
+    // upper_bound.
+    public void AddLocalTerrain() {
+        // direction 0: bottom edge
+        {
+            List<Contour> c0 = R.Contours[0];
+            int i = N.LowerBoundByV0Raw(c0, S.CurPosMinY - S.Inner[0] - 1);
+            while (i != c0.Count) {
+                Contour c = c0[i];
+                if (c.V0 > S.CurPosY - S.Inner[0] - 1) break;
+                if (c.V1 + S.Inner[c.Flags & 3] <= S.CurPosMaxX) {
+                    if (c.V2 + S.Inner[(c.Flags >> 2) & 3] >= S.CurPosMinX) {
+                        PushBackLocalEdge(0, ToShortContour(c));
+                    }
+                }
+                ++i;
+            }
+        }
+        // direction 1: right edge
+        {
+            List<Contour> c1 = R.Contours[1];
+            int i = N.UpperBoundByV0Raw(c1, S.CurPosX - S.Inner[1]);
+            while (i != c1.Count) {
+                Contour c = c1[i];
+                if (c.V0 > S.CurPosMaxX - S.Inner[1] + 1) break;
+                if (c.V1 + S.Inner[c.Flags & 3] <= S.CurPosMaxY) {
+                    if (c.V2 + S.Inner[(c.Flags >> 2) & 3] >= S.CurPosMinY) {
+                        PushBackLocalEdge(1, ToShortContour(c));
+                    }
+                }
+                ++i;
+            }
+        }
+        // direction 2: top edge
+        {
+            List<Contour> c2 = R.Contours[2];
+            int i = N.UpperBoundByV0Raw(c2, S.CurPosY - S.Inner[2]);
+            while (i != c2.Count) {
+                Contour c = c2[i];
+                if (c.V0 > S.CurPosMaxY - S.Inner[2] + 1) break;
+                if (c.V1 + S.Inner[c.Flags & 3] <= S.CurPosMaxX) {
+                    if (c.V2 + S.Inner[(c.Flags >> 2) & 3] >= S.CurPosMinX) {
+                        PushBackLocalEdge(2, ToShortContour(c));
+                    }
+                }
+                ++i;
+            }
+        }
+        // direction 3: left edge
+        {
+            List<Contour> c3 = R.Contours[3];
+            int i = N.LowerBoundByV0Raw(c3, S.CurPosMinX - S.Inner[3] - 1);
+            while (i != c3.Count) {
+                Contour c = c3[i];
+                if (c.V0 > S.CurPosX - S.Inner[3] - 1) break;
+                if (c.V1 + S.Inner[c.Flags & 3] <= S.CurPosMaxY) {
+                    if (c.V2 + S.Inner[(c.Flags >> 2) & 3] >= S.CurPosMinY) {
+                        PushBackLocalEdge(3, ToShortContour(c));
+                    }
+                }
+                ++i;
+            }
+        }
+    }
+
+    public ShortContour ToShortContour(Contour c) {
+        ShortContour s = new ShortContour();
+        s.V0 = c.V0;
+        s.V1 = c.V1;
+        s.V2 = c.V2;
+        s.Dir = c.Dir;
+        s.Flags = c.Flags;
+        return s;
+    }
+
+    // ------------------------------------------------- neighbour generation
+
+    // openbw: pf_generate_neighbors(pos, flags)
+    public void GenerateNeighbors(int posX, int posY, int flags) {
+        S.HasFoundGoal = false;
+        S.Neighbors = new List<ShortNeighbor>();
+        S.VisitedAreas = new List<ShortVisitedArea>();
+
+        S.CurPosX = posX;
+        S.CurPosY = posY;
+        S.CurPosMaxX = posX + 64;
+        S.CurPosMaxY = posY + 64;
+        S.CurPosMinX = posX - 64;
+        S.CurPosMinY = posY - 64;
+        if (posX < 64) S.CurPosMinX = 0;
+        if (posY < 64) S.CurPosMinY = 0;
+        if (posX + 64 >= R.MapWidth) S.CurPosMaxX = R.MapWidth - 1;
+        if (posY + 64 >= R.MapHeight) S.CurPosMaxY = R.MapHeight - 1;
+        if ((flags & (0x10 | (8 | 1))) == 0) S.CurPosMinY = posY;
+        if ((flags & (0x20 | (1 | 2))) == 0) S.CurPosMaxX = posX;
+        if ((flags & (0x40 | (2 | 4))) == 0) S.CurPosMaxY = posY;
+        if ((flags & (0x80 | (4 | 8))) == 0) S.CurPosMinX = posX;
+
+        for (int i = 0; i != 4; ++i) {
+            S.LocalEdges[i] = new List<ShortContour>();
+        }
+
+        AddLocalTerrain();
+        // pf_add_local_units() is omitted: the reference bed has no other
+        // units, so the unit finder lists are empty.
+
+        S.NearestEdge[0] = null;
+        S.NearestEdge[1] = null;
+        S.NearestEdge[2] = null;
+        S.NearestEdge[3] = null;
+
+        int e = N.LocalEdgesFind(0, posY, posX, posX, S.CurPosMinY - 1);
+        if (e >= 0) {
+            S.NearestEdge[0] = S.LocalEdges[0][e];
+            S.CurPosMinY = S.NearestEdge[0].V0 + S.Inner[0] + 1;
+        }
+        e = N.LocalEdgesFind(1, posX, posY, posY, S.CurPosMaxX + 1);
+        if (e >= 0) {
+            S.NearestEdge[1] = S.LocalEdges[1][e];
+            S.CurPosMaxX = S.NearestEdge[1].V0 + S.Inner[1] - 1;
+        }
+        e = N.LocalEdgesFind(2, posY, posX, posX, S.CurPosMaxY + 1);
+        if (e >= 0) {
+            S.NearestEdge[2] = S.LocalEdges[2][e];
+            S.CurPosMaxY = S.NearestEdge[2].V0 + S.Inner[2] - 1;
+        }
+        e = N.LocalEdgesFind(3, posX, posY, posY, S.CurPosMinX - 1);
+        if (e >= 0) {
+            S.NearestEdge[3] = S.LocalEdges[3][e];
+            S.CurPosMinX = S.NearestEdge[3].V0 + S.Inner[3] + 1;
+        }
+
+        if (S.CurPosMinY == posY && S.CurPosMaxX == posX) flags &= 0xfe;
+        if (S.CurPosMaxY == posY) {
+            if (S.CurPosMaxX == posX) flags &= 0xfd;
+            if (S.CurPosMinX == posX) flags &= 0xfb;
+        }
+        if (S.CurPosMinY == posY) {
+            if (S.CurPosMinX == posX) flags &= 0xf7;
+            flags &= 0xef;
+        }
+        if (S.CurPosMaxX == posX) flags &= 0xdf;
+        if (S.CurPosMaxY == posY) flags &= 0xbf;
+        if (S.CurPosMinX == posX) flags &= 0x7f;
+
+        if ((flags & 0x10) != 0) {
+            flags |= 9;
+            N.AddNeighbor(posX, S.CurPosMinY, S.NearestEdge[0] != null ? 0xa6 : 0xbf);
+        }
+        if ((flags & 0x20) != 0) {
+            flags |= 3;
+            N.AddNeighbor(S.CurPosMaxX, posY, S.NearestEdge[1] != null ? 0x5c : 0x7f);
+        }
+        if ((flags & 0x40) != 0) {
+            flags |= 6;
+            N.AddNeighbor(posX, S.CurPosMaxY, S.NearestEdge[2] != null ? 0xa9 : 0xef);
+        }
+        if ((flags & 0x80) != 0) {
+            flags |= 0xc;
+            N.AddNeighbor(S.CurPosMinX, posY, S.NearestEdge[3] != null ? 0x53 : 0xdf);
+        }
+
+        for (int dir = 0; dir != 4; ++dir) {
+            if ((flags & (1 << dir)) != 0) {
+                if (TraceOn) Console.WriteLine("  DIR " + dir);
+                AN.AddNeighbors(dir);
+            }
+        }
+
+        foreach (ShortVisitedArea v in S.VisitedAreas) {
+            SR.MarkVisited(v.X, v.FromY, v.ToX, v.ToY);
+        }
+    }
+
+    // ------------------------------------------------------------ the search
+
+    // openbw: pathfinder_find_short_path(pf, target, target_region)
+    //
+    // Returns the short path as a list of positions.
+    public List<int[]> Run(int sourceX, int sourceY, int targetX, int targetY,
+                           int targetRegion, int sourceRegion, int destinationRegion,
+                           int destinationX, int destinationY) {
+        ShortPathPoints = new List<int[]>();
+        HighestOpenSize = 0;
+        Nodes = new List<ShortNode>();
+        Open = new List<int>();
+        SR.AreaVisited = new List<VisitedColumn>();
+        // openbw: the visited area starts with the two border columns
+        // (bwgame.h 9515-9517).
+        {
+            VisitedColumn c0 = new VisitedColumn();
+            c0.X = 0;
+            c0.Ys = new List<int[]>();
+            SR.AreaVisited.Add(c0);
+            VisitedColumn c1 = new VisitedColumn();
+            c1.X = R.MapWidth;
+            c1.Ys = new List<int[]>();
+            SR.AreaVisited.Add(c1);
+        }
+        SR.NodesInNeighborRegion = 0;
+        SR.NodesInTargetRegion = 0;
+        HasFoundGoal = false;
+        IsTired = false;
+        S.TraceOn = TraceOn;
+        Step = 0;
+
+        S.TargetX = targetX;
+        S.TargetY = targetY;
+        S.TargetRegion = targetRegion;
+        S.SourceRegion = sourceRegion;
+        S.DestinationRegion = destinationRegion;
+        S.MoveToRegion = targetRegion >= 0 ? targetRegion : destinationRegion;
+
+        // openbw: the neighbours of the move-to region are marked with
+        // pathfinder_flag = 1 (bwgame.h 9430-9432); nodes in those regions are
+        // "neighbour region" nodes and the search prefers them.
+        foreach (int nr in R.RegionsList[S.MoveToRegion].WalkableNeighbors) {
+            if (nr == sourceRegion) continue;
+            R.RegionsList[nr].PathfinderFlag = 1;
+        }
+
+        ShortNode startNode = new ShortNode();
+        startNode.PosX = sourceX;
+        startNode.PosY = sourceY;
+        startNode.EstimatedRemainingCostRaw = Fp.Integer(128 * 128).RawValue();
+        startNode.EstimatedFinalCostRaw = startNode.EstimatedRemainingCostRaw;
+        startNode.DirectionalFlags = 0xff;
+        startNode.RegionIndex = sourceRegion;
+        Nodes.Add(startNode);
+        Open.Add(0);
+        HeapUp(Open.Count - 1);
+
+        int goalNode = -1;
+        // openbw: target_is_destination = (target == pf.destination)
+        bool targetIsDestination = targetX == destinationX && targetY == destinationY;
+
+        while (Open.Count != 0) {
+            int cur = Open[0];
+            Swap(0, Open.Count - 1);
+            Open.RemoveAt(Open.Count - 1);
+            HeapDown(0);
+            if (TraceOn) {
+                Console.WriteLine("STEP " + Step + " pop pos=" + Nodes[cur].PosX + "," + Nodes[cur].PosY
+                    + " total=" + Nodes[cur].TotalCostRaw
+                    + " rem=" + Nodes[cur].EstimatedRemainingCostRaw
+                    + " flags=0x" + Hex(Nodes[cur].DirectionalFlags)
+                    + " region=" + Nodes[cur].RegionIndex
+                    + " open=" + Open.Count + " nodes=" + Nodes.Count);
+                Step++;
+            }
+
+            if (Nodes[cur].IsGoal) {
+                goalNode = cur;
+                S.DestinationReached = true;
+                break;
+            }
+
+            if (Nodes[cur].DirectionalFlags != 0) {
+                Nodes[cur].DirectionalFlags =
+                    SR.RemoveVisitedFlags(Nodes[cur].PosX, Nodes[cur].PosY, Nodes[cur].DirectionalFlags);
+            }
+
+            bool isExhausted;
+            if (SR.NodesInTargetRegion <= 0 || HasFoundGoal
+                || (targetIsDestination && Nodes.Count < 150)) {
+                isExhausted = IsTired;
+            } else {
+                isExhausted = true;
+                IsTired = true;
+            }
+            if (SR.NodesInNeighborRegion != 0 && !HasFoundGoal) {
+                if (Nodes.Count >= 200) {
+                    isExhausted = true;
+                    IsTired = true;
+                }
+            }
+            if (Nodes[cur].IsTargetRegion && isExhausted) {
+                goalNode = cur;
+                break;
+            }
+            Nodes[cur].Visited = true;
+            if (Nodes[cur].IsTargetRegion) --SR.NodesInTargetRegion;
+            if (Nodes[cur].IsNeighborRegion) {
+                --SR.NodesInNeighborRegion;
+                if (isExhausted) break;
+            }
+            if (HasFoundGoal || isExhausted || Nodes[cur].DirectionalFlags == 0) {
+                continue;
+            }
+
+            GenerateNeighbors(Nodes[cur].PosX, Nodes[cur].PosY, Nodes[cur].DirectionalFlags);
+
+            bool foundGoal = false;
+            foreach (ShortNeighbor v in S.Neighbors) {
+                if (TraceOn) {
+                    Console.WriteLine("  NB " + v.PosX + "," + v.PosY + " flags=0x" + Hex(v.Flags)
+                        + " goal=" + (v.IsGoal ? 1 : 0));
+                }
+                if (v.IsGoal) {
+                    foundGoal = true;
+                } else {
+                    if (v.Flags != 0) {
+                        v.Flags = SR.RemoveVisitedFlags(v.PosX, v.PosY, v.Flags);
+                        if (v.Flags == 0) continue;
+                    }
+                }
+                int nRegion = S.Pf.GetRegionAt(v.PosX, v.PosY);
+                int cost = XyLengthFp8((v.PosX << 8) - (Nodes[cur].PosX << 8),
+                                        (v.PosY << 8) - (Nodes[cur].PosY << 8));
+                bool targetRegionWalkable = targetRegion >= 0 && R.RegionsList[targetRegion].Walkable();
+                if (targetRegionWalkable && nRegion != targetRegion && nRegion != sourceRegion) {
+                    cost = (Fp.FromRaw(cost) * 2).RawValue();
+                }
+                int totalCost = (Fp.FromRaw(Nodes[cur].TotalCostRaw) + Fp.FromRaw(cost)).RawValue();
+
+                int n = -1;
+                for (int i = 1; i != Nodes.Count; ++i) {
+                    if (Nodes[i].PosX == v.PosX && Nodes[i].PosY == v.PosY) {
+                        n = i;
+                        break;
+                    }
+                }
+                if (n < 0) {
+                    ShortNode node = new ShortNode();
+                    Nodes.Add(node);
+                    n = Nodes.Count - 1;
+                    node.Prev = cur;
+                    node.PosX = v.PosX;
+                    node.PosY = v.PosY;
+                    node.RegionIndex = nRegion;
+                    node.Depth = Nodes[cur].Depth + 1;
+                    node.DirectionalFlags = v.Flags;
+                    node.TotalCostRaw = totalCost;
+                    node.EstimatedRemainingCostRaw =
+                        XyLengthFp8((targetX << 8) - (v.PosX << 8),
+                                  (targetY << 8) - (v.PosY << 8));
+                    node.EstimatedFinalCostRaw =
+                        (Fp.FromRaw(node.TotalCostRaw) + Fp.FromRaw(node.EstimatedRemainingCostRaw)).RawValue();
+                    node.Visited = node.DirectionalFlags == 0 && !node.IsGoal;
+                    node.IsTargetRegion = node.RegionIndex == targetRegion;
+                    node.IsNeighborRegion = R.RegionsList[node.RegionIndex].PathfinderFlag != 0;
+                    node.IsGoal = v.IsGoal;
+                    if (!node.Visited) {
+                        Open.Add(n);
+                        HeapUp(Open.Count - 1);
+                        if (node.IsTargetRegion) ++SR.NodesInTargetRegion;
+                        if (node.IsNeighborRegion) ++SR.NodesInNeighborRegion;
+                    }
+                    if (Open.Count == 150) break;
+                    if (Nodes.Count == 250) break;
+                } else if (Nodes[cur].Prev != n) {
+                    if (totalCost < Nodes[n].TotalCostRaw) {
+                        Nodes[n].Prev = cur;
+                        Nodes[n].Depth = Nodes[cur].Depth + 1;
+                        Nodes[n].TotalCostRaw = totalCost;
+                        int estimatedFinalCost =
+                            (Fp.FromRaw(Nodes[n].TotalCostRaw) + Fp.FromRaw(Nodes[n].EstimatedRemainingCostRaw)).RawValue();
+                        if (Nodes[n].Visited) {
+                            Nodes[n].DirectionalFlags = v.Flags;
+                            Nodes[n].EstimatedFinalCostRaw = estimatedFinalCost;
+                            Nodes[n].Visited = false;
+                            Nodes[n].IsGoal = v.IsGoal;
+                            Open.Add(n);
+                            HeapUp(Open.Count - 1);
+                            if (Nodes[n].IsTargetRegion) ++SR.NodesInTargetRegion;
+                            if (Nodes[n].IsNeighborRegion) ++SR.NodesInNeighborRegion;
+                        } else {
+                            Nodes[n].EstimatedFinalCostRaw = estimatedFinalCost;
+                            int pos = Open.IndexOf(n);
+                            if (pos >= 0) HeapUp(pos);
+                        }
+                        if (Open.Count == 150) break;
+                    } else if (!Nodes[n].Visited) {
+                        Nodes[n].DirectionalFlags &= v.Flags;
+                    }
+                }
+            }
+
+            if (Open.Count > HighestOpenSize) {
+                HighestOpenSize = Open.Count;
+            }
+
+            HasFoundGoal = foundGoal;
+            if (Open.Count == 150 || Nodes.Count == 250) {
+                if (!foundGoal && SR.NodesInTargetRegion == 0) break;
+            }
+        }
+
+        AllNodesSize = Nodes.Count;
+
+        if (goalNode < 0) {
+            int nUnvisitedNodes = 0;
+            int nUnvisitedDestinationRegionNodes = 0;
+            for (int i = 1; i != Nodes.Count; ++i) {
+                if (R.RegionsList[Nodes[i].RegionIndex].PathfinderFlag != 0) {
+                    R.RegionsList[Nodes[i].RegionIndex].PathfinderFlag++;
+                }
+                if (!Nodes[i].Visited) {
+                    if (Nodes[i].DirectionalFlags != 0) {
+                        Nodes[i].DirectionalFlags =
+                            SR.RemoveVisitedFlags(Nodes[i].PosX, Nodes[i].PosY, Nodes[i].DirectionalFlags);
+                    }
+                    if (Nodes[i].DirectionalFlags != 0) {
+                        ++nUnvisitedNodes;
+                        if (Nodes[i].RegionIndex == S.DestinationRegion) {
+                            ++nUnvisitedDestinationRegionNodes;
+                        }
+                    } else {
+                        Nodes[i].Visited = true;
+                        if (Nodes[i].IsTargetRegion) --SR.NodesInTargetRegion;
+                    }
+                }
+            }
+
+            if (targetIsDestination) {
+                nUnvisitedNodes = nUnvisitedDestinationRegionNodes;
+                foreach (int nr in R.RegionsList[S.MoveToRegion].WalkableNeighbors) {
+                    if (nr == sourceRegion) continue;
+                    if (R.RegionsList[nr].PathfinderFlag < 2) {
+                        ++nUnvisitedNodes;
+                        break;
+                    } else {
+                        nUnvisitedNodes -= R.RegionsList[nr].PathfinderFlag / 2;
+                        if (nUnvisitedNodes < 0) nUnvisitedNodes = 0;
+                    }
+                }
+            }
+
+            goalNode = 0;
+            Nodes[0].EstimatedRemainingCostRaw =
+                XyLengthFp8((targetX << 8) - (Nodes[0].PosX << 8),
+                            (targetY << 8) - (Nodes[0].PosY << 8));
+            if (nUnvisitedNodes == 0 && SR.NodesInTargetRegion == 0) {
+                int bestCost = Fp.Integer(128 * 128).RawValue();
+                if (SR.NodesInTargetRegion == 0) {
+                    bestCost = Nodes[0].EstimatedRemainingCostRaw;
+                }
+                int bestNode = 0;
+                for (int i = 1; i != Nodes.Count; ++i) {
+                    if (Nodes[i].EstimatedRemainingCostRaw < bestCost) {
+                        bool ok = targetIsDestination
+                               || Nodes[i].RegionIndex == sourceRegion
+                               || (SR.NodesInTargetRegion != 0 && Nodes[i].RegionIndex == S.DestinationRegion);
+                        if (ok) {
+                            bestCost = Nodes[i].EstimatedRemainingCostRaw;
+                            bestNode = i;
+                        }
+                    }
+                }
+                goalNode = bestNode;
+                S.DestinationReached = true;
+                S.IsStuck = true;
+            } else {
+                int bestCost = Fp.Integer(128 * 128).RawValue();
+                int bestNode = 0;
+                for (int i = 1; i != Nodes.Count; ++i) {
+                    int cost = Nodes[i].EstimatedRemainingCostRaw;
+                    if (Nodes[i].RegionIndex == S.DestinationRegion || Nodes[i].RegionIndex == targetRegion) {
+                        // cost += total_cost / 2
+                        cost = (Fp.FromRaw(cost) + Fp.FromRaw(Nodes[i].TotalCostRaw) / 2).RawValue();
+                    } else {
+                        if (R.RegionsList[Nodes[i].RegionIndex].PathfinderFlag != 0) {
+                            // cost = cost * 3 / 2
+                            cost = (Fp.FromRaw(cost) * 3 / 2).RawValue();
+                        } else {
+                            if (Nodes[i].RegionIndex == sourceRegion) {
+                                cost = (Fp.FromRaw(cost) * 2).RawValue();
+                            } else {
+                                cost = (Fp.FromRaw(cost) * 4).RawValue();
+                            }
+                        }
+                    }
+                    if (Nodes[i].Visited) cost = (Fp.FromRaw(cost) * 32).RawValue();
+                    if (cost < bestCost) {
+                        bestCost = cost;
+                        bestNode = i;
+                    }
+                }
+                goalNode = bestNode;
+            }
+        }
+
+        // openbw: the path runs from the goal back to the start, excluding the
+        // start itself, and is capped at 128 points (50 after the tail fold).
+        ShortPathPoints = new List<int[]>();
+        int n = goalNode;
+        while (n != 0 && ShortPathPoints.Count < 128) {
+            ShortPathPoints.Insert(0, new int[] { Nodes[n].PosX, Nodes[n].PosY });
+            n = Nodes[n].Prev;
+        }
+        if (ShortPathPoints.Count > 50) {
+            ShortPathPoints[49] = ShortPathPoints[ShortPathPoints.Count - 1];
+            ShortPathPoints = new List<int[]>();
+            for (int i = 0; i < 50; ++i) {
+                ShortPathPoints.Add(ShortPathPoints[i]);
+            }
+        }
+
+        foreach (int nr in R.RegionsList[S.MoveToRegion].WalkableNeighbors) {
+            if (nr == sourceRegion) continue;
+            R.RegionsList[nr].PathfinderFlag = 0;
+        }
+
+        // openbw: only the move-to region's neighbours are cleared
+        // (bwgame.h 10556-10559).
+        foreach (int nr in R.RegionsList[S.MoveToRegion].WalkableNeighbors) {
+            if (nr == sourceRegion) continue;
+            R.RegionsList[nr].PathfinderFlag = 0;
+        }
+
+        return ShortPathPoints;
+    }
+
+    public int AllNodesSize;
+    public bool TraceOn;
+    public int Step;
+
+    // A small hex formatter, matching printf("%x").
+    public static string Hex(int v) {
+        if (v == 0) return "0";
+        string digits = "0123456789abcdef";
+        string r = "";
+        int x = v;
+        while (x != 0) {
+            r = digits[x & 0xf] + r;
+            x = x >> 4;
+        }
+        return r;
+    }
+
+    // openbw: xy_length(xy vec) -- the integer approximation of the length.
+    public static int XyLength(int vx, int vy) {
+        int x = vx < 0 ? -vx : vx;
+        int y = vy < 0 ? -vy : vy;
+        if (x < y) {
+            int t = x;
+            x = y;
+            y = t;
+        }
+        if (x / 4 < y) {
+            x = x - x / 16 + y * 3 / 8 - x / 64 + y * 3 / 256;
+        }
+        return x;
+    }
+
+    // openbw: xy_length(xy_fp8 vec) -> fp8::from_raw(...)
+    public static int XyLengthFp8(int rawX, int rawY) {
+        return XyLength(rawX, rawY);
+    }
+}

@@ -7,8 +7,9 @@
 # Builds both sides, runs them over the same frames, and diffs the traces.
 # Any difference (including the RNG audit line) is a hard failure.
 #
-# The regions layer has its own script (check_regions.sh) because it is a
-# separate, non-frame-based comparison.
+# The regions layer (check_regions.sh), the long path A* (check_astar.sh) and
+# the short path search (check_shortpath.sh) have their own scripts because
+# they are separate, non-frame-based comparisons.
 
 set -uo pipefail
 
@@ -52,3 +53,9 @@ if [ "$FAIL" -ne 0 ]; then
     exit 1
 fi
 echo "== ALL SCENARIOS BIT-IDENTICAL =="
+
+# The non-frame-based layers run their own scripts.
+for sub in check_regions.sh check_astar.sh check_shortpath.sh; do
+    echo "== $sub =="
+    bash "$sub" || exit 1
+done

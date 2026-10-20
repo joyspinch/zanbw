@@ -1,0 +1,254 @@
+using System;
+
+// The neighbour expansion of the short path search.
+//
+// Port of the add_neighbors lambda of pathfinder_find_short_path()
+// (openbw/bwgame.h 9807-10222). The four directions are symmetric but not
+// identical, so each one is ported literally.
+
+public class ShortPathNeighbors {
+    public ShortPath S;
+
+    public ShortPathNeighbors(ShortPath s) {
+        S = s;
+    }
+
+    public Regions R { get { return S.R; } }
+
+    // openbw: expand_inner(c)
+    //
+    // The C++ takes the contour by value and returns an expanded copy; the
+    // port must copy too, because ShortContour has reference semantics and the
+    // source lives in the local edge list.
+    public ShortContour ExpandInner(ShortContour c) {
+        ShortContour r = new ShortContour();
+        r.V0 = c.V0 + S.Inner[c.Dir];
+        r.V1 = c.V1 + S.Inner[c.Flags & 3];
+        r.V2 = c.V2 + S.Inner[(c.Flags >> 2) & 3];
+        r.Dir = c.Dir;
+        r.Flags = c.Flags;
+        return r;
+    }
+
+    // openbw: expand_outer(c)
+    public ShortContour ExpandOuter(ShortContour c) {
+        ShortContour r = new ShortContour();
+        r.V0 = c.V0 + S.Outer[c.Dir];
+        r.V1 = c.V1 + S.Outer[c.Flags & 3];
+        r.V2 = c.V2 + S.Outer[(c.Flags >> 2) & 3];
+        r.Dir = c.Dir;
+        r.Flags = c.Flags;
+        return r;
+    }
+
+    // A small hex formatter, matching printf("%x").
+    public static string Hex(int v) {
+        if (v == 0) return "0";
+        string digits = "0123456789abcdef";
+        string r = "";
+        int x = v;
+        while (x != 0) {
+            r = digits[x & 0xf] + r;
+            x = x >> 4;
+        }
+        return r;
+    }
+
+    // openbw: pf_add_neighbor(pos, flags)
+    public void AddNeighbor(int posX, int posY, int flags) {
+        if (!IsInMapBounds(posX, posY)) return;
+        if (posX == S.CurPosX && posY == S.CurPosY) return;
+        bool isGoal = false;
+        if (S.HasTargetUnit) {
+            if (posX == S.TargetUnitBbFromX || posX == S.TargetUnitBbToX) {
+                if (posY >= S.TargetUnitBbFromY && posY <= S.TargetUnitBbToY) {
+                    isGoal = true;
+                }
+            }
+            if (posY == S.TargetUnitBbFromY || posY == S.TargetUnitBbToY) {
+                if (posX >= S.TargetUnitBbFromX && posX <= S.TargetUnitBbToX) {
+                    isGoal = true;
+                }
+            }
+        }
+        if (posX == S.TargetX && posY == S.TargetY) isGoal = true;
+        if (isGoal) {
+            flags = 0xff;
+            S.HasFoundGoal = true;
+        }
+        if (S.Neighbors.Count < 32) {
+            if (isGoal || S.Neighbors.Count == 0) {
+                if (S.TraceOn) {
+                    Console.WriteLine("  ADD " + posX + "," + posY + " flags=0x" + Hex(flags)
+                        + " goal=" + (isGoal ? 1 : 0));
+                }
+                ShortNeighbor n = new ShortNeighbor();
+                n.PosX = posX;
+                n.PosY = posY;
+                n.Flags = flags;
+                n.IsGoal = isGoal;
+                S.Neighbors.Add(n);
+            } else {
+                int found = -1;
+                for (int i = 0; i != S.Neighbors.Count; ++i) {
+                    if (S.Neighbors[i].PosX == posX && S.Neighbors[i].PosY == posY) {
+                        found = i;
+                        break;
+                    }
+                }
+                if (found >= 0) {
+                    S.Neighbors[found].Flags &= flags;
+                } else {
+                    if (S.TraceOn) {
+                        Console.WriteLine("  ADD " + posX + "," + posY + " flags=0x" + Hex(flags)
+                            + " goal=" + (isGoal ? 1 : 0));
+                    }
+                    ShortNeighbor n = new ShortNeighbor();
+                    n.PosX = posX;
+                    n.PosY = posY;
+                    n.Flags = flags;
+                    n.IsGoal = isGoal;
+                    S.Neighbors.Add(n);
+                }
+            }
+        }
+    }
+
+    // openbw: pf_local_edges_find(dir, v, v0, v1, v2) -> const contour*
+    // The port returns the index into the local edge list, or -1 for none.
+    public int LocalEdgesFind(int dir, int v, int v0, int v1, int v2) {
+        List<ShortContour> edges = S.LocalEdges[dir];
+        if (dir == 0) {
+            // openbw: upper_bound(c0.begin(), c0.end(), v - inner[0], cmp_u)
+            int i = UpperBoundByV0(edges, v - S.Inner[0]);
+            while (i != 0) {
+                --i;
+                ShortContour c = edges[i];
+                if (c.V0 + S.Inner[0] < v2) break;
+                int lo = c.V1 + S.Inner[c.Flags & 3];
+                if (lo < v0) lo = v0;
+                int hi = c.V2 + S.Inner[(c.Flags >> 2) & 3];
+                if (hi > v1) hi = v1;
+                if (lo <= hi) return i;
+            }
+        } else if (dir == 1) {
+            int i = LowerBoundByV0(edges, v - S.Inner[1]);
+            while (i != edges.Count) {
+                ShortContour c = edges[i];
+                if (c.V0 + S.Inner[1] > v2) break;
+                int lo = c.V1 + S.Inner[c.Flags & 3];
+                if (lo < v0) lo = v0;
+                int hi = c.V2 + S.Inner[(c.Flags >> 2) & 3];
+                if (hi > v1) hi = v1;
+                if (lo <= hi) return i;
+                ++i;
+            }
+        } else if (dir == 2) {
+            int i = LowerBoundByV0(edges, v - S.Inner[2]);
+            while (i != edges.Count) {
+                ShortContour c = edges[i];
+                if (c.V0 + S.Inner[2] > v2) break;
+                int lo = c.V1 + S.Inner[c.Flags & 3];
+                if (lo < v0) lo = v0;
+                int hi = c.V2 + S.Inner[(c.Flags >> 2) & 3];
+                if (hi > v1) hi = v1;
+                if (lo <= hi) return i;
+                ++i;
+            }
+        } else {
+            int i = UpperBoundByV0(edges, v - S.Inner[3]);
+            while (i != 0) {
+                --i;
+                ShortContour c = edges[i];
+                if (c.V0 + S.Inner[3] < v2) break;
+                int lo = c.V1 + S.Inner[c.Flags & 3];
+                if (lo < v0) lo = v0;
+                int hi = c.V2 + S.Inner[(c.Flags >> 2) & 3];
+                if (hi > v1) hi = v1;
+                if (lo <= hi) return i;
+            }
+        }
+        return -1;
+    }
+
+    // openbw: lower_bound(begin, end, v, cmp_l) -- first index with v[0] >= v
+    public int LowerBoundByV0(List<ShortContour> edges, int v) {
+        int lo = 0;
+        int hi = edges.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (edges[mid].V0 < v) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: upper_bound(begin, end, v, cmp_u) -- first index with v[0] > v
+    public int UpperBoundByV0(List<ShortContour> edges, int v) {
+        int lo = 0;
+        int hi = edges.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (edges[mid].V0 <= v) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: lower_bound(begin, end, v, cmp_l) over the region contours
+    public int LowerBoundByV0Raw(List<Contour> contours, int v) {
+        int lo = 0;
+        int hi = contours.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (contours[mid].V0 < v) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: upper_bound(begin, end, v, cmp_u) over the region contours
+    public int UpperBoundByV0Raw(List<Contour> contours, int v) {
+        int lo = 0;
+        int hi = contours.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (contours[mid].V0 <= v) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: is_in_map_bounds(pos)
+    public bool IsInMapBounds(int posX, int posY) {
+        if (posX < 0 || posY < 0) return false;
+        if (posX >= R.MapWidth || posY >= R.MapHeight) return false;
+        return true;
+    }
+
+    // openbw: visit_area(from_x, from_y, to_x, to_y)
+    public void VisitArea(int fromX, int fromY, int toX, int toY) {
+        if (toX < fromX) { int t = fromX; fromX = toX; toX = t; }
+        if (toY < fromY) { int t = fromY; fromY = toY; toY = t; }
+        if (S.TargetX >= fromX && S.TargetX <= toX) {
+            if (S.TargetY >= fromY && S.TargetY <= toY) {
+                ShortNeighbor n = new ShortNeighbor();
+                n.PosX = S.TargetX;
+                n.PosY = S.TargetY;
+                n.Flags = 0xff;
+                n.IsGoal = true;
+                if (S.TraceOn) {
+                    Console.WriteLine("  GOALAREA " + S.TargetX + "," + S.TargetY);
+                }
+                S.Neighbors.Add(n);
+                S.HasFoundGoal = true;
+            }
+        }
+        ShortVisitedArea va = new ShortVisitedArea();
+        va.X = fromX;
+        va.ToX = toX;
+        va.FromY = fromY;
+        va.ToY = toY;
+        S.VisitedAreas.Add(va);
+    }
+}

@@ -8,3 +8,4 @@ tools/cppbed/audit_*.txt
 
 # Throwaway probes
 _scratch/
+tools/cppbed/openbw_traced.h

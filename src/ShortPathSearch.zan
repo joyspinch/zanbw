@@ -1,0 +1,170 @@
+using System;
+
+// The main search loop of the short path.
+//
+// Port of pathfinder_find_short_path() (openbw/bwgame.h 9421-10560), minus
+// the parts that need a live unit list (pf_add_local_units) -- the bed has no
+// other units, so the unit finder lists are empty.
+
+public class ShortPathSearch {
+    public ShortPath S;
+    public ShortPathNeighbors N;
+    public ShortPathAddNeighbors AN;
+
+    // the area visited so far, used to prune directions that are known to be
+    // blocked; openbw keeps it as a sorted list of columns
+    public List<VisitedColumn> AreaVisited;
+
+    public int NodesInNeighborRegion;
+    public int NodesInTargetRegion;
+
+    public ShortPathSearch(ShortPath s) {
+        S = s;
+        N = new ShortPathNeighbors(s);
+        AN = new ShortPathAddNeighbors(s, N);
+        AreaVisited = new List<VisitedColumn>();
+    }
+
+    public Regions R { get { return S.R; } }
+
+    // ------------------------------------------------------- visited areas
+
+    // openbw: pf_remove_visited_flags(pos, flags)
+    public int RemoveVisitedFlags(int posX, int posY, int flags) {
+        // openbw keeps the list sorted by x; the port searches for the column
+        // that contains posX.
+        int cur = -1;
+        for (int i = 0; i != AreaVisited.Count; ++i) {
+            if (AreaVisited[i].X <= posX) cur = i;
+            else break;
+        }
+        if (cur < 0) return flags;
+        VisitedColumn col = AreaVisited[cur];
+
+        int i = 0;
+        while (i != col.Ys.Count) {
+            if (posY <= col.Ys[i][1]) break;
+            ++i;
+        }
+        if (i == col.Ys.Count) return flags;
+        int mask = 0;
+        if (posY <= col.Ys[i][0]) mask |= 0x19;
+        if (posY >= col.Ys[i][1]) mask |= 0x46;
+        if (posX == col.X) {
+            mask |= 0x8c;
+            if (cur != 0) {
+                VisitedColumn prev = AreaVisited[cur - 1];
+                int j = 0;
+                while (j != prev.Ys.Count) {
+                    if (posY <= prev.Ys[j][1]) break;
+                    ++j;
+                }
+                if (j != prev.Ys.Count) {
+                    if (posY >= prev.Ys[j][0] && posY <= prev.Ys[j][1]) {
+                        mask &= 0x7f;
+                        if (posY > prev.Ys[j][0]) mask &= 0xf7;
+                        if (posY < prev.Ys[j][1]) mask &= 0xfb;
+                    }
+                }
+            }
+        }
+        int next = cur + 1;
+        if (next < AreaVisited.Count) {
+            VisitedColumn nextCol = AreaVisited[next];
+            if (posX == nextCol.X - 1) {
+                mask |= 0x23;
+                int j = 0;
+                while (j != nextCol.Ys.Count) {
+                    if (posY <= nextCol.Ys[j][1]) break;
+                    ++j;
+                }
+                if (j != nextCol.Ys.Count) {
+                    if (posY >= nextCol.Ys[j][0] && posY <= nextCol.Ys[j][1]) {
+                        mask &= 0xdf;
+                        if (posY > nextCol.Ys[j][0]) mask &= 0xfe;
+                        if (posY < nextCol.Ys[j][1]) mask &= 0xfd;
+                    }
+                }
+            }
+        }
+        return flags & mask;
+    }
+
+    public List<int[]> CopyRanges(List<int[]> src) {
+        List<int[]> r = new List<int[]>();
+        foreach (int[] p in src) {
+            r.Add(new int[] { p[0], p[1] });
+        }
+        return r;
+    }
+
+    // openbw: pf_mark_visited(area)
+    public void MarkVisited(int fromX, int fromY, int toX, int toY) {
+        // find the insertion point for fromX
+        int next = 0;
+        while (next != AreaVisited.Count && AreaVisited[next].X <= fromX) {
+            ++next;
+        }
+        if (next == 0) return;
+        int cur = next - 1;
+        if (fromX > AreaVisited[cur].X) {
+            if (AreaVisited.Count == 128 + 1) return;
+            // openbw inserts a copy of the current column's y ranges
+            VisitedColumn col = new VisitedColumn();
+            col.X = fromX;
+            col.Ys = CopyRanges(AreaVisited[cur].Ys);
+            AreaVisited.Insert(next, col);
+            ++next;
+            cur = next - 1;
+        }
+        if (fromX > toX) return;
+        while (true) {
+            if (AreaVisited[next].X > toX + 1) {
+                if (AreaVisited.Count == 128 + 1) return;
+                VisitedColumn col = new VisitedColumn();
+                col.X = toX + 1;
+                col.Ys = CopyRanges(AreaVisited[cur].Ys);
+                AreaVisited.Insert(next, col);
+                --next;
+            }
+            VisitedColumn column = AreaVisited[cur];
+            int i = 0;
+            while (i != column.Ys.Count) {
+                if (fromY <= column.Ys[i][1] + 1) break;
+                ++i;
+            }
+            if (i == column.Ys.Count) {
+                if (column.Ys.Count == 10) return;
+                column.Ys.Insert(i, new int[] { fromY, toY });
+            } else {
+                if (toY < column.Ys[i][0] - 1 || fromY > column.Ys[i][1] + 1) {
+                    if (column.Ys.Count == 10) return;
+                    column.Ys.Insert(i, new int[] { fromY, toY });
+                } else {
+                    if (column.Ys[i][0] > fromY) column.Ys[i][0] = fromY;
+                    if (column.Ys[i][1] < toY) column.Ys[i][1] = toY;
+                    // merge the following ranges that now touch
+                    //
+                    // openbw: t = std::prev(cur->y.erase(n)) -- after erasing,
+                    // t stays on the element *before* the erased one, so the
+                    // loop looks at the same slot again.
+                    int t = 0;
+                    while (t + 1 < column.Ys.Count) {
+                        int nn = t + 1;
+                        if (column.Ys[nn][0] - 1 <= column.Ys[t][1]) {
+                            if (column.Ys[nn][1] > column.Ys[t][1]) column.Ys[t][1] = column.Ys[nn][1];
+                            column.Ys.RemoveAt(nn);
+                            // t keeps pointing at the same slot, which now
+                            // holds the element that followed the erased one
+                        } else {
+                            t = nn;
+                        }
+                    }
+                }
+            }
+            ++cur;
+            ++next;
+            if (!(AreaVisited[cur].X <= toX)) break;
+        }
+    }
+}

@@ -48,10 +48,15 @@ public class Region {
     // pointer here (regions_t::region::pathfinder_node).
     public int PathfinderNode;
 
+    // The short path search's counter on the region; openbw stores it in
+    // regions_t::region::pathfinder_flag.
+    public int PathfinderFlag;
+
     public Region() {
         Flags = 0x1FFD;
         Index = -1;
         PathfinderNode = -1;
+        PathfinderFlag = 0;
     }
 
     // openbw: bool walkable() const { return flags != 0x1ffd; }

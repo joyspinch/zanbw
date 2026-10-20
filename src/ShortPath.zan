@@ -1,0 +1,131 @@
+using System;
+
+// The short-path (contour) search of openbw's pathfinder.
+//
+// Port of pathfinder_find_short_path() (openbw/bwgame.h 9421-10560).
+//
+// The long path gives the sequence of regions to pass through. The short
+// path refines one hop: it walks the contour edges of the walkable area,
+// producing the positions the unit should actually follow.
+//
+// The search works on a 1/8-scale grid: the unit's bounding box is expanded
+// into "inner" and "outer" offsets, and the contour edges of the region
+// (see RegionsContours.zan) act as walls that the path must go around.
+
+// A contour edge in the search's local coordinate space.
+public class ShortContour {
+    public int V0;
+    public int V1;
+    public int V2;
+    public int Dir;
+    public int Flags;
+}
+
+// A candidate neighbour of the current position.
+public class ShortNeighbor {
+    public int PosX;
+    public int PosY;
+    public int Flags;
+    public bool IsGoal;
+}
+
+// A node of the short path search.
+public class ShortNode {
+    public int Prev;              // index of the predecessor node, -1 for none
+    public int PosX;
+    public int PosY;
+    public int TotalCostRaw;
+    public int EstimatedRemainingCostRaw;
+    public int EstimatedFinalCostRaw;
+    public bool IsGoal;
+    public int Depth;
+    public int DirectionalFlags;
+    public int RegionIndex;
+    public bool IsTargetRegion;
+    public bool IsNeighborRegion;
+    public bool Visited;
+
+    public ShortNode() {
+        Prev = -1;
+        RegionIndex = -1;
+        Visited = false;
+    }
+}
+
+// A rectangle of already-visited area, produced by visit_area() during one
+// expansion step. openbw keeps these in w.visited_areas and replays them
+// into the column-wise area at the end of the expansion.
+public class ShortVisitedArea {
+    public int X;
+    public int ToX;
+    public int FromY;
+    public int ToY;
+}
+
+// A column of the accumulated visited area.
+//
+// openbw: struct visited { int x; a_vector<std::pair<int, int>> y; };
+// The y ranges are kept sorted and non-overlapping.
+public class VisitedColumn {
+    public int X;
+    public List<int[]> Ys;
+}
+
+public class ShortPath {
+    public Regions R;
+    public Pathfinder Pf;
+
+    // The unit's inner/outer offsets, indexed by direction 0..3.
+    public int[] Inner;
+    public int[] Outer;
+
+    // the current search state
+    public bool HasFoundGoal;
+    public bool TraceOn;
+    public int CurPosX;
+    public int CurPosY;
+    public int CurPosMaxX;
+    public int CurPosMaxY;
+    public int CurPosMinX;
+    public int CurPosMinY;
+    public List<List<ShortContour>> LocalEdges;
+    public ShortContour[] NearestEdge;
+    public List<ShortNeighbor> Neighbors;
+    public List<ShortVisitedArea> VisitedAreas;
+
+    public List<ShortNode> Nodes;
+    public List<int> Open;
+
+    public int TargetX;
+    public int TargetY;
+    public int TargetRegion;
+
+    public int SourceRegion;
+    public int MoveToRegion;
+    public int DestinationRegion;
+    public bool DestinationReached;
+    public bool IsStuck;
+
+    // the target unit, if any; the search treats its bounding box as the goal
+    public bool HasTargetUnit;
+    public int TargetUnitBbFromX;
+    public int TargetUnitBbFromY;
+    public int TargetUnitBbToX;
+    public int TargetUnitBbToY;
+
+    public ShortPath(Regions r, Pathfinder pf) {
+        R = r;
+        Pf = pf;
+        Inner = new int[4];
+        Outer = new int[4];
+        LocalEdges = new List<List<ShortContour>>();
+        for (int i = 0; i < 4; i++) {
+            LocalEdges.Add(new List<ShortContour>());
+        }
+        NearestEdge = new ShortContour[4];
+        Neighbors = new List<ShortNeighbor>();
+        VisitedAreas = new List<ShortVisitedArea>();
+        Nodes = new List<ShortNode>();
+        Open = new List<int>();
+    }
+}

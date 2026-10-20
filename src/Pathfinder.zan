@@ -20,6 +20,22 @@ public class Pathfinder {
     public int SourceRegion;
     public int DestinationRegion;
 
+    // the unit's start and end points, in map pixels
+    public int Source;
+    public int SourceY;
+    public int Destination;
+    public int DestinationY;
+
+    public bool DestinationReached;
+    public bool IsStuck;
+
+    // the index into LongPath that the next short path hop starts from
+    public int CurrentLongPathIndex;
+    public int ShortAllNodesSize;
+    public int ShortHighestOpenSize;
+    public List<int[]> ShortPath;
+    public int ShortPathIndex;
+
     public Pathfinder(Regions r) {
         R = r;
         Search = new AStar(r);
@@ -34,6 +50,16 @@ public class Pathfinder {
             SplitRegion split = R.SplitRegions[index - 0x2000];
             if ((split.Mask & (1 << maskIndex)) != 0) return split.B;
             else return split.A;
+        }
+        return index;
+    }
+
+    // openbw: get_region_at_prefer_walkable(pos) -- ignores the split region
+    // mask and always returns the 'a' half.
+    public int GetRegionAtPreferWalkable(int posX, int posY) {
+        int index = R.TileRegionIndex[(posY / 32) * 256 + (posX / 32)];
+        if (index >= 0x2000) {
+            return R.SplitRegions[index - 0x2000].A;
         }
         return index;
     }

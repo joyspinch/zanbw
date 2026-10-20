@@ -1,0 +1,434 @@
+using System;
+
+// The add_neighbors() body of the short path search.
+//
+// Port of openbw/bwgame.h 9807-10222. The four directions are symmetric in
+// shape but differ in details, so each one is ported literally rather than
+// generalised -- a generalised version would be shorter but would not be
+// verifiable against the original.
+
+public class ShortPathAddNeighbors {
+    public ShortPath S;
+    public ShortPathNeighbors N;
+
+    public ShortPathAddNeighbors(ShortPath s, ShortPathNeighbors n) {
+        S = s;
+        N = n;
+    }
+
+    public Regions R { get { return S.R; } }
+
+    // openbw: add_neighbors(n)
+    public void AddNeighbors(int n) {
+        ShortContour c = new ShortContour();
+        int posX = S.CurPosX;
+        int posY = S.CurPosY;
+        int posMaxX = S.CurPosMaxX;
+        int posMaxY = S.CurPosMaxY;
+        int posMinX = S.CurPosMinX;
+        int posMinY = S.CurPosMinY;
+
+        if (n == 0) {
+            if (posX < posMaxX) {
+                int xval = posMaxX;
+                int yval = posMinY;
+                int edgeY = posMinY;
+                ShortContour ic = S.NearestEdge[1];
+                if (ic != null) {
+                    edgeY = ic.V1 + S.Inner[ic.Flags & 3] - 1;
+                    if (edgeY > yval) yval = edgeY;
+                }
+                int flags = 0x3b;
+                int edgeIndex = N.LocalEdgesFind(0, posY - 1, posX, xval, yval - 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[0][edgeIndex]);
+                    yval = c.V0;
+                    if (xval == c.V2) {
+                        if ((c.Flags & 0x20) != 0) flags = 0x33;
+                        else flags = 0;
+                    } else if (xval < c.V2) {
+                        flags = 0x22;
+                    }
+                }
+                ic = S.NearestEdge[1];
+                if (ic != null) {
+                    flags &= 0xfd;
+                    if (edgeY < yval) flags &= 0xde;
+                }
+                if (yval >= posY) {
+                    flags |= 0x44;
+                } else {
+                    N.AddNeighbor(xval, posY, 0xe7);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                if (yval == posMinY) N.AddNeighbor(posX, yval, 0xdd);
+                if (edgeIndex >= 0) {
+                    if (xval > c.V2) N.AddNeighbor(c.V2, c.V0, 0x11);
+                    while (true) {
+                        if (c.V1 < posX) {
+                            posMaxX = posX;
+                            break;
+                        }
+                        posMaxX = c.V1;
+                        N.AddNeighbor(c.V1, c.V0, 0x18);
+                        if (edgeIndex == 0) break;
+                        --edgeIndex;
+                        c = N.ExpandOuter(S.LocalEdges[0][edgeIndex]);
+                        if (c.V0 != yval) break;
+                        if (c.V2 < posX) break;
+                        if (c.V2 <= xval) N.AddNeighbor(c.V2, c.V0, 0x11);
+                    }
+                }
+                N.VisitArea(posX, posY, xval, yval);
+                posY = yval;
+            }
+            if (posY > posMinY) {
+                int xval = posMaxX;
+                int yval = posMinY;
+                int edgeX = posMinY;
+                ShortContour ic = S.NearestEdge[0];
+                if (ic != null) {
+                    edgeX = ic.V2 + S.Inner[(ic.Flags >> 2) & 3] + 1;
+                    if (edgeX < xval) xval = edgeX;
+                }
+                int flags = 0x3b;
+                int edgeIndex = N.LocalEdgesFind(1, posX + 1, yval, posY, xval + 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[1][edgeIndex]);
+                    xval = c.V0;
+                    if (yval == c.V1) {
+                        if ((c.Flags & 0x10) != 0) flags = 0x39;
+                        else flags = 0;
+                    } else if (yval > c.V1) {
+                        flags = 0x18;
+                    }
+                }
+                ic = S.NearestEdge[0];
+                if (ic != null) {
+                    flags &= 0xf7;
+                    if (edgeX > xval) flags &= 0xde;
+                }
+                if (xval <= posX) {
+                    flags |= 0x84;
+                } else {
+                    N.AddNeighbor(posX, yval, 0xdd);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                if (xval < posMaxX) N.AddNeighbor(xval, posY, 1);
+                if (edgeIndex >= 0) {
+                    if (yval < c.V1) N.AddNeighbor(c.V0, c.V1, 0x21);
+                    while (c.V2 <= posY) {
+                        N.AddNeighbor(c.V0, c.V2, 0x22);
+                        if (edgeIndex == S.LocalEdges[1].Count - 1) break;
+                        ++edgeIndex;
+                        c = N.ExpandOuter(S.LocalEdges[1][edgeIndex]);
+                        if (c.V0 != xval || c.V1 > posY) {
+                            N.AddNeighbor(xval, posY, 0x21);
+                            break;
+                        }
+                        if (c.V1 >= yval) N.AddNeighbor(c.V0, c.V1, 0x21);
+                    }
+                }
+                N.VisitArea(posX, posY, xval, yval);
+            }
+        } else if (n == 1) {
+            if (posX < posMaxX) {
+                int xval = posMaxX;
+                int yval = posMaxY;
+                int edgeY = posMaxY;
+                ShortContour ic = S.NearestEdge[1];
+                if (ic != null) {
+                    edgeY = ic.V2 + S.Inner[(ic.Flags >> 2) & 3] + 1;
+                    if (edgeY < yval) yval = edgeY;
+                }
+                int flags = 0x67;
+                int edgeIndex = N.LocalEdgesFind(2, posY + 1, posX, xval, yval + 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[2][edgeIndex]);
+                    if (posX < c.V1) N.AddNeighbor(c.V1, c.V0, 0x44);
+                    yval = c.V0;
+                    posMaxX = c.V1;
+                    while (c.V2 < xval) {
+                        N.AddNeighbor(c.V2, c.V0, 0x42);
+                        if (edgeIndex == S.LocalEdges[2].Count - 1) break;
+                        ++edgeIndex;
+                        ShortContour ic2 = N.ExpandInner(S.LocalEdges[2][edgeIndex]);
+                        if (ic2.V0 - 1 != yval) break;
+                        if (ic2.V1 - 1 >= xval) break;
+                        c = N.ExpandOuter(S.LocalEdges[2][edgeIndex]);
+                        if (c.V1 <= xval) N.AddNeighbor(c.V1, c.V0, 0x44);
+                    }
+                    if (xval == c.V2) {
+                        if ((c.Flags & 0x20) != 0) flags = 0x63;
+                        else flags = 0;
+                    } else if (xval < c.V2) {
+                        flags = 0x21;
+                    }
+                }
+                ic = S.NearestEdge[1];
+                if (ic != null) {
+                    flags &= 0xfe;
+                    if (edgeY > yval) flags &= 0xdd;
+                }
+                if (yval <= posY) {
+                    flags |= 0x18;
+                } else {
+                    N.AddNeighbor(xval, posY, 0xbb);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                if (yval == posMaxY) N.AddNeighbor(posX, yval, 0xde);
+                N.VisitArea(posX, posY, xval, yval);
+                posY = yval;
+            }
+            if (posY < posMaxY) {
+                int xval = posMaxX;
+                int yval = posMaxY;
+                int edgeX = posMaxX;
+                ShortContour ic = S.NearestEdge[2];
+                if (ic != null) {
+                    edgeX = ic.V2 + S.Inner[(ic.Flags >> 2) & 3] + 1;
+                    if (edgeX < xval) xval = edgeX;
+                }
+                int flags = 0x67;
+                int edgeIndex = N.LocalEdgesFind(1, posX + 1, posY, yval, xval + 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[1][edgeIndex]);
+                    if (c.V0 < posMaxX) N.AddNeighbor(c.V0, posY, 2);
+                    if (c.V1 > posY) N.AddNeighbor(c.V0, c.V1, 0x21);
+                    xval = c.V0;
+                    while (c.V2 < yval) {
+                        N.AddNeighbor(c.V0, c.V2, 0x22);
+                        if (edgeIndex == S.LocalEdges[1].Count - 1) break;
+                        ++edgeIndex;
+                        ShortContour ic2 = N.ExpandInner(S.LocalEdges[1][edgeIndex]);
+                        if (ic2.V0 - 1 != xval) break;
+                        if (ic2.V1 - 1 >= yval) break;
+                        c = N.ExpandOuter(S.LocalEdges[1][edgeIndex]);
+                        if (posY <= c.V1 && c.V1 <= posMaxY) N.AddNeighbor(c.V0, c.V1, 0x21);
+                    }
+                    if (yval == c.V2) {
+                        if ((c.Flags & 0x20) != 0) flags = 0x66;
+                        else flags = 0;
+                    } else if (yval < c.V2) {
+                        flags = 0x44;
+                    }
+                }
+                ic = S.NearestEdge[2];
+                if (ic != null) {
+                    flags &= 0xfb;
+                    if (edgeX > xval) flags &= 0xbd;
+                }
+                if (xval <= posX) {
+                    flags |= 0x88;
+                } else {
+                    N.AddNeighbor(posX, yval, 0xde);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                N.VisitArea(posX, posY, xval, yval);
+            }
+        } else if (n == 2) {
+            if (posX > posMinX) {
+                int xval = posMinX;
+                int yval = posMaxY;
+                int edgeY = posMaxY;
+                ShortContour ic = S.NearestEdge[3];
+                if (ic != null) {
+                    edgeY = ic.V2 + S.Inner[(ic.Flags >> 2) & 3] + 1;
+                    if (edgeY < yval) yval = edgeY;
+                }
+                int flags = 0xce;
+                int edgeIndex = N.LocalEdgesFind(2, posY + 1, xval, posX, yval + 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[2][edgeIndex]);
+                    yval = c.V0;
+                    if (xval == c.V1) {
+                        if ((c.Flags & 0x10) != 0) flags = 0xcc;
+                        else flags = 0;
+                    } else if (xval > c.V1) {
+                        flags = 0x88;
+                    }
+                }
+                ic = S.NearestEdge[3];
+                if (ic != null) {
+                    flags &= 0xf7;
+                    if (edgeY > yval) flags &= 0x7b;
+                }
+                if (yval <= posY) {
+                    flags |= 0x11;
+                } else {
+                    N.AddNeighbor(xval, posY, 0xbd);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                if (yval == posMaxY) N.AddNeighbor(posX, yval, 0x77);
+                if (edgeIndex >= 0) {
+                    if (xval < c.V1) N.AddNeighbor(c.V1, c.V0, 0x44);
+                    while (true) {
+                        if (c.V2 > posX) {
+                            N.AddNeighbor(posX, c.V0, 0x21);
+                            posMinX = posX;
+                            break;
+                        }
+                        posMinX = c.V2;
+                        N.AddNeighbor(c.V2, c.V0, 0x42);
+                        if (edgeIndex == S.LocalEdges[2].Count - 1) break;
+                        ++edgeIndex;
+                        c = N.ExpandOuter(S.LocalEdges[2][edgeIndex]);
+                        if (c.V0 != yval) break;
+                        if (c.V1 > posX) break;
+                        N.AddNeighbor(c.V1, c.V0, 0x44);
+                    }
+                }
+                N.VisitArea(posX, posY, xval, yval);
+                posY = yval;
+            }
+            if (posY < posMaxY) {
+                int xval = posMinX;
+                int yval = posMaxY;
+                int edgeX = posMinY;
+                ShortContour ic = S.NearestEdge[2];
+                if (ic != null) {
+                    edgeX = ic.V1 + S.Inner[ic.Flags & 3] - 1;
+                    if (edgeX > xval) xval = edgeX;
+                }
+                int flags = 0xce;
+                int edgeIndex = N.LocalEdgesFind(3, posX - 1, posY, yval, xval - 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[3][edgeIndex]);
+                    xval = c.V0;
+                    if (yval == c.V2) {
+                        if ((c.Flags & 0x20) != 0) flags = 0xc6;
+                        else flags = 0;
+                    } else if (yval < c.V2) {
+                        flags = 0x42;
+                    }
+                }
+                ic = S.NearestEdge[2];
+                if (ic != null) {
+                    flags &= 0xfd;
+                    if (edgeX < xval) flags &= 0xbb;
+                }
+                if (xval >= posX) {
+                    flags |= 0x22;
+                } else {
+                    N.AddNeighbor(posX, yval, 0x77);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                if (xval > posMinX) N.AddNeighbor(xval, posY, 4);
+                if (edgeIndex >= 0) {
+                    if (yval > c.V2) N.AddNeighbor(c.V0, c.V2, 0x84);
+                    while (c.V1 >= posY) {
+                        N.AddNeighbor(c.V0, c.V1, 0x88);
+                        if (edgeIndex == 0) break;
+                        --edgeIndex;
+                        c = N.ExpandOuter(S.LocalEdges[3][edgeIndex]);
+                        if (c.V0 != xval || c.V2 < posY) {
+                            N.AddNeighbor(xval, posY, 0x84);
+                            break;
+                        }
+                        if (c.V2 <= yval) N.AddNeighbor(c.V0, c.V2, 0x84);
+                    }
+                }
+                N.VisitArea(posX, posY, xval, yval);
+            }
+        } else {
+            if (posX > posMinX) {
+                int xval = posMinX;
+                int yval = posMinY;
+                int edgeY = posMinY;
+                ShortContour ic = S.NearestEdge[3];
+                if (ic != null) {
+                    edgeY = ic.V1 + S.Inner[ic.Flags & 3] - 1;
+                    if (edgeY > yval) yval = edgeY;
+                }
+                int flags = 0x9d;
+                int edgeIndex = N.LocalEdgesFind(0, posY - 1, xval, posX, yval - 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[0][edgeIndex]);
+                    if (posX <= c.V2) {
+                        N.AddNeighbor(posX, c.V0, 0x22);
+                    } else {
+                        N.AddNeighbor(c.V2, c.V0, 0x11);
+                    }
+                    yval = c.V0;
+                    posMinX = c.V2;
+                    while (c.V1 > xval) {
+                        N.AddNeighbor(c.V1, c.V0, 0x18);
+                        if (edgeIndex == 0) break;
+                        --edgeIndex;
+                        ShortContour ic2 = N.ExpandInner(S.LocalEdges[0][edgeIndex]);
+                        if (ic2.V0 + 1 != yval) break;
+                        if (ic2.V2 + 1 <= xval) break;
+                        c = N.ExpandOuter(S.LocalEdges[0][edgeIndex]);
+                        if (c.V2 >= xval) N.AddNeighbor(c.V2, c.V0, 0x11);
+                    }
+                    if (xval == c.V1) {
+                        if ((c.Flags & 0x10) != 0) flags = 0x9c;
+                        else flags = 0;
+                    } else if (xval > c.V1) {
+                        flags = 0x84;
+                    }
+                }
+                ic = S.NearestEdge[3];
+                if (ic != null) {
+                    flags &= 0xfb;
+                    if (edgeY < yval) flags &= 0x77;
+                }
+                if (yval >= posY) {
+                    flags |= 0x44;
+                } else {
+                    N.AddNeighbor(xval, posY, 0xee);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                if (yval == posMinY) N.AddNeighbor(posX, yval, 0x7b);
+                N.VisitArea(posX, posY, xval, yval);
+                posY = yval;
+            }
+            if (posY > posMinY) {
+                int xval = posMinX;
+                int yval = posMinY;
+                int edgeX = posMinX;
+                ShortContour ic = S.NearestEdge[0];
+                if (ic != null) {
+                    edgeX = ic.V1 + S.Inner[ic.Flags & 3] - 1;
+                    if (edgeX > xval) xval = edgeX;
+                }
+                int flags = 0x9d;
+                int edgeIndex = N.LocalEdgesFind(3, posX - 1, yval, posY, xval - 1);
+                if (edgeIndex >= 0) {
+                    c = N.ExpandOuter(S.LocalEdges[3][edgeIndex]);
+                    if (c.V0 > posMinX) N.AddNeighbor(c.V0, posY, 8);
+                    if (c.V2 < posY) N.AddNeighbor(c.V0, c.V2, 0x84);
+                    xval = c.V0;
+                    while (c.V1 > yval) {
+                        N.AddNeighbor(c.V0, c.V1, 0x88);
+                        if (edgeIndex == 0) break;
+                        --edgeIndex;
+                        ShortContour ic2 = N.ExpandInner(S.LocalEdges[3][edgeIndex]);
+                        if (ic2.V0 + 1 != xval) break;
+                        if (ic2.V2 + 1 <= yval) break;
+                        c = N.ExpandOuter(S.LocalEdges[3][edgeIndex]);
+                        if (c.V2 >= yval) N.AddNeighbor(c.V0, c.V2, 0x84);
+                    }
+                    if (yval == c.V1) {
+                        if ((c.Flags & 0x10) != 0) flags = 0x99;
+                        else flags = 0;
+                    } else if (yval > c.V1) {
+                        flags = 0x11;
+                    }
+                }
+                ic = S.NearestEdge[0];
+                if (ic != null) {
+                    flags &= 0xfe;
+                    if (edgeX < xval) flags &= 0xe7;
+                }
+                if (xval >= posX) {
+                    flags |= 0x21;
+                } else {
+                    N.AddNeighbor(posX, yval, 0x7b);
+                }
+                N.AddNeighbor(xval, yval, flags);
+                N.VisitArea(posX, posY, xval, yval);
+            }
+        }
+    }
+}
