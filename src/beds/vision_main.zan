@@ -1,0 +1,247 @@
+using System;
+
+// The differential bed for the visibility layer.
+//
+// It mirrors tools/cppbed/vision_bed.cpp: it builds the same synthetic
+// map, generates the sight range table, optionally performs one reveal
+// operation, and dumps the table and the per-tile visibility masks.
+
+public class VisionScenario {
+    public string Name;
+    public int PosX;
+    public int PosY;
+    public int Range;
+    public int RevealTo;
+    public bool InAir;
+
+    public VisionScenario(string name, int posX, int posY, int range, int revealTo, bool inAir) {
+        Name = name;
+        PosX = posX;
+        PosY = posY;
+        Range = range;
+        RevealTo = revealTo;
+        InAir = inAir;
+    }
+}
+
+public class VisionMain {
+
+    public static int TileWidth = 64;
+    public static int TileHeight = 64;
+
+    // The scenario table, mirrored by bed_scenarios in the C++ bed.
+    public static List<VisionScenario> Scenarios = new List<VisionScenario>();
+
+    // ------------------------------------------------------------------
+    // The synthetic terrain of the visibility bed.
+    //
+    // It is deliberately NOT the regions bed's terrain: the visibility
+    // layer reads the ground height from the vf4 table, so the bed needs
+    // mega tiles that carry high, middle and very high ground. The rules
+    // below are mirrored by mega_tile_index() in tools/cppbed/vision_bed.cpp.
+
+    //   0  fully walkable
+    //   1  fully blocked
+    //   2  partially walkable (the lower two rows of walk cells)
+    //   3  high ground (12 high cells, 4 low ones)
+    //   4  middle ground (12 middle cells, 4 low ones)
+    //   5  very high ground (4 very high cells, 12 low ones)
+    public static int MegaTileIndex(int tx, int ty) {
+        int variant = Terrain.Variant;
+        if (variant == 0) {
+            if (ty >= 24 && ty < 32 && tx >= 16 && tx < 48) return 3;
+            if (ty >= 32 && ty < 40 && tx >= 16 && tx < 48) return 4;
+            if (tx >= 40 && tx < 44 && ty >= 12 && ty < 20) return 5;
+            return 0;
+        }
+        if (variant == 1) {
+            if ((tx / 4 + ty / 4) % 2 == 0) return 3;
+            return 0;
+        }
+        if (variant == 2) {
+            if ((tx + ty) % 12 < 4) return 4;
+            if ((tx + ty) % 12 < 6) return 5;
+            return 0;
+        }
+        if (variant == 3) {
+            if (tx >= 8 && tx < 24 && ty >= 8 && ty < 24) return 3;
+            if (tx >= 32 && tx < 48 && ty >= 8 && ty < 24) return 4;
+            if (tx >= 16 && tx < 32 && ty >= 32 && ty < 48) return 5;
+            return 0;
+        }
+        if (variant == 4) {
+            return 0;
+        }
+        if (variant == 5) {
+            int ring = (tx < 16 || tx >= 48 || ty < 16 || ty >= 48) ? 0
+                     : ((tx < 24 || tx >= 40 || ty < 24 || ty >= 40) ? 1 : 2);
+            if (ring == 0) return 3;
+            if (ring == 1) return 4;
+            return 5;
+        }
+        // variant 6: a field of high ground with a patch of blocked tiles
+        if (tx >= 20 && tx < 28 && ty >= 20 && ty < 28) return 1;
+        if (tx >= 36 && tx < 44 && ty >= 36 && ty < 44) return 2;
+        return 3;
+    }
+
+    // The 16 walkability flags of each mega tile.
+    public static int Vf4Flags(int megaTile, int cell) {
+        if (megaTile == 0) return (int)Vf4Flag.Walkable;
+        if (megaTile == 1) return 0;
+        if (megaTile == 2) return (cell / 4 >= 2) ? (int)Vf4Flag.Walkable : 0;
+        if (megaTile == 3) return (int)Vf4Flag.Walkable | (cell < 12 ? (int)Vf4Flag.High : 0);
+        if (megaTile == 4) return (int)Vf4Flag.Walkable | (cell < 12 ? (int)Vf4Flag.Middle : 0);
+        return (int)Vf4Flag.Walkable | (cell < 4 ? (int)Vf4Flag.VeryHigh : 0);
+    }
+
+    // openbw: the set_mega_tile_flags lambda in load_tile_stuff(). The
+    // tile flags the sight blocking logic reads come from here.
+    public static int MegaTileFlags(int megaTile) {
+        int flags = 0;
+        int walkableCount = 0;
+        int middleCount = 0;
+        int highCount = 0;
+        int veryHighCount = 0;
+        for (int cell = 0; cell < 16; ++cell) {
+            int f = Vf4Flags(megaTile, cell);
+            if ((f & (int)Vf4Flag.Walkable) != 0) ++walkableCount;
+            if ((f & (int)Vf4Flag.Middle) != 0) ++middleCount;
+            if ((f & (int)Vf4Flag.High) != 0) ++highCount;
+            if ((f & (int)Vf4Flag.VeryHigh) != 0) ++veryHighCount;
+        }
+        if (walkableCount > 12) flags |= (int)TileFlag.Walkable;
+        else flags |= (int)TileFlag.Unwalkable;
+        if (walkableCount != 0 && walkableCount != 0x10) flags |= (int)TileFlag.PartiallyWalkable;
+        if (highCount < 12 && middleCount + highCount >= 12) flags |= (int)TileFlag.Middle;
+        if (highCount >= 12) flags |= (int)TileFlag.High;
+        if (veryHighCount != 0) flags |= (int)TileFlag.VeryHigh;
+        return flags;
+    }
+
+    public static void BuildScenarios() {
+        Scenarios.Clear();
+        Scenarios.Add(new VisionScenario("range4", 400, 400, 4, 0x01, false));
+        Scenarios.Add(new VisionScenario("range4_air", 400, 400, 4, 0x01, true));
+        Scenarios.Add(new VisionScenario("range7", 400, 400, 7, 0x03, false));
+        Scenarios.Add(new VisionScenario("range11", 400, 400, 11, 0xff, false));
+        Scenarios.Add(new VisionScenario("range4_centre", 960, 960, 4, 0x01, false));
+        Scenarios.Add(new VisionScenario("range4_corner", 16, 16, 4, 0x01, false));
+        Scenarios.Add(new VisionScenario("range5_all", 400, 400, 5, 0xff, false));
+        Scenarios.Add(new VisionScenario("range4_high", 600, 600, 4, 0x0f, false));
+        Scenarios.Add(new VisionScenario("range6_air", 640, 300, 6, 0x05, true));
+        Scenarios.Add(new VisionScenario("range3_tight", 512, 512, 3, 0x01, false));
+        Scenarios.Add(new VisionScenario("range8_wall", 256, 256, 8, 0xff, false));
+        Scenarios.Add(new VisionScenario("range4_edge", 1900, 500, 4, 0x03, false));
+        // Middle ground and very high ground: the height mask differs, so
+        // the sight blocking differs.
+        Scenarios.Add(new VisionScenario("range4_middle", 640, 1088, 4, 0x01, false));
+        Scenarios.Add(new VisionScenario("range5_middle", 700, 1150, 5, 0x03, false));
+        Scenarios.Add(new VisionScenario("range4_veryhigh", 1312, 384, 4, 0x01, false));
+        Scenarios.Add(new VisionScenario("range7_veryhigh", 1340, 400, 7, 0xff, false));
+    }
+
+    static int Main(string[] args) {
+        int variant = 0;
+        int scenario = -1;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+        if (args.Length >= 2) scenario = Convert.ToInt32(args[1]);
+
+        Terrain.Variant = variant;
+        BuildScenarios();
+
+        VisionMap map = new VisionMap(TileWidth, TileHeight);
+
+        // The synthetic vf4 table, with high / middle / very high ground
+        // so that the sight blocking path is exercised.
+        for (int mega = 0; mega < 6; ++mega) {
+            for (int cell = 0; cell < 16; ++cell) {
+                map.Vf4.Add(Vf4Flags(mega, cell));
+            }
+        }
+
+        // The graphics-side tile table and the cv5 megatile lookup. The
+        // engine fills these in load_map(); the bed has to do it by hand
+        // because get_ground_height_at() walks them.
+        // Group n routes to mega tile n, so the cv5 lookup returns the
+        // mega tile the terrain function picked.
+        for (int g = 0; g < 6; ++g) {
+            for (int s = 0; s < 16; ++s) map.Cv5.Add(g);
+        }
+
+        for (int y = 0; y < TileHeight; ++y) {
+            for (int x = 0; x < TileWidth; ++x) {
+                MapTile mt = new MapTile();
+                int mega = MegaTileIndex(x, y);
+                // openbw: the tile flags come from the mega tile flags.
+                mt.Tile.Flags = MegaTileFlags(mega);
+                // openbw: load_map() starts every tile fully visible and
+                // fully explored.
+                mt.Tile.Visible = 0xff;
+                mt.Tile.Explored = 0xff;
+                mt.MegaTileIndex = mega;
+                mt.GfxTile = (mega << 4) | 0;
+                map.Tiles.Add(mt);
+            }
+        }
+
+        List<SightValues> sightValues = SightValuesGenerator.Generate(12, TileWidth);
+        Vision vision = new Vision(map, sightValues);
+
+        Console.WriteLine("variant=" + variant);
+        DumpSightValues(sightValues);
+
+        if (scenario >= 0 && scenario < Scenarios.Count) {
+            VisionScenario sc = Scenarios[scenario];
+            Console.WriteLine("scenario=" + sc.Name + " pos=" + sc.PosX + "," + sc.PosY
+                + " range=" + sc.Range + " to=" + sc.RevealTo + " air=" + (sc.InAir ? 1 : 0));
+            int h = vision.GetGroundHeightAt(sc.PosX, sc.PosY);
+            Console.WriteLine("height=" + h);
+            vision.RevealSightAt(sc.PosX, sc.PosY, sc.Range, sc.RevealTo, sc.InAir);
+        }
+
+        DumpTiles(map);
+    }
+
+    private static void DumpSightValues(List<SightValues> sightValues) {
+        for (int i = 0; i < sightValues.Count; ++i) {
+            SightValues v = sightValues[i];
+            Console.WriteLine("S " + i
+                + " max=" + v.MaxWidth + "," + v.MaxHeight
+                + " min=" + v.MinWidth + "," + v.MinHeight
+                + " min_mask=" + v.MinMaskSize
+                + " ext_masked=" + v.ExtMaskedCount
+                + " nodes=" + v.MaskDat.Count);
+            for (int k = 0; k < v.MaskDat.Count; ++k) {
+                SightValuesMaskNode n = v.MaskDat[k];
+                Console.WriteLine("N " + i + " " + k
+                    + " prev=" + n.Prev + " prev2=" + n.Prev2
+                    + " rel=" + n.RelativeTileIndex + " xy=" + n.X + "," + n.Y);
+            }
+        }
+    }
+
+    private static void DumpTiles(VisionMap map) {
+        for (int y = 0; y < map.MapTileHeight; ++y) {
+            for (int x = 0; x < map.MapTileWidth; ++x) {
+                Tile t = map.Tiles[y * map.MapTileWidth + x].Tile;
+                Console.WriteLine("T " + x + "," + y
+                    + " vis=" + t.Visible + " exp=" + t.Explored
+                    + " flags=0x" + Hex4(t.Flags));
+            }
+        }
+    }
+
+    // The C++ bed prints the tile flags with printf("%04x"), so the two
+    // sides have to pad to the same width.
+    private static string Hex4(int v) {
+        string digits = "0123456789abcdef";
+        string r = "";
+        int x = v;
+        for (int i = 0; i < 4; ++i) {
+            r = digits[x & 0xf] + r;
+            x = x >> 4;
+        }
+        return r;
+    }
+}

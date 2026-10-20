@@ -81,3 +81,9 @@ ZAN_SOURCES_COLLISION=(
     src/collision/MovementStates.zan
     src/collision/StateMachine.zan
 )
+
+# The visibility layer: the sight range table and the tile reveal logic.
+ZAN_SOURCES_VISION=(
+    src/vision/SightValues.zan
+    src/vision/Vision.zan
+)

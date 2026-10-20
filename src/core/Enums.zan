@@ -110,6 +110,34 @@ public enum SpriteFlag {
     IscriptNobrk = 0x80
 }
 
+// openbw: tile_t::flags -- the per-tile terrain and state bits.
+public enum TileFlag {
+    Walkable = 1,
+    Unk0 = 2,
+    Unwalkable = 4,
+    Unk1 = 8,
+    ProvidesCover = 0x10,
+    Unk3 = 0x20,
+    HasCreep = 0x40,
+    Unbuildable = 0x80,
+    VeryHigh = 0x100,
+    Middle = 0x200,
+    High = 0x400,
+    Occupied = 0x800,
+    CreepReceding = 0x1000,
+    PartiallyWalkable = 0x2000,
+    TemporaryCreep = 0x4000,
+    Unk4 = 0x8000
+}
+
+// openbw: vf4_entry::flags -- the 16 walkability bits of one mega tile.
+public enum Vf4Flag {
+    Walkable = 1,
+    Middle = 2,
+    High = 4,
+    VeryHigh = 8
+}
+
 // The order ids the movement code looks at. The values are the indexes
 // in openbw's Orders enum (bwenums.h), so they match the original.
 public enum Orders {

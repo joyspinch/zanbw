@@ -14,10 +14,12 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/regions/` | regions 层：区域划分、contours、split regions、合成地形 |
 | `src/pathfind/` | 寻路：长路径 A*、短路径 contour 搜索、`path_t` 生命周期 |
 | `src/collision/` | 单位间碰撞：碰撞规则、unit finder 查询、运动状态机各 `UM_*` 状态 |
+| `src/vision/` | 视野：视距表生成、地形高度、迷雾揭开 |
 | `src/beds/` | 各层对拍入口与它们用的场景表 |
 | `zan_sources.sh` | 各层的源文件清单，对拍脚本共用 |
 
-层间依赖单向：`core ← math ← regions ← pathfind ← collision`。
+层间依赖单向：`core ← math ← regions ← pathfind ← collision`，
+`core ← math ← vision`。
 
 ### 分层的判据
 
@@ -29,6 +31,8 @@ raw 值都必须与原 C++ 实现完全相同。
 - 只依赖 `Pathfinder` 的寻路逻辑放 `pathfind`（例：`pathfinder_unit_can_collide_with`
   是寻路的障碍过滤规则，不是碰撞规则）。
 - 依赖 `StateMachine` 和 unit finder 的放 `collision`。
+- 只依赖 tile 表和整数掩码运算的放 `vision`（例：`reveal_sight_at` 是迷雾
+  揭开规则，不依赖任何单位或路径）。
 
 **反向依赖就是错的**：`pathfind` 不许引用 `collision`，`regions` 不许引用
 `pathfind`。发现反向依赖时，先问"这条规则到底归谁"，再搬家，不要加
@@ -82,6 +86,9 @@ bash check_state2.sh
 # 单位间碰撞层对拍（7 个地形变体 × 17 场景，两单位对撞）
 bash check_collide.sh
 
+# 视野层对拍（7 个地形变体 × 16 个场景：视距表 + 迷雾揭开）
+bash check_vision.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -91,6 +98,7 @@ bash check_path.sh 3
 bash check_state.sh 3
 bash check_state2.sh 3
 bash check_collide.sh 5 3
+bash check_vision.sh 3 5
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -674,6 +682,102 @@ Collision.IsBlockedWithUnit(this, u, posX, posY, blockingUnit);        // 段错
 移动目标改成 `pf.destination`）。所以"单位不动"这个结果不是一条路径
 决定的，而是这两处的叠加。移植时漏掉任何一处，状态标志和移动目标都会差。
 
+## 视野层（视距表 / 迷雾揭开）
+
+移植的是 `openbw` 的 `game_load_functions` 里的四件事：
+`generate_sight_values()`（生成视距表）、`get_ground_height_at()`、
+`reveal_sight_at()`、`refresh_unit_vision()`。前三个是纯整数运算，
+没有随机数、没有图像、没有 iscript —— 所以这一层能逐位对拍。
+
+### 52. 视距表的坐标是**相对中心**的，不是绝对下标
+
+`generate_sight_values()` 里所有格子坐标都以视距菱形的中心为原点
+（`this_x` / `this_y` 可以是负数），存进 `base_mask` 时要**加上中心下标**：
+
+```cpp
+auto at = [&](int relative_index) -> base_mask_t& {
+    size_t index = center_index + relative_index;   // ← 中心相对
+    return base_mask[index];
+};
+```
+
+直接用 `this_y * max_width + this_x` 当绝对下标，整张表的下标会整体
+偏移一个中心，依赖关系（`prev` / `prev2`）全错——而且**节点数量和
+尺寸都对得上**，只有 `prev` 列不一样，很容易被当成"随机数差异"放过。
+
+### 53. `maskdat` 的中心节点从未被写过，`prev` / `prev2` 是 0 不是 -1
+
+C++ 的 `maskdat` 是 `a_vector<maskdat_node_t>`（`std::vector`），
+`resize()` 会**值初始化**新元素，所以每个节点的 `prev` / `prev2` 初始
+是 0。而中心节点（`xy = 0,0`）在生成循环里被 `if (this_x || this_y)`
+跳过，**永远不会被写** → 它的 `prev` / `prev2` 保持 0。
+
+Zan 侧如果把构造函数的默认值设成 -1（表示"没有依赖"），中心节点就会
+比成 -1，与 C++ 差一整列。规则：
+
+- 字段**默认值** = 0（对应 C++ 的值初始化）；
+- "没有第二依赖"这个**显式标记** = -1（对应 C++ 的 `(size_t)-1`）。
+
+两者含义不同，不能混。
+
+### 54. 视距表的下界检查是 `size_t` 算术，负偏移会绕回
+
+```cpp
+size_t tile_x = (size_t)pos.x / 32;
+if (tile_x + cur.x >= game_st.map_tile_width) continue;
+```
+
+`tile_x` 是 `size_t`，`cur.x` 是 `int`——`tile_x + cur.x` 会**先把
+`cur.x` 转成无符号再相加**，负偏移变成一个巨大的数，于是
+`>= map_tile_width` 成立，节点被跳过。
+
+Zan 侧照写成有符号比较就会漏掉这个跳过，节点继续往下走，
+`base_tile[cur.relative_tile_index]` 越界。移植时要把这条写成
+"���标在地图内吗"（`tx < 0 || tx >= width`），而不是
+"tile_x + cur.x >= width"。
+
+### 55. 迷雾的位是**反着存的**：`visible` 初值 0xff，`reveal` 做的是"清零"
+
+`load_map()` 把每个 tile 的 `visible` / `explored` 都设成 `0xff`
+（12 个玩家全可见），每 100 帧 `process_frame()` 又把 `visible` 重置成
+`0xff`。`reveal_sight_at()` 里：
+
+```cpp
+int visibility_mask = ~reveal_to;
+tile.visible &= visibility_mask;      // ← 清掉"看不见"的玩家
+```
+
+所以这个函数叫"reveal"，做的却是 `&=`：**把不在 `reveal_to` 里的玩家的
+可见位清掉**。高地遮挡的判定则是：若前一格的 flags/explored/visible
+与 `required_tile_mask` 有交集，就 `continue`——**跳过这一格**，让它保持
+对 `reveal_to` 可见。
+
+对照床的 tile 初值必须是 `0xff`（不是 0），否则两边都在"全黑"上做
+`&=`，`reveal` 之后看起来一样，其实根本没验到东西。
+
+### 56. tile 的高低来自 `mega_tile_flags`，不是直接来自 vf4
+
+`get_ground_height_at()` 读的是 `game_st.vf4`，但**迷雾遮挡判定读的是
+`st.tiles[i].flags`**，而后者由 `load_tile_stuff()` 的
+`set_mega_tile_flags()` 从 vf4 推导：
+
+```
+walkable_count > 12        → flag_walkable
+high_count < 12 && middle+high >= 12 → flag_middle
+high_count >= 12          → flag_high
+very_high_count           → flag_very_high
+```
+
+而且 `get_ground_height_at()` 只认 `high` 和 `middle`
+（`very_high` 的 tile 在它眼里是"低地"），但 `very_high` 这个**位**
+照样进 `tile.flags`，照样参与遮挡判定。所以要覆盖三种高度：
+`height == 2`（high）、`height == 1`（middle）、`height == 0`（low /
+very high）。
+
+对照床必须自己实现 `set_mega_tile_flags()` 的推导，不能直接把 vf4
+的 16 个标志当成 tile flags——那会把"12 个 high + 4 个普通"这种
+边界情况算错。
+
 ## 已知 zanc 缺陷
 
 - **一元运算符重载**（`operator-`）在非整型上会触发 irgen bug
@@ -695,3 +799,12 @@ Collision.IsBlockedWithUnit(this, u, posX, posY, blockingUnit);        // 段错
 4. 跑 `bash check.sh` 直到全绿。
 
 不要在 Zan 侧"顺手优化"——任何偏离 C++ 的写法都会在下一轮对拍里暴露。
+
+**新开一层之前先问依赖**：如果这一层的调用链会拖进 iscript 解释器、图像
+系统或武器表，它就不是能独立对拍的层（`update_unit_values` 就是这种：
+`set_unit_hp` → `update_unit_damage_overlay` → 图像；`stim` 到期 →
+`update_unit_speed` → iscript）。挑一个**依赖闭合**的层先做，收益更大。
+
+**对照床的初值要跟原版一致**：`load_map()` 把 tile 的 `visible` /
+`explored` 设成 `0xff`，不是 0。对照床若用 0，两边都在"全黑"上做
+`&=`，差异全被吃掉，测试等于没做。

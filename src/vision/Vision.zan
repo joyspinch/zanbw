@@ -1,0 +1,182 @@
+using System;
+
+// openbw: game_types.h::tile_t -- one map tile.
+//
+// The visibility layer keeps two byte masks per tile: which players can
+// currently see it, and which players have ever seen it. Both are bit
+// masks over the twelve players.
+public class Tile {
+    public int Visible;
+    public int Explored;
+    public int Flags;
+
+    public Tile() {
+        Visible = 0;
+        Explored = 0;
+        Flags = 0;
+    }
+}
+
+// One map tile, with everything the visibility layer needs to know about
+// it. The engine keeps the terrain in a few parallel arrays; here they
+// live in one entity so the tile cannot get out of sync with itself.
+public class MapTile {
+    // The visibility masks.
+    public Tile Tile;
+
+    // openbw: st.tiles_mega_tile_index -- the mega tile the terrain
+    // function picked for this tile.
+    public int MegaTileIndex;
+
+    // openbw: game_st.gfx_tiles -- the graphics tile id. Its raw value
+    // splits into a group index and a subtile index.
+    public int GfxTile;
+
+    public MapTile() {
+        Tile = new Tile();
+        MegaTileIndex = 0;
+        GfxTile = 0;
+    }
+}
+
+// The tile grid plus everything the visibility layer needs to look at it:
+// the per-tile terrain flags, the graphics-side tile table and the cv5 /
+// vf4 tables the ground height is derived from.
+public class VisionMap {
+    public int MapTileWidth;
+    public int MapTileHeight;
+
+    // The tiles, in row-major order: index = y * MapTileWidth + x.
+    public List<MapTile> Tiles;
+
+    // openbw: game_st.cv5 -- per group, the mega tile index of each of
+    // the 16 subtiles.
+    public List<int> Cv5;
+
+    // openbw: game_st.vf4 -- per mega tile, 16 walkability flags.
+    public List<int> Vf4;
+
+    public VisionMap(int tileWidth, int tileHeight) {
+        MapTileWidth = tileWidth;
+        MapTileHeight = tileHeight;
+        Tiles = new List<MapTile>();
+        Cv5 = new List<int>();
+        Vf4 = new List<int>();
+    }
+
+    public int TileIndex(int posX, int posY) {
+        return (posY / 32) * MapTileWidth + (posX / 32);
+    }
+}
+
+// The sight range table, shared by the whole map.
+public class Vision {
+    public VisionMap Map;
+    public List<SightValues> SightValues;
+
+    public Vision(VisionMap map, List<SightValues> sightValues) {
+        Map = map;
+        SightValues = sightValues;
+    }
+
+    // openbw: int get_ground_height_at(xy pos) const
+    //
+    // 2 = the tile is high ground, 1 = middle, 0 = low.
+    public int GetGroundHeightAt(int posX, int posY) {
+        int index = Map.TileIndex(posX, posY);
+        int raw = Map.Tiles[index].GfxTile;
+        int groupIndex = (raw >> 4) & 0x7ff;
+        int subtileIndex = raw & 0xf;
+        int megaTileIndex = Map.Cv5[groupIndex * 16 + subtileIndex];
+        int ux = posX;
+        int uy = posY;
+        int flags = Map.Vf4[megaTileIndex * 16 + (uy / 8 % 4) * 4 + (ux / 8 % 4)];
+        if ((flags & (int)Vf4Flag.High) != 0) return 2;
+        if ((flags & (int)Vf4Flag.Middle) != 0) return 1;
+        return 0;
+    }
+
+    // openbw: void reveal_sight_at(xy pos, int range, int reveal_to, bool in_air)
+    //
+    // Reveals the tiles around pos to the players in reveal_to. A tile's
+    // visibility depends on the tiles "before" it in the sight table: a
+    // tile that is blocked by high ground is not revealed.
+    public void RevealSightAt(int posX, int posY, int range, int revealTo, bool inAir) {
+        int visibilityMask = ~revealTo;
+        int heightMask = 0;
+        if (!inAir) {
+            int height = GetGroundHeightAt(posX, posY);
+            if (height == 2) heightMask = (int)TileFlag.VeryHigh;
+            else if (height == 1) heightMask = (int)TileFlag.VeryHigh | (int)TileFlag.High;
+            else heightMask = (int)TileFlag.VeryHigh | (int)TileFlag.High | (int)TileFlag.Middle;
+        }
+
+        int maxWidth = 11 * 2 + 3;
+        int[] visionPropagation = new int[maxWidth * maxWidth];
+
+        // The mask a tile's flags / explored / visible have to match for
+        // the tile to let the sight through.
+        int requiredTileMask = (heightMask << 16)
+            | ((~visibilityMask & 0xff) << 8)
+            | (~visibilityMask & 0xff);
+
+        SightValues sightVals = SightValues[range];
+        int tileX = posX / 32;
+        int tileY = posY / 32;
+
+        if (!inAir) {
+            int index = 0;
+            int end = sightVals.MinMaskSize;
+            for (; index != end; ++index) {
+                SightValuesMaskNode cur = sightVals.MaskDat[index];
+                visionPropagation[index] = 0xff;
+                int tx = tileX + cur.X;
+                int ty = tileY + cur.Y;
+                if (!InMap(tx, ty)) continue;
+                Tile tile = Map.Tiles[ty * Map.MapTileWidth + tx].Tile;
+                tile.Visible = tile.Visible & visibilityMask;
+                tile.Explored = tile.Explored & visibilityMask;
+                visionPropagation[index] = (tile.Flags << 16) | (tile.Explored << 8) | tile.Visible;
+            }
+            end += sightVals.ExtMaskedCount;
+            for (; index != end; ++index) {
+                SightValuesMaskNode cur = sightVals.MaskDat[index];
+                visionPropagation[index] = 0xff;
+                int tx = tileX + cur.X;
+                int ty = tileY + cur.Y;
+                if (!InMap(tx, ty)) continue;
+                if ((visionPropagation[cur.Prev] & requiredTileMask) != 0) {
+                    if (cur.Prev2 == -1 || (visionPropagation[cur.Prev2] & requiredTileMask) != 0) continue;
+                }
+                Tile tile = Map.Tiles[ty * Map.MapTileWidth + tx].Tile;
+                tile.Visible = tile.Visible & visibilityMask;
+                tile.Explored = tile.Explored & visibilityMask;
+                visionPropagation[index] = (tile.Flags << 16) | (tile.Explored << 8) | tile.Visible;
+            }
+        } else {
+            // openbw: "This seems bugged; even for air units, if you only
+            // traverse ext_masked_count nodes, then you will still miss out
+            // on the min_mask_size (9) last ones"
+            int end = sightVals.ExtMaskedCount;
+            for (int cur = 0; cur != end; ++cur) {
+                SightValuesMaskNode node = sightVals.MaskDat[cur];
+                int tx = tileX + node.X;
+                int ty = tileY + node.Y;
+                if (!InMap(tx, ty)) continue;
+                Tile tile = Map.Tiles[ty * Map.MapTileWidth + tx].Tile;
+                tile.Visible = tile.Visible & visibilityMask;
+                tile.Explored = tile.Explored & visibilityMask;
+            }
+        }
+    }
+
+    // openbw: the bounds check is written as `tile_x + cur.x >= map_tile_width`
+    // with a size_t on the left, so a negative offset wraps around to a
+    // huge value and the node is skipped. The signed form of the same
+    // test is "outside the map".
+    private bool InMap(int tx, int ty) {
+        if (tx < 0 || tx >= Map.MapTileWidth) return false;
+        if (ty < 0 || ty >= Map.MapTileHeight) return false;
+        return true;
+    }
+}
