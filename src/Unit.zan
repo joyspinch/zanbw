@@ -1,0 +1,242 @@
+using System;
+
+// Integer point, port of openbw's xy_t<int>.
+public struct Xy {
+    public int X;
+    public int Y;
+
+    public Xy(int x, int y) { X = x; Y = y; }
+
+    public static bool operator ==(Xy a, Xy b) { return a.X == b.X && a.Y == b.Y; }
+    public static bool operator !=(Xy a, Xy b) { return !(a.X == b.X && a.Y == b.Y); }
+
+    public static Xy operator +(Xy a, Xy b) { return new Xy(a.X + b.X, a.Y + b.Y); }
+    public static Xy operator -(Xy a, Xy b) { return new Xy(a.X - b.X, a.Y - b.Y); }
+
+    public Xy Neg() { return new Xy(-X, -Y); }
+
+    public int Length() { return XyMath.XyLength(this); }
+}
+
+// openbw bwgame.h:
+//   int xy_length(xy vec) const {
+//       unsigned int x = std::abs(vec.x);
+//       unsigned int y = std::abs(vec.y);
+//       if (x < y) std::swap(x, y);
+//       if (x / 4 < y) x = x - x / 16 + y * 3 / 8 - x / 64 + y * 3 / 256;
+//       return x;
+//   }
+public class XyMath {
+    public static int XyLength(Xy vec) {
+        uint x = (uint)(vec.X < 0 ? -vec.X : vec.X);
+        uint y = (uint)(vec.Y < 0 ? -vec.Y : vec.Y);
+        if (x < y) { uint t = x; x = y; y = t; }
+        if (x / 4u < y) {
+            x = x - x / 16u + y * 3u / 8u - x / 64u + y * 3u / 256u;
+        }
+        return (int)x;
+    }
+}
+
+// Fixed point 2D point, port of openbw's xy_t<fp8>.
+public struct XyFp8 {
+    public Fp X;
+    public Fp Y;
+
+    public XyFp8(Fp x, Fp y) { X = x; Y = y; }
+
+    public static bool operator ==(XyFp8 a, XyFp8 b) { return a.X == b.X && a.Y == b.Y; }
+    public static bool operator !=(XyFp8 a, XyFp8 b) { return !(a.X == b.X && a.Y == b.Y); }
+
+    public static XyFp8 operator +(XyFp8 a, XyFp8 b) { return new XyFp8(a.X + b.X, a.Y + b.Y); }
+    public static XyFp8 operator -(XyFp8 a, XyFp8 b) { return new XyFp8(a.X - b.X, a.Y - b.Y); }
+
+    public static XyFp8 operator *(XyFp8 a, int b) { return new XyFp8(a.X * b, a.Y * b); }
+    public static XyFp8 operator /(XyFp8 a, int b) { return new XyFp8(a.X / b, a.Y / b); }
+    public static XyFp8 operator /(XyFp8 a, Fp b) { return new XyFp8(a.X / b, a.Y / b); }
+}
+
+// Sprite-level state (openbw sprite_t), reduced to the fields the movement
+// code touches.
+public class Sprite {
+    public int Flags;
+    public Xy Position;
+    public int ElevationLevel;
+
+    public Sprite() {
+        Flags = 0;
+        Position = new Xy(0, 0);
+        ElevationLevel = 4;
+    }
+}
+
+// Flingy type (openbw flingy_type_t).
+public class FlingyType {
+    public int Id;
+    public Fp TopSpeed;
+    public Fp Acceleration;
+    public Fp HaltDistance;
+    public Fp TurnRate;
+    public int MovementType;
+
+    public FlingyType(int id, Fp topSpeed, Fp acceleration, Fp haltDistance, Fp turnRate, int movementType) {
+        Id = id;
+        TopSpeed = topSpeed;
+        Acceleration = acceleration;
+        HaltDistance = haltDistance;
+        TurnRate = turnRate;
+        MovementType = movementType;
+    }
+}
+
+// Unit type (openbw unit_type_t), reduced to the fields the movement code needs.
+public class UnitType {
+    public int Id;
+    public FlingyType Flingy;
+    public Fp Hitpoints;
+    public int ElevationLevel;
+    public int Flags;
+    public int SightRange;
+    public Xy DimensionsFrom;
+    public Xy DimensionsTo;
+    public int GroupFlags;
+
+    public UnitType(int id, FlingyType flingy, int elevationLevel, int flags, int sightRange,
+                   Xy dimensionsFrom, Xy dimensionsTo) {
+        Id = id;
+        Flingy = flingy;
+        Hitpoints = Fp.Integer(400);
+        ElevationLevel = elevationLevel;
+        Flags = flags;
+        SightRange = sightRange;
+        DimensionsFrom = dimensionsFrom;
+        DimensionsTo = dimensionsTo;
+        GroupFlags = 0;
+    }
+}
+
+// The unit entity: openbw's unit_t, restricted to the fields the movement
+// simulation reads or writes.
+public class Unit {
+    // ---- flingy_t ---------------------------------------------------------
+    public Fp Hp;
+    public Sprite Sprite;
+
+    public Xy MoveTargetPos;
+    public bool HasMoveTargetUnit;
+    public Xy NextMovementWaypoint;
+    public Xy NextTargetWaypoint;
+    public int MovementFlags;
+
+    public Dir Heading;
+    public Fp FlingyTurnRate;
+    public Dir NextVelocityDirection;
+    public FlingyType FlingyType;
+    public int FlingyMovementType;
+
+    public Xy Position;
+    public XyFp8 ExactPosition;
+    public Fp FlingyTopSpeed;
+    public Fp CurrentSpeed;
+    public Fp NextSpeed;
+    public XyFp8 Velocity;
+    public Fp FlingyAcceleration;
+    public Dir CurrentVelocityDirection;
+    public Dir DesiredVelocityDirection;
+    public int OrderSignal;
+
+    // ---- unit_t -----------------------------------------------------------
+    public int Owner;
+    public int OrderId;
+    public int OrderState;
+    public UnitType UnitType;
+
+    public int UserActionFlags;
+    public MovementStates MovementState;
+    public int StatusFlagBits;
+    public int CarryingFlags;
+    public int WireframeRandomizer;
+    public int SecondaryOrderState;
+    public int MoveTargetTimer;
+    public int PathingCollisionCounter;
+    public int PathingFlags;
+
+    public int RepulseFlags;
+    public Dir RepulseDirection;
+    public int RepulseIndex;
+
+    public int UnitIdGeneration;
+
+    public Unit() {
+        Hp = Fp.Zero();
+        Sprite = new Sprite();
+        MoveTargetPos = new Xy(0, 0);
+        HasMoveTargetUnit = false;
+        NextMovementWaypoint = new Xy(0, 0);
+        NextTargetWaypoint = new Xy(0, 0);
+        MovementFlags = 0;
+        Heading = Dir.Zero();
+        FlingyTurnRate = Fp.Zero();
+        NextVelocityDirection = Dir.Zero();
+        FlingyMovementType = 0;
+        Position = new Xy(0, 0);
+        ExactPosition = new XyFp8(Fp.Zero(), Fp.Zero());
+        FlingyTopSpeed = Fp.Zero();
+        CurrentSpeed = Fp.Zero();
+        NextSpeed = Fp.Zero();
+        Velocity = new XyFp8(Fp.Zero(), Fp.Zero());
+        FlingyAcceleration = Fp.Zero();
+        CurrentVelocityDirection = Dir.Zero();
+        DesiredVelocityDirection = Dir.Zero();
+        OrderSignal = 0;
+        Owner = 0;
+        OrderId = 0;
+        OrderState = 0;
+        UnitType = null;
+        UserActionFlags = 0;
+        MovementState = MovementStates.UM_Init;
+        StatusFlagBits = 0;
+        CarryingFlags = 0;
+        WireframeRandomizer = 0;
+        SecondaryOrderState = 0;
+        MoveTargetTimer = 0;
+        PathingCollisionCounter = 0;
+        PathingFlags = 0;
+        RepulseFlags = 0;
+        RepulseDirection = Dir.Zero();
+        RepulseIndex = 0;
+        UnitIdGeneration = 0;
+    }
+
+    // ---- status helpers (openbw bwgame.h u_* helpers) ----------------------
+
+    public bool HasStatusFlag(StatusFlag flag) { return (StatusFlagBits & (int)flag) != 0; }
+    public void SetStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits | (int)flag; }
+    public void ClearStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits & ~(int)flag; }
+
+    public bool UCanMove() { return HasStatusFlag(StatusFlag.CanMove); }
+    public bool UCanTurn() { return HasStatusFlag(StatusFlag.CanTurn); }
+    public bool UFlying() { return HasStatusFlag(StatusFlag.Flying); }
+    public bool UGroundUnit() { return HasStatusFlag(StatusFlag.GroundUnit); }
+    public bool UGroundedBuilding() { return HasStatusFlag(StatusFlag.GroundedBuilding); }
+    public bool UOrderNotInterruptible() { return HasStatusFlag(StatusFlag.OrderNotInterruptible); }
+    public bool UIscriptNobrk() { return HasStatusFlag(StatusFlag.IscriptNobrk); }
+    public bool UCollision() { return HasStatusFlag(StatusFlag.Collision); }
+    public bool UCompleted() { return HasStatusFlag(StatusFlag.Completed); }
+    public bool UImmovable() { return HasStatusFlag(StatusFlag.Immovable); }
+    public bool UBurrowed() { return HasStatusFlag(StatusFlag.Burrowed); }
+    public bool UInBunker() { return HasStatusFlag(StatusFlag.InBunker); }
+
+    public bool MovementFlag(int flag) { return (MovementFlags & flag) != 0; }
+    public void SetMovementFlag(int flag) { MovementFlags = MovementFlags | flag; }
+    public void UnsetMovementFlag(int flag) { MovementFlags = MovementFlags & ~flag; }
+
+    public bool UtBuilding() { return UnitType != null && (UnitType.Flags & UnitTypeFlag.Building) != 0; }
+    public bool UtTurret() { return UnitType != null && (UnitType.Flags & UnitTypeFlag.Turret) != 0; }
+    public bool UtFlyer() { return UnitType != null && (UnitType.Flags & UnitTypeFlag.Flyer) != 0; }
+
+    // openbw: bool unit_is_at_move_target(const flingy_t* u) const {
+    //     return u->sprite->position == u->move_target.pos;
+    // }
+    public bool IsAtMoveTarget() { return Sprite.Position == MoveTargetPos; }
+}

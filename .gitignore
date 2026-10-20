@@ -1,0 +1,10 @@
+# Build output
+build/
+
+# C++ reference bed binaries and traces
+tools/cppbed/*.exe
+tools/cppbed/trace_*.txt
+tools/cppbed/audit_*.txt
+
+# Throwaway probes
+_scratch/

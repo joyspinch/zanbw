@@ -1,0 +1,38 @@
+using System;
+
+// Port of openbw's LCG (bwgame.h):
+//
+//   int lcg_rand(int source) {
+//       ++st.random_counts[source];
+//       ++st.total_random_counts;
+//       st.lcg_rand_state = st.lcg_rand_state * 22695477 + 1;
+//       return (st.lcg_rand_state >> 16) & 0x7fff;
+//   }
+//   int lcg_rand(int source, int from, int to) {
+//       return from + ((lcg_rand(source) * (to - from + 1)) >> 15);
+//   }
+//
+// The C++ state is a uint32_t, so the multiply-add wraps at 32 bits. Zan has no
+// 32-bit unsigned type, so the state is kept as uint and the wrap is native.
+public class Rng {
+    public uint State;
+    public int[] RandomCounts;
+    public int TotalRandomCounts;
+
+    public Rng() {
+        State = 42;
+        RandomCounts = new int[256];
+        TotalRandomCounts = 0;
+    }
+
+    public int Rand(int source) {
+        RandomCounts[source] = RandomCounts[source] + 1;
+        TotalRandomCounts = TotalRandomCounts + 1;
+        State = State * 22695477u + 1u;
+        return (int)((State >> 16) & 0x7fffu);
+    }
+
+    public int Rand(int source, int from, int to) {
+        return from + ((Rand(source) * (to - from + 1)) >> 15);
+    }
+}

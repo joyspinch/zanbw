@@ -1,0 +1,4 @@
+name = ZanBW
+type = console
+entry = src/main.zan
+target = exe

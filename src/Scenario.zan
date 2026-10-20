@@ -1,0 +1,95 @@
+using System;
+
+// A scenario describes the initial situation of a simulation run.
+//
+// The C++ reference bed (tools/cppbed/main.cpp) parses the very same string
+// format, so both sides run identical situations and their traces can be
+// diffed directly.
+//
+//   s<idx>                      -- built-in scenario
+//   s<idx>:x,y,tx,ty;x,y,tx,ty -- explicit unit list
+//
+// A unit spec is  x,y,tx,ty  (start position and move target). The first
+// unit uses flingy type 0, the rest use type 1.
+//
+// Built-in scenarios:
+//   0  two units crossing diagonally (straight line + turning)
+//   1  two units converging on the same spot (repulse field)
+//   2  one unit driving into the map edge (bounds clamping)
+//   3  two units starting almost on top of each other (repulse field)
+//   4  two units flying side by side (parallel motion, no repulse)
+public class Scenario {
+    public int X;
+    public int Y;
+    public int TargetX;
+    public int TargetY;
+
+    public Scenario(int x, int y, int tx, int ty) {
+        X = x;
+        Y = y;
+        TargetX = tx;
+        TargetY = ty;
+    }
+}
+
+public class ScenarioParser {
+    public static List<Scenario> Parse(string spec) {
+        List<Scenario> units = new List<Scenario>();
+
+        string body = "";
+        int colon = spec.IndexOf(":");
+        if (colon >= 0) {
+            body = spec.Substring(colon + 1);
+        }
+        if (body != "") {
+            foreach (string item in body.Split(";")) {
+                if (item == "") continue;
+                List<string> parts = item.Split(",");
+                if (parts.Count == 4) {
+                    units.Add(new Scenario(
+                        Convert.ToInt32(parts[0]), Convert.ToInt32(parts[1]),
+                        Convert.ToInt32(parts[2]), Convert.ToInt32(parts[3])));
+                }
+            }
+            return units;
+        }
+
+        int idx = 0;
+        if (spec.Length >= 2) {
+            idx = Convert.ToInt32(spec.Substring(1));
+        }
+        if (idx == 0) {
+            units.Add(new Scenario(500, 500, 3600, 3600));
+            units.Add(new Scenario(3500, 3500, 400, 400));
+        } else if (idx == 1) {
+            units.Add(new Scenario(1500, 1500, 2000, 2000));
+            units.Add(new Scenario(2000, 2000, 1500, 1500));
+        } else if (idx == 2) {
+            units.Add(new Scenario(3900, 2000, 4096, 2000));
+        } else if (idx == 3) {
+            units.Add(new Scenario(100, 100, 2000, 2000));
+            units.Add(new Scenario(150, 150, 2100, 2100));
+        } else if (idx == 4) {
+            units.Add(new Scenario(2000, 2000, 2200, 2000));
+            units.Add(new Scenario(2000, 2050, 2200, 2050));
+        } else if (idx == 5) {
+            // two units on the exact same spot, both heading the same way:
+            // they share a repulse cell and push each other apart
+            units.Add(new Scenario(2000, 2000, 3000, 2000));
+            units.Add(new Scenario(2000, 2000, 3000, 2000));
+        } else if (idx == 6) {
+            // three units converging on one point from three directions
+            units.Add(new Scenario(1900, 2000, 2000, 2000));
+            units.Add(new Scenario(2100, 2000, 2000, 2000));
+            units.Add(new Scenario(2000, 1900, 2000, 2000));
+        } else if (idx == 7) {
+            // unit reversing direction: target behind the start position
+            units.Add(new Scenario(2000, 2000, 1000, 2000));
+        } else if (idx == 8) {
+            // diagonal move with a long turn at the end
+            units.Add(new Scenario(1000, 1000, 3000, 1000));
+            units.Add(new Scenario(3000, 1000, 3000, 3000));
+        }
+        return units;
+    }
+}

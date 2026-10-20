@@ -1,0 +1,403 @@
+using System;
+
+// Direction math and velocity integration, a direct port of the openbw
+// functions in bwgame.h:
+//
+//   atan, xy_direction, direction_xy, direction_index, direction_from_index
+//   set_flingy_move_target, set_current_velocity_direction, set_current_speed,
+//   set_next_speed, unit_turn_rate, set_desired_velocity_direction,
+//   update_current_velocity_direction_towards_waypoint, update_unit_heading,
+//   update_current_speed_towards_waypoint, set_movement_flags,
+//   set_movement_values, update_unit_movement_values
+//
+// The fp8 multiplication uses a 64-bit intermediate and rounds towards
+// negative infinity (arithmetic shift right), matching fixed_point's
+// operator*(const fixed_point&) in util.h. Division rounds towards zero.
+public class Kin {
+    // openbw: template<size_t integer_bits> direction_t atan(fixed_point<integer_bits, 8, true> x) const {
+    //     bool negative = x < decltype(x)::zero();
+    //     if (negative) x = -x;
+    //     typename decltype(x)::raw_unsigned_type uv = x.raw_value;
+    //     size_t r = std::lower_bound(tan_table.begin(), tan_table.end(), uv) - tan_table.begin();
+    //     return negative ? -direction_t::from_raw((direction_t::raw_type)r) : direction_t::from_raw((direction_t::raw_type)r);
+    // }
+    public static Dir Atan(Fp x) {
+        bool negative = x < Fp.Zero();
+        if (negative) x = x.Neg();
+        uint uv = (uint)x.RawValue();
+        int r = LowerBoundTan(uv);
+        if (negative) return Dir.FromRaw(r).Neg();
+        return Dir.FromRaw(r);
+    }
+
+    // std::lower_bound over tan_table (64 unsigned entries, ascending, last is
+    // numeric_limits<unsigned>::max()).
+    public static int LowerBoundTan(uint uv) {
+        long[] table = Tabs.TanTable;
+        int lo = 0;
+        int hi = table.Length;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if ((uint)table[mid] < uv) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: direction_t xy_direction(xy_fp8 pos) const {
+    //     if (pos.x == 0_fp8) return pos.y <= 0_fp8 ? 0_dir : -128_dir;
+    //     direction_t r = atan(pos.y / pos.x);
+    //     if (pos.x > 0_fp8) r += 64_dir;
+    //     else r = -64_dir + r;
+    //     return r;
+    // }
+    public static Dir XyDirectionFp8(XyFp8 pos) {
+        if (pos.X == Fp.Zero()) {
+            return pos.Y <= Fp.Zero() ? Dir.FromRaw(0) : Dir.FromRaw(-128);
+        }
+        Dir r = Atan(pos.Y / pos.X);
+        if (pos.X > Fp.Zero()) return r + Dir.FromRaw(64);
+        return Dir.FromRaw(-64) + r;
+    }
+
+    // openbw: direction_t xy_direction(xy pos) const {
+    //     if (pos.x == 0) return pos.y <= 0 ? 0_dir : -128_dir;
+    //     direction_t r = atan(fp8::integer(pos.y) / pos.x);
+    //     if (pos.x > 0) r = 64_dir + r;
+    //     else r = -64_dir + r;
+    //     return r;
+    // }
+    //
+    // fp8::integer(pos.y) / pos.x is fixed_point::operator/(int): the raw
+    // value is divided as a plain integer (truncating towards zero), and the
+    // result is NOT re-shifted, so the quotient is already in fp8 raw units.
+    public static Dir XyDirection(Xy pos) {
+        if (pos.X == 0) {
+            return pos.Y <= 0 ? Dir.FromRaw(0) : Dir.FromRaw(-128);
+        }
+        Fp quotient = Fp.FromRaw((pos.Y << 8) / pos.X);
+        Dir r = Atan(quotient);
+        if (pos.X > 0) return Dir.FromRaw(64) + r;
+        return Dir.FromRaw(-64) + r;
+    }
+
+    // openbw: xy_fp8 direction_xy(direction_t dir, fp8 length) const {
+    //     return direction_table[direction_index(dir)] * length;
+    // }
+    public static XyFp8 DirectionXY(Dir dir, Fp length) {
+        int idx = DirIndex.Index(dir);
+        long[] table = Tabs.DirTable;
+        Fp x = Fp.FromRaw((int)table[idx * 2]);
+        Fp y = Fp.FromRaw((int)table[idx * 2 + 1]);
+        return new XyFp8(x * length, y * length);
+    }
+
+    public static XyFp8 DirectionXY(Dir dir) {
+        int idx = DirIndex.Index(dir);
+        long[] table = Tabs.DirTable;
+        return new XyFp8(Fp.FromRaw((int)table[idx * 2]), Fp.FromRaw((int)table[idx * 2 + 1]));
+    }
+
+    // openbw: xy_fp8 direction_xy(direction_t dir, int length) const {
+    //     return direction_table[direction_index(dir)] * length;
+    // }
+    public static XyFp8 DirectionXYInt(Dir dir, int length) {
+        int idx = DirIndex.Index(dir);
+        long[] table = Tabs.DirTable;
+        Fp x = Fp.FromRaw((int)table[idx * 2]);
+        Fp y = Fp.FromRaw((int)table[idx * 2 + 1]);
+        return new XyFp8(x * length, y * length);
+    }
+
+    // openbw: void set_flingy_move_target(flingy_t* u, xy target_pos, unit_t* target_unit = nullptr) {
+    //     if (u->move_target.pos == target_pos && (!target_unit || u->move_target.unit == target_unit)) return;
+    //     u->move_target.pos = target_pos;
+    //     u->move_target.unit = target_unit;
+    //     u->next_movement_waypoint = target_pos;
+    //     u_unset_movement_flag(u, 4);
+    //     u_set_movement_flag(u, 1);
+    // }
+    public static void SetFlingyMoveTarget(Unit u, Xy targetPos) {
+        if (u.MoveTargetPos == targetPos) return;
+        u.MoveTargetPos = targetPos;
+        u.HasMoveTargetUnit = false;
+        u.NextMovementWaypoint = targetPos;
+        u.UnsetMovementFlag(4);
+        u.SetMovementFlag(1);
+    }
+
+    // openbw: void set_current_velocity_direction(flingy_t* u, direction_t current_velocity_direction) {
+    //     if (u->current_velocity_direction == current_velocity_direction) return;
+    //     u->current_velocity_direction = current_velocity_direction;
+    //     u->velocity = direction_xy(current_velocity_direction, u->current_speed);
+    // }
+    public static void SetCurrentVelocityDirection(Unit u, Dir dir) {
+        if (u.CurrentVelocityDirection == dir) return;
+        u.CurrentVelocityDirection = dir;
+        u.Velocity = DirectionXY(dir, u.CurrentSpeed);
+    }
+
+    // openbw: void set_current_speed(flingy_t* u, fp8 current_speed) {
+    //     if (u->current_speed == current_speed) return;
+    //     u->current_speed = current_speed;
+    //     u->velocity = direction_xy(u->current_velocity_direction, u->current_speed);
+    // }
+    public static void SetCurrentSpeed(Unit u, Fp speed) {
+        if (u.CurrentSpeed == speed) return;
+        u.CurrentSpeed = speed;
+        u.Velocity = DirectionXY(u.CurrentVelocityDirection, u.CurrentSpeed);
+    }
+
+    // openbw: void set_next_speed(flingy_t* u, fp8 next_speed) {
+    //     u->next_speed = next_speed;
+    //     set_current_speed(u, next_speed);
+    // }
+    public static void SetNextSpeed(Unit u, Fp speed) {
+        u.NextSpeed = speed;
+        SetCurrentSpeed(u, speed);
+    }
+
+    // openbw: direction_t unit_turn_rate(const flingy_t* u, direction_t desired_turn) const {
+    //     ufp8 uturn_rate = u->flingy_turn_rate.as_unsigned();
+    //     if (u->flingy_movement_type != 2) uturn_rate /= 2u;
+    //     fp8 turn_rate = uturn_rate.as_signed();
+    //     fp8 turn = fp8::extend(desired_turn);
+    //     if (turn > turn_rate) turn = turn_rate;
+    //     else if (turn < -turn_rate) turn = -turn_rate;
+    //     return direction_t::truncate(turn);
+    // }
+    public static Dir UnitTurnRate(Unit u, Dir desiredTurn) {
+        // ufp8 uturn_rate = u->flingy_turn_rate.as_unsigned();
+        // The unsigned view makes the division an unsigned 32-bit division.
+        uint uturnRate = (uint)u.FlingyTurnRate.RawValue();
+        if (u.FlingyMovementType != 2) uturnRate = uturnRate / 2u;
+        Fp turnRate = Fp.FromRaw((int)uturnRate);
+        // fp8::extend(direction_t): the fractional bit counts are equal, so the
+        // raw value carries over unchanged.
+        Fp turn = Fp.ExtendFromDir(desiredTurn.RawValue());
+        if (turn > turnRate) turn = turnRate;
+        else if (turn < turnRate.Neg()) turn = turnRate.Neg();
+        return Dir.FromRaw(Fp.TruncateToDir(turn.RawValue()));
+    }
+
+    // openbw: void set_desired_velocity_direction(flingy_t* u, direction_t desired_velocity_direction) {
+    //     u->desired_velocity_direction = desired_velocity_direction;
+    //     if (u->next_velocity_direction != desired_velocity_direction) {
+    //         auto turn = unit_turn_rate(u, desired_velocity_direction - u->next_velocity_direction);
+    //         set_current_velocity_direction(u, u->next_velocity_direction + turn);
+    //     } else {
+    //         set_current_velocity_direction(u, desired_velocity_direction);
+    //     }
+    // }
+    public static void SetDesiredVelocityDirection(Unit u, Dir desired) {
+        u.DesiredVelocityDirection = desired;
+        if (u.NextVelocityDirection != desired) {
+            Dir turn = UnitTurnRate(u, desired - u.NextVelocityDirection);
+            SetCurrentVelocityDirection(u, u.NextVelocityDirection + turn);
+        } else {
+            SetCurrentVelocityDirection(u, desired);
+        }
+    }
+
+    // openbw: void update_current_velocity_direction_towards_waypoint(flingy_t* u) {
+    //     if (u->position != u->next_movement_waypoint) {
+    //         set_desired_velocity_direction(u, xy_direction(u->next_movement_waypoint - u->position));
+    //     } else {
+    //         if (u->position != u->next_target_waypoint) {
+    //             set_desired_velocity_direction(u, xy_direction(u->next_target_waypoint - u->position));
+    //         } else {
+    //             set_desired_velocity_direction(u, u->heading);
+    //         }
+    //     }
+    // }
+    public static void UpdateCurrentVelocityDirectionTowardsWaypoint(Unit u) {
+        if (u.Position != u.NextMovementWaypoint) {
+            SetDesiredVelocityDirection(u, XyDirection(u.NextMovementWaypoint - u.Position));
+        } else {
+            if (u.Position != u.NextTargetWaypoint) {
+                SetDesiredVelocityDirection(u, XyDirection(u.NextTargetWaypoint - u.Position));
+            } else {
+                SetDesiredVelocityDirection(u, u.Heading);
+            }
+        }
+    }
+
+    // openbw: void update_unit_heading(flingy_t* u, direction_t velocity_direction) {
+    //     u->next_velocity_direction = velocity_direction;
+    //     if (!u_movement_flag(u, 2) || u_movement_flag(u, 1)) {
+    //         direction_t turn = u->desired_velocity_direction - u->heading;
+    //         if (turn > direction_t::truncate(u->flingy_turn_rate)) turn = direction_t::truncate(u->flingy_turn_rate);
+    //         else if (turn < direction_t::truncate(-u->flingy_turn_rate)) turn = -direction_t::truncate(u->flingy_turn_rate);
+    //         u->heading += turn;
+    //         ...
+    //         if (velocity_direction == u->desired_velocity_direction) {
+    //             if (u->heading == u->desired_velocity_direction) {
+    //                 u_unset_movement_flag(u, 1);
+    //             }
+    //         }
+    //     }
+    // }
+    public static void UpdateUnitHeading(Unit u, Dir velocityDirection) {
+        u.NextVelocityDirection = velocityDirection;
+        if (!u.MovementFlag(2) || u.MovementFlag(1)) {
+            Dir turn = u.DesiredVelocityDirection - u.Heading;
+            // direction_t::truncate(fp8): the shift amount is 0, so the value
+            // is only truncated to 8 bits with sign extension.
+            int maxTurn = Fp.TruncateToDir(u.FlingyTurnRate.RawValue());
+            if (turn > Dir.FromRaw(maxTurn)) turn = Dir.FromRaw(maxTurn);
+            else if (turn < Dir.FromRaw(-maxTurn)) turn = Dir.FromRaw(-maxTurn);
+            u.Heading = u.Heading + turn;
+            if (velocityDirection == u.DesiredVelocityDirection) {
+                if (u.Heading == u.DesiredVelocityDirection) {
+                    u.UnsetMovementFlag(1);
+                }
+            }
+        }
+    }
+
+    // openbw: fp8 unit_halt_distance(const flingy_t* u) const {
+    //     ufp8 speed = u->next_speed.as_unsigned();
+    //     if (speed == ufp8::zero()) return 0_fp8;
+    //     if (u->flingy_movement_type != 0) return 0_fp8;
+    //     if (speed == u->flingy_type->top_speed.as_unsigned() && u->flingy_acceleration == u->flingy_type->acceleration) {
+    //         return u->flingy_type->halt_distance;
+    //     } else {
+    //         return (ufp8::multiply_divide(speed, speed, u->flingy_acceleration.as_unsigned()) / 2u).as_signed();
+    //     }
+    // }
+    public static Fp UnitHaltDistance(Unit u) {
+        int speed = u.NextSpeed.RawValue();
+        if (speed == 0) return Fp.Zero();
+        if (u.FlingyMovementType != 0) return Fp.Zero();
+        int topSpeed = u.FlingyType.TopSpeed.RawValue();
+        int accel = u.FlingyAcceleration.RawValue();
+        if (speed == topSpeed && accel == u.FlingyType.Acceleration.RawValue()) {
+            return u.FlingyType.HaltDistance;
+        }
+        // ufp8::multiply_divide(speed, speed, acceleration) / 2u
+        // multiply_divide: a.raw * b.raw / c.raw with 64-bit intermediate.
+        long prod = (long)speed * (long)speed;
+        int accelUnsigned = accel;
+        long divided = prod / (long)accelUnsigned;
+        int half = (int)((uint)divided / 2u);
+        return Fp.FromRaw(half);
+    }
+
+    // openbw: void update_current_speed_towards_waypoint(flingy_t* u) {
+    //     if (u->flingy_movement_type == 0) { ... }
+    //     else if (u->flingy_movement_type == 1) {
+    //         if (unit_is_at_move_target(u)) {
+    //             u_unset_movement_flag(u, 4);
+    //             set_current_speed(u, 0_fp8);
+    //             return;
+    //         }
+    //     } else if (u->flingy_movement_type == 2) { ... }
+    //     set_current_speed(u, u->next_speed);
+    //     int d = xy_length(u->next_movement_waypoint - u->position);
+    //     bool accelerate = false;
+    //     if (u->current_velocity_direction == u->desired_velocity_direction) accelerate = true;
+    //     else if (d >= 32) accelerate = true;
+    //     else {
+    //         fp8 turn_rate = u->flingy_turn_rate;
+    //         fp8 diff = fp8::extend(u->desired_velocity_direction - u->current_velocity_direction).abs();
+    //         unsigned int val = fp8::divide_multiply(diff * 2 + turn_rate - 1_fp8, turn_rate, u->next_speed).integer_part();
+    //         if (val * 3 / 2 <= (unsigned int)d) accelerate = true;
+    //     }
+    //     if (accelerate) { ...movement_type 0 branch... }
+    //     fp8 speed = u->current_speed;
+    //     if (accelerate) speed += u->flingy_acceleration;
+    //     else speed -= u->flingy_acceleration;
+    //     if (speed < 0_fp8) speed = 0_fp8;
+    //     else if (speed > u->flingy_top_speed) speed = u->flingy_top_speed;
+    //     set_current_speed(u, speed);
+    // }
+    public static void UpdateCurrentSpeedTowardsWaypoint(Unit u) {
+        if (u.FlingyMovementType == 1) {
+            if (u.IsAtMoveTarget()) {
+                u.UnsetMovementFlag(4);
+                SetCurrentSpeed(u, Fp.Zero());
+                return;
+            }
+        } else if (u.FlingyMovementType == 2) {
+            if (u.IsAtMoveTarget()) {
+                u.UnsetMovementFlag(4);
+                SetCurrentSpeed(u, Fp.Zero());
+            } else {
+                if (!u.MovementFlag(1)) {
+                    SetCurrentSpeed(u, u.NextSpeed);
+                } else {
+                    // fp8::extend(direction_t): the fractional bit counts are
+                    // equal, so the raw value carries over unchanged.
+                    Fp headingError = Fp.ExtendFromDir(
+                        (u.Heading - u.DesiredVelocityDirection).RawValue()).Abs();
+                    if (headingError >= Fp.Integer(32)) {
+                        if (u.MovementFlag(2)) {
+                            u.UnsetMovementFlag(2);
+                            u.UnsetMovementFlag(4);
+                            SetCurrentSpeed(u, Fp.Zero());
+                        }
+                    } else {
+                        SetCurrentSpeed(u, u.NextSpeed);
+                    }
+                }
+            }
+            return;
+        }
+
+        SetCurrentSpeed(u, u.NextSpeed);
+        int d = XyMath.XyLength(u.NextMovementWaypoint - u.Position);
+        bool accelerate = false;
+        if (u.CurrentVelocityDirection == u.DesiredVelocityDirection) accelerate = true;
+        else if (d >= 32) accelerate = true;
+        else {
+            Fp turnRate = u.FlingyTurnRate;
+            // fp8::extend(direction_t): the fractional bit counts are equal,
+            // so the raw value carries over unchanged.
+            Fp diff = Fp.ExtendFromDir(
+                (u.DesiredVelocityDirection - u.CurrentVelocityDirection).RawValue()).Abs();
+
+            // fp8::divide_multiply(diff * 2 + turn_rate - 1_fp8, turn_rate, next_speed)
+            Fp scaled = Fp.MulFp8(diff * Fp.Integer(2), Fp.One()) + turnRate - Fp.One();
+            Fp quotient = Fp.DivideMultiply(scaled, turnRate, u.NextSpeed);
+            uint val = (uint)quotient.IntegerPart();
+            if ((uint)(val * 3 / 2) <= (uint)d) accelerate = true;
+        }
+        if (accelerate) {
+            if (u.FlingyMovementType == 0) {
+                if (!u.MovementFlag(0x20) || u.NextMovementWaypoint != u.MoveTargetPos) {
+                    if (!u.MovementFlag(0x10) || u.MovementFlag(0x40)) {
+                        Fp remainingD = XyLengthFp8(ToXyFp8(u.NextMovementWaypoint) - u.ExactPosition);
+                        if (UnitHaltDistance(u) >= remainingD) accelerate = false;
+                    }
+                }
+            }
+        }
+        Fp speed = u.CurrentSpeed;
+        if (accelerate) speed = speed + u.FlingyAcceleration;
+        else speed = speed - u.FlingyAcceleration;
+        if (speed < Fp.Zero()) speed = Fp.Zero();
+        else if (speed > u.FlingyTopSpeed) speed = u.FlingyTopSpeed;
+        SetCurrentSpeed(u, speed);
+    }
+
+    // openbw: fp8 xy_length(xy_fp8 vec) const {
+    //     return fp8::from_raw(xy_length({ (int)vec.x.raw_value, (int)vec.y.raw_value }));
+    // }
+    public static Fp XyLengthFp8(XyFp8 vec) {
+        return Fp.FromRaw(XyMath.XyLength(new Xy((int)vec.X.RawValue(), (int)vec.Y.RawValue())));
+    }
+
+    // openbw: xy_fp8 to_xy_fp8(xy position) const {
+    //     return { fp8::integer(position.x), fp8::integer(position.y) };
+    // }
+    public static XyFp8 ToXyFp8(Xy position) {
+        return new XyFp8(Fp.Integer(position.X), Fp.Integer(position.Y));
+    }
+
+    // openbw: xy to_xy(xy_fp8 position) const {
+    //     return { (int)position.x.integer_part(), (int)position.y.integer_part() };
+    // }
+    public static Xy ToXy(XyFp8 position) {
+        return new Xy(position.X.IntegerPart(), position.Y.IntegerPart());
+    }
+}

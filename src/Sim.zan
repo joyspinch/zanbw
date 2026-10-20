@@ -1,0 +1,461 @@
+using System;
+
+// The movement simulation: openbw's movement state machine for flyers plus
+// the supporting pieces (repulse field, map bounds clamping, per-frame
+// displacement). Direct port of:
+//
+//   movement_UM_Init, movement_UM_Flyer, movement_UM_AtRest,
+//   movement_UM_Dormant, movement_UM_AtMoveTarget
+//   update_unit_movement_values, set_movement_flags, set_movement_values
+//   finish_flingy_movement, finish_unit_movement
+//   apply_repulse_field, update_repulse_direction
+//   increment_repulse_field, decrement_repulse_field, repulse_index
+//   map_bounds, restrict_unit_pos_to_bounds, unit_type_bounding_box
+//
+// The C++ code keeps the per-frame movement results in an
+// execute_movement_struct; this port uses the same struct.
+
+public class Ems {
+    public bool RefreshVision;
+    public bool StartingMovement;
+    public bool StoppingMovement;
+    public Fp Speed;
+    public Xy Position;
+    public XyFp8 ExactPosition;
+    public int PreMovementFlags;
+    public int PostMovementFlags;
+
+    public Ems() {
+        RefreshVision = false;
+        StartingMovement = false;
+        StoppingMovement = false;
+        Speed = Fp.Zero();
+        Position = new Xy(0, 0);
+        ExactPosition = new XyFp8(Fp.Zero(), Fp.Zero());
+        PreMovementFlags = 0;
+        PostMovementFlags = 0;
+    }
+}
+
+public class Sim {
+    public Rng Rng;
+    public int MapWidth;
+    public int MapHeight;
+    public int[] RepulseField;
+
+    public Sim(Rng rng, int mapWidth, int mapHeight) {
+        Rng = rng;
+        MapWidth = mapWidth;
+        MapHeight = mapHeight;
+        RepulseField = new int[((mapWidth + 47) / 48) * ((mapHeight + 47) / 48)];
+    }
+
+    // ---- map bounds --------------------------------------------------------
+
+    // openbw: rect map_bounds() const {
+    //     return { {0, 0}, {(int)game_st.map_width, (int)game_st.map_height} };
+    // }
+    public Xy MapBoundsTo() { return new Xy(MapWidth, MapHeight); }
+
+    // openbw: rect unit_type_bounding_box(const unit_type_t* unit_type, xy origin) const {
+    //     return {origin - unit_type->dimensions.from, origin + unit_type->dimensions.to + xy(1, 1)};
+    // }
+    public void UnitTypeBoundingBox(UnitType ut, Xy origin, out Xy from, out Xy to) {
+        from = origin - ut.DimensionsFrom;
+        to = origin + ut.DimensionsTo + new Xy(1, 1);
+    }
+
+    // openbw: xy restrict_unit_pos_to_bounds(xy pos, const unit_type_t* ut, rect bounds) const {
+    //     rect bb = unit_type_bounding_box(ut, pos);
+    //     if (bb.from.x < bounds.from.x) pos.x -= bb.from.x - bounds.from.x;
+    //     else if (bb.to.x >= bounds.to.x) pos.x -= bb.to.x - bounds.to.x;
+    //     if (bb.from.y < bounds.from.y) pos.y -= bb.from.y - bounds.from.y;
+    //     else if (bb.to.y >= bounds.to.y) pos.y -= bb.to.y - bounds.to.y;
+    //     return pos;
+    // }
+    public Xy RestrictUnitPosToBounds(Xy pos, UnitType ut, Xy boundsFrom, Xy boundsTo) {
+        Xy bbFrom;
+        Xy bbTo;
+        UnitTypeBoundingBox(ut, pos, out bbFrom, out bbTo);
+        int x = pos.X;
+        int y = pos.Y;
+        if (bbFrom.X < boundsFrom.X) x = x - (bbFrom.X - boundsFrom.X);
+        else if (bbTo.X >= boundsTo.X) x = x - (bbTo.X - boundsTo.X);
+        if (bbFrom.Y < boundsFrom.Y) y = y - (bbFrom.Y - boundsFrom.Y);
+        else if (bbTo.Y >= boundsTo.Y) y = y - (bbTo.Y - boundsTo.Y);
+        return new Xy(x, y);
+    }
+
+    // ---- repulse field -----------------------------------------------------
+
+    // openbw: size_t repulse_index(xy pos) {
+    //     size_t ux = pos.x;  size_t uy = pos.y;
+    //     ux /= 48; uy /= 48;
+    //     return uy * game_st.repulse_field_width + ux;
+    // }
+    public int RepulseIndex(Xy pos) {
+        int ux = pos.X;
+        int uy = pos.Y;
+        ux = ux / 48;
+        uy = uy / 48;
+        return uy * ((MapWidth + 47) / 48) + ux;
+    }
+
+    // openbw: void increment_repulse_field(unit_t* u) {
+    //     if (!u_can_move(u)) return;
+    //     if (ut_building(u)) return;
+    //     if (unit_is(u, UnitTypes::Protoss_Interceptor)) return;
+    //     if ((u->repulse_flags & 0xf0) == 0) {
+    //         unsigned int v = lcg_rand(37);
+    //         u->repulse_direction = direction_from_index(v & 0xff);
+    //         v = (v >> 8) & 0xf0;
+    //         if (v == 0) v = 0xf0;
+    //         u->repulse_flags = v;
+    //     }
+    //     u->repulse_flags &= ~7;
+    //     u->repulse_index = repulse_index(u->sprite->position);
+    //     auto& v = st.repulse_field.at(u->repulse_index);
+    //     if (v < 0xff) ++v;
+    // }
+    public void IncrementRepulseField(Unit u) {
+        if (!u.UCanMove()) return;
+        if (u.UtBuilding()) return;
+        if ((u.RepulseFlags & 0xf0) == 0) {
+            uint v = (uint)Rng.Rand(37);
+            u.RepulseDirection = DirIndex.FromIndex((int)(v & 0xff));
+            v = (v >> 8) & 0xf0;
+            if (v == 0) v = 0xf0;
+            u.RepulseFlags = (int)v;
+        }
+        u.RepulseFlags = u.RepulseFlags & ~7;
+        u.RepulseIndex = RepulseIndex(u.Sprite.Position);
+        int field = RepulseField[u.RepulseIndex];
+        if (field < 0xff) RepulseField[u.RepulseIndex] = field + 1;
+    }
+
+    // openbw: void decrement_repulse_field(unit_t* u) {
+    //     ... same guards ...
+    //     auto& v = st.repulse_field.at(u->repulse_index);
+    //     if (v > 0) --v;
+    // }
+    public void DecrementRepulseField(Unit u) {
+        if (!u.UCanMove()) return;
+        if (u.UtBuilding()) return;
+        int field = RepulseField[u.RepulseIndex];
+        if (field > 0) RepulseField[u.RepulseIndex] = field - 1;
+    }
+
+    // openbw: void update_repulse_direction(unit_t* u) {
+    //     direction_t repulse_dir = u->repulse_direction;
+    //     if (!unit_is_at_move_target(u)) {
+    //         direction_t target_dir = xy_direction(u->move_target.pos - u->position);
+    //         size_t index = direction_index(repulse_dir - target_dir);
+    //         repulse_dir = target_dir + direction_from_index(index % 32 + (index < 128 ? 32 : -64));
+    //     }
+    //     auto bb = unit_sprite_bounding_box(u);
+    //     if (bb.from.x < 32) { if (repulse_dir < 0_dir) repulse_dir = -repulse_dir; u->repulse_flags &= 0xf; }
+    //     else if ((size_t)bb.to.x > game_st.map_width - 32) { if (repulse_dir > 0_dir) repulse_dir = -repulse_dir; u->repulse_flags &= 0xf; }
+    //     if (bb.from.y < 32) { if (repulse_dir + 64_dir >= 0_dir) repulse_dir = -repulse_dir - 128_dir; u->repulse_flags &= 0xf; }
+    //     else if ((size_t)bb.to.y > game_st.map_height - 32) { if (repulse_dir + 64_dir < 0_dir) repulse_dir = -repulse_dir - 128_dir; u->repulse_flags &= 0xf; }
+    //     u->repulse_direction = repulse_dir;
+    // }
+    public void UpdateRepulseDirection(Unit u) {
+        Dir repulseDir = u.RepulseDirection;
+        if (!u.IsAtMoveTarget()) {
+            Dir targetDir = Kin.XyDirection(u.MoveTargetPos - u.Position);
+            int index = DirIndex.Index(repulseDir - targetDir);
+            int offset = index % 32 + (index < 128 ? 32 : -64);
+            repulseDir = targetDir + DirIndex.FromIndex(offset);
+        }
+        // unit_sprite_bounding_box(u) = {position - dimensions.from, position + dimensions.to + (1,1)}
+        Xy bbFrom = u.Sprite.Position - u.UnitType.DimensionsFrom;
+        Xy bbTo = u.Sprite.Position + u.UnitType.DimensionsTo + new Xy(1, 1);
+
+        if (bbFrom.X < 32) {
+            if (repulseDir < Dir.FromRaw(0)) repulseDir = repulseDir.Neg();
+            u.RepulseFlags = u.RepulseFlags & 0xf;
+        } else if (bbTo.X > MapWidth - 32) {
+            if (repulseDir > Dir.FromRaw(0)) repulseDir = repulseDir.Neg();
+            u.RepulseFlags = u.RepulseFlags & 0xf;
+        }
+        if (bbFrom.Y < 32) {
+            if (repulseDir + Dir.FromRaw(64) >= Dir.FromRaw(0)) {
+                repulseDir = repulseDir.Neg() - Dir.FromRaw(128);
+            }
+            u.RepulseFlags = u.RepulseFlags & 0xf;
+        } else if (bbTo.Y > MapHeight - 32) {
+            if (repulseDir + Dir.FromRaw(64) < Dir.FromRaw(0)) {
+                repulseDir = repulseDir.Neg() - Dir.FromRaw(128);
+            }
+            u.RepulseFlags = u.RepulseFlags & 0xf;
+        }
+        u.RepulseDirection = repulseDir;
+    }
+
+    // openbw: bool apply_repulse_field(unit_t* u, execute_movement_struct& ems) {
+    //     if (!u_can_move(u)) return false;
+    //     if (ut_building(u)) return false;
+    //     if (unit_is(u, UnitTypes::Protoss_Interceptor)) return false;
+    //     if (u_order_not_interruptible(u)) return false;
+    //     if (u_iscript_nobrk(u)) return false;
+    //     int strength = st.repulse_field[u->repulse_index];
+    //     if (strength <= 1) { u->repulse_flags &= ~7; return false; }
+    //     if (u->repulse_flags & 7) { --u->repulse_flags; }
+    //     else { u->repulse_flags |= 7; update_repulse_direction(u); }
+    //     xy_fp8 repulse = direction_xy(u->repulse_direction) / 2;
+    //     if (unit_is_at_move_target(u)) {
+    //         repulse *= strength / 4 + 1;
+    //         repulse /= 2;
+    //     }
+    //     size_t index = u->repulse_flags >> 4;
+    //     xy_fp8 adjust = { fp8::from_raw(repulse_adjust_table[index * 2]), fp8::from_raw(repulse_adjust_table[index * 2 + 1]) };
+    //     if (repulse.x > adjust.x * 4) repulse.x -= adjust.x;
+    //     else if (repulse.x > 0_fp8) repulse.x += adjust.x;
+    //     else if (repulse.x < -adjust.x * 4) repulse.x += adjust.x;
+    //     else if (repulse.x < 0_fp8) repulse.x -= adjust.x;
+    //     ... same for y ...
+    //     ems.exact_position += repulse;
+    //     ems.position = to_xy(ems.exact_position);
+    //     return true;
+    // }
+    public bool ApplyRepulseField(Unit u, Ems ems) {
+        if (!u.UCanMove()) return false;
+        if (u.UtBuilding()) return false;
+        if (u.UOrderNotInterruptible()) return false;
+        if (u.UIscriptNobrk()) return false;
+        int strength = RepulseField[u.RepulseIndex];
+        if (strength <= 1) {
+            u.RepulseFlags = u.RepulseFlags & ~7;
+            return false;
+        }
+        if ((u.RepulseFlags & 7) != 0) {
+            u.RepulseFlags = u.RepulseFlags - 1;
+        } else {
+            u.RepulseFlags = u.RepulseFlags | 7;
+            UpdateRepulseDirection(u);
+        }
+        XyFp8 repulse = Kin.DirectionXY(u.RepulseDirection) / 2;
+        if (u.IsAtMoveTarget()) {
+            repulse = repulse * (strength / 4 + 1);
+            repulse = repulse / 2;
+        }
+        int index = u.RepulseFlags >> 4;
+        long[] table = Tabs.RepulseAdjustTable;
+        Fp adjustX = Fp.FromRaw((int)table[index * 2]);
+        Fp adjustY = Fp.FromRaw((int)table[index * 2 + 1]);
+
+        Fp rx = repulse.X;
+        if (rx > adjustX * Fp.Integer(4)) rx = rx - adjustX;
+        else if (rx > Fp.Zero()) rx = rx + adjustX;
+        else if (rx < (adjustX * Fp.Integer(4)).Neg()) rx = rx + adjustX;
+        else if (rx < Fp.Zero()) rx = rx - adjustX;
+
+        Fp ry = repulse.Y;
+        if (ry > adjustY * Fp.Integer(4)) ry = ry - adjustY;
+        else if (ry > Fp.Zero()) ry = ry + adjustY;
+        else if (ry < (adjustY * Fp.Integer(4)).Neg()) ry = ry + adjustY;
+        else if (ry < Fp.Zero()) ry = ry - adjustY;
+
+        ems.ExactPosition = ems.ExactPosition + new XyFp8(rx, ry);
+        ems.Position = Kin.ToXy(ems.ExactPosition);
+        return true;
+    }
+
+    // ---- movement values ---------------------------------------------------
+
+    // openbw: void set_movement_flags(flingy_t* u, execute_movement_struct& ems) {
+    //     ems.starting_movement = false;
+    //     ems.stopping_movement = false;
+    //     if (!unit_is_at_move_target(u)) {
+    //         if (!u_movement_flag(u, 2)) {
+    //             if (u->flingy_movement_type != 2 || !u_movement_flag(u, 8)) u_set_movement_flag(u, 2);
+    //             if (!u_movement_flag(u, 8)) ems.starting_movement = true;
+    //         }
+    //     } else {
+    //         if (u_movement_flag(u, 2)) {
+    //             u_unset_movement_flag(u, 2);
+    //             if (!u_movement_flag(u, 8)) ems.stopping_movement = true;
+    //         }
+    //     }
+    // }
+    public void SetMovementFlags(Unit u, Ems ems) {
+        ems.StartingMovement = false;
+        ems.StoppingMovement = false;
+        if (!u.IsAtMoveTarget()) {
+            if (!u.MovementFlag(2)) {
+                if (u.FlingyMovementType != 2 || !u.MovementFlag(8)) u.SetMovementFlag(2);
+                if (!u.MovementFlag(8)) ems.StartingMovement = true;
+            }
+        } else {
+            if (u.MovementFlag(2)) {
+                u.UnsetMovementFlag(2);
+                if (!u.MovementFlag(8)) ems.StoppingMovement = true;
+            }
+        }
+    }
+
+    // openbw: void set_movement_values(flingy_t* u, execute_movement_struct& ems) {
+    //     ems.speed = u->current_speed;
+    //     if (!u_movement_flag(u, 2) || u->current_speed == 0_fp8) {
+    //         ems.position = u->position;
+    //         ems.exact_position = u->exact_position;
+    //     } else {
+    //         fp8 remaining_d = xy_length(to_xy_fp8(u->next_movement_waypoint) - u->exact_position);
+    //         if (u->current_speed >= remaining_d) {
+    //             ems.position = u->next_movement_waypoint;
+    //             ems.exact_position = to_xy_fp8(ems.position);
+    //             ems.speed = remaining_d;
+    //         } else {
+    //             ems.exact_position = u->exact_position + u->velocity;
+    //             ems.position = to_xy(ems.exact_position);
+    //         }
+    //         if (u->flingy_movement_type == 2) { set_current_speed(u, 0_fp8); }
+    //     }
+    // }
+    public void SetMovementValues(Unit u, Ems ems) {
+        ems.Speed = u.CurrentSpeed;
+        if (!u.MovementFlag(2) || u.CurrentSpeed == Fp.Zero()) {
+            ems.Position = u.Position;
+            ems.ExactPosition = u.ExactPosition;
+        } else {
+            Fp remainingD = Kin.XyLengthFp8(Kin.ToXyFp8(u.NextMovementWaypoint) - u.ExactPosition);
+            if (u.CurrentSpeed >= remainingD) {
+                ems.Position = u.NextMovementWaypoint;
+                ems.ExactPosition = Kin.ToXyFp8(ems.Position);
+                ems.Speed = remainingD;
+            } else {
+                ems.ExactPosition = u.ExactPosition + u.Velocity;
+                ems.Position = Kin.ToXy(ems.ExactPosition);
+            }
+            if (u.FlingyMovementType == 2) {
+                Kin.SetCurrentSpeed(u, Fp.Zero());
+            }
+        }
+    }
+
+    // openbw: void update_unit_movement_values(flingy_t* u, execute_movement_struct& ems) {
+    //     ems.pre_movement_flags = u->movement_flags;
+    //     update_current_velocity_direction_towards_waypoint(u);
+    //     update_current_speed_towards_waypoint(u);
+    //     set_movement_flags(u, ems);
+    //     set_movement_values(u, ems);
+    //     ems.post_movement_flags = u->movement_flags;
+    //     u->movement_flags = ems.pre_movement_flags;
+    // }
+    public void UpdateUnitMovementValues(Unit u, Ems ems) {
+        ems.PreMovementFlags = u.MovementFlags;
+        Kin.UpdateCurrentVelocityDirectionTowardsWaypoint(u);
+        Kin.UpdateCurrentSpeedTowardsWaypoint(u);
+        SetMovementFlags(u, ems);
+        SetMovementValues(u, ems);
+        ems.PostMovementFlags = u.MovementFlags;
+        u.MovementFlags = ems.PreMovementFlags;
+    }
+
+    // openbw: bool finish_flingy_movement(flingy_t* u, execute_movement_struct& ems) {
+    //     bool moved = u->position != ems.position;
+    //     u->movement_flags = ems.post_movement_flags;
+    //     u->next_speed = u->current_speed;
+    //     u->position = ems.position;
+    //     u->exact_position = ems.exact_position;
+    //     move_sprite(u->sprite, u->position);
+    //     update_unit_heading(u, u->current_velocity_direction);
+    //     return moved;
+    // }
+    public bool FinishFlingyMovement(Unit u, Ems ems) {
+        bool moved = u.Position != ems.Position;
+        u.MovementFlags = ems.PostMovementFlags;
+        u.NextSpeed = u.CurrentSpeed;
+        u.Position = ems.Position;
+        u.ExactPosition = ems.ExactPosition;
+        u.Sprite.Position = u.Position;
+        Kin.UpdateUnitHeading(u, u.CurrentVelocityDirection);
+        return moved;
+    }
+
+    // openbw: bool finish_unit_movement(unit_t* u, execute_movement_struct& ems) {
+    //     auto prev_pos = u->position;
+    //     if (!finish_flingy_movement(u, ems)) return false;
+    //     if (tile_index(prev_pos) != tile_index(u->position)) ems.refresh_vision = true;
+    //     unit_finder_reinsert(u);
+    //     return true;
+    // }
+    public bool FinishUnitMovement(Unit u, Ems ems) {
+        Xy prevPos = u.Position;
+        if (!FinishFlingyMovement(u, ems)) return false;
+        if (TileIndex(prevPos) != TileIndex(u.Position)) ems.RefreshVision = true;
+        return true;
+    }
+
+    // openbw: size_t tile_index(xy pos) const {
+    //     size_t ux = (size_t)pos.x / 32;  size_t uy = (size_t)pos.y / 32;
+    //     return uy * game_st.map_tile_width + ux;
+    // }
+    public int TileIndex(Xy pos) {
+        int ux = pos.X / 32;
+        int uy = pos.Y / 32;
+        return uy * 128 + ux;
+    }
+
+    // ---- movement states ---------------------------------------------------
+
+    // openbw: bool movement_UM_Flyer(unit_t* u, execute_movement_struct& ems) {
+    //     if (u->sprite->position != u->move_target.pos) {
+    //         xy move_target = restrict_unit_pos_to_bounds(u->move_target.pos, u->unit_type, map_bounds());
+    //         if (move_target != u->move_target.pos) {
+    //             set_flingy_move_target(u, move_target);
+    //             u_set_status_flag(u, unit_t::status_flag_immovable);
+    //         }
+    //     }
+    //     update_unit_movement_values(u, ems);
+    //     bool being_repulsed = apply_repulse_field(u, ems);
+    //     ems.position = restrict_unit_pos_to_bounds(ems.position, u->unit_type, map_bounds());
+    //     finish_unit_movement(u, ems);
+    //     if (u_can_move(u) && !ut_building(u) && u->unit_type->id != UnitTypes::Protoss_Interceptor) {
+    //         size_t index = repulse_index(u->position);
+    //         if (index != u->repulse_index) {
+    //             decrement_repulse_field(u);
+    //             increment_repulse_field(u);
+    //         }
+    //         if (being_repulsed) {
+    //             if (std::max(std::abs(u->move_target.pos.x - u->position.x), std::abs(u->move_target.pos.y - u->position.y)) < 24) {
+    //                 u->move_target.pos = u->position;
+    //                 u->next_movement_waypoint = u->position;
+    //             }
+    //         }
+    //     }
+    //     return false;
+    // }
+    public bool MovementUmFlyer(Unit u, Ems ems) {
+        if (u.Sprite.Position != u.MoveTargetPos) {
+            Xy moveTarget = RestrictUnitPosToBounds(u.MoveTargetPos, u.UnitType, new Xy(0, 0), MapBoundsTo());
+            if (moveTarget != u.MoveTargetPos) {
+                Kin.SetFlingyMoveTarget(u, moveTarget);
+                u.SetStatus(StatusFlag.Immovable);
+            }
+        }
+        UpdateUnitMovementValues(u, ems);
+        bool beingRepulsed = ApplyRepulseField(u, ems);
+        ems.Position = RestrictUnitPosToBounds(ems.Position, u.UnitType, new Xy(0, 0), MapBoundsTo());
+        FinishUnitMovement(u, ems);
+        if (u.UCanMove() && !u.UtBuilding()) {
+            int index = RepulseIndex(u.Position);
+            if (index != u.RepulseIndex) {
+                DecrementRepulseField(u);
+                IncrementRepulseField(u);
+            }
+            if (beingRepulsed) {
+                int dx = u.MoveTargetPos.X - u.Position.X;
+                int dy = u.MoveTargetPos.Y - u.Position.Y;
+                int adx = dx < 0 ? -dx : dx;
+                int ady = dy < 0 ? -dy : dy;
+                int m = adx > ady ? adx : ady;
+                if (m < 24) {
+                    u.MoveTargetPos = u.Position;
+                    u.NextMovementWaypoint = u.Position;
+                }
+            }
+        }
+        return false;
+    }
+}

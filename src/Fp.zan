@@ -1,0 +1,157 @@
+using System;
+
+// Fixed-point arithmetic, a direct port of openbw/util.h's fixed_point template.
+//
+// The C++ original is a template parameterised by <integer_bits, fractional_bits,
+// is_signed, exact_integer_bits>. The instantiations that actually matter for
+// this port are:
+//
+//   fp1  = fixed_point<31, 1,  true>                 // supply counters
+//   fp8  = fixed_point<24, 8,  true>                 // positions, speeds
+//   ufp8 = fixed_point<24, 8,  false>                // unsigned view of fp8
+//   fp16 = fixed_point<16, 16, true>
+//   dir  = fixed_point<0,  8,  true, true>           // direction_t, int8 raw
+//
+// Semantics that must be preserved bit for bit:
+//   * raw storage width follows int_fastn_t: on x64 that is 32 bits for the
+//     <=32-bit cases, so raw_value arithmetic wraps at 32 bits (int in C).
+//   * the 64-bit intermediate used by fixed_point's fixed_point operator* and
+//     operator/ is always 64 bit (fractional_bits doubled => 48 bits total),
+//     matching the original's use of int_fast64_t.
+//   * direction_t has exact_integer_bits = true: raw values are truncated to
+//     8 bits with sign extension on every construction.
+//   * multiplication rounds towards negative infinity (arithmetic shift right),
+//     division rounds towards zero.
+
+public struct Fp {
+    public int Raw;
+
+    public Fp(int raw) { Raw = raw; }
+
+    // ---- raw access -------------------------------------------------------
+
+    public static Fp FromRaw(int raw) { return new Fp(raw); }
+
+    public int RawValue() { return Raw; }
+
+    // ---- integer_part / fractional_part ------------------------------------
+
+    public int IntegerPart() { return Raw >> 8; }        // fp8: >> fractional_bits
+    public int FractionalPart() { return Raw & 0xff; }    // fp8: & ((1<<8)-1)
+
+    // ---- construction ------------------------------------------------------
+
+    public static Fp Integer(int v) { return new Fp(v << 8); }
+    public static Fp Zero() { return new Fp(0); }
+    public static Fp One() { return new Fp(256); }
+
+    // ---- comparison --------------------------------------------------------
+
+    public static bool operator ==(Fp a, Fp b) { return a.Raw == b.Raw; }
+    public static bool operator !=(Fp a, Fp b) { return a.Raw != b.Raw; }
+    public static bool operator <(Fp a, Fp b) { return a.Raw < b.Raw; }
+    public static bool operator <=(Fp a, Fp b) { return a.Raw <= b.Raw; }
+    public static bool operator >(Fp a, Fp b) { return a.Raw > b.Raw; }
+    public static bool operator >=(Fp a, Fp b) { return a.Raw >= b.Raw; }
+
+    // ---- arithmetic --------------------------------------------------------
+    // C++ fixed_point::operator+ returns from_raw(a + b) with no wrap() call
+    // (wrap only happens in the compound assignment forms), so plain addition
+    // keeps the 32-bit wrap of the raw type.
+
+    public static Fp operator +(Fp a, Fp b) { return new Fp(a.Raw + b.Raw); }
+    public static Fp operator -(Fp a, Fp b) { return new Fp(a.Raw - b.Raw); }
+
+    // fixed_point's fixed_point operator* uses a 64-bit intermediate and
+    // shifts right by the fractional bits (rounds towards negative infinity).
+    public static Fp operator *(Fp a, Fp b) { return MulFp8(a, b); }
+
+    // fixed_point's fixed_point operator/ uses a 64-bit intermediate and
+    // truncates towards zero.
+    public static Fp operator /(Fp a, Fp b) { return DivFp8(a, b); }
+
+    // operator*(int) / operator/(int): plain 32-bit raw arithmetic.
+    public static Fp operator *(Fp a, int b) { return new Fp(a.Raw * b); }
+    public static Fp operator /(Fp a, int b) { return new Fp(a.Raw / b); }
+
+    // unary minus is a method, not an operator overload: zanc's irgen miscompiles
+    // unary operator overloads on non-integral types (verified: "Integer
+    // arithmetic operators only work with integral types!").
+    public Fp Neg() { return new Fp(-Raw); }
+
+    // fixed_point::abs: if (*this >= zero()) return *this; else from_raw(-raw_value)
+    public Fp Abs() {
+        if (this >= Fp.Zero()) return this;
+        return new Fp(-Raw);
+    }
+
+    // ---- fp8 <-> fp16 / unsigned views -------------------------------------
+
+    // fp8::extend(direction_t): the result type has 24 integer bits and 8
+    // fractional bits, the source has 0 integer bits and 8 fractional bits.
+    // The shift amount (result_fractional_bits - n_fractional_bits) is 0, so
+    // the raw value carries over unchanged.
+    public static Fp ExtendFromDir(int dirRaw) { return new Fp(dirRaw); }
+
+    // fp8::extend(fp16): fp16 has 16 fractional bits, fp8 has 8, so the raw
+    // value is shifted right by 8.
+    public static Fp ExtendFromFp16(int fp16Raw) { return new Fp(fp16Raw >> 8); }
+
+    // direction_t::truncate(fp8): the shift amount
+    // (n_fractional_bits - result_fractional_bits) is 8 - 8 = 0, so the raw
+    // value is unchanged; the result type's from_raw() then applies the
+    // 8-bit sign-extending truncation of exact_integer_bits.
+    public static int TruncateToDir(int fp8Raw) {
+        int v = fp8Raw & 0xff;
+        if ((v & 0x80) != 0) v = v - 256;
+        return v;
+    }
+
+    // ---- wide arithmetic ---------------------------------------------------
+    // fixed_point's fixed_point operator* and operator/ always use a 64-bit
+    // intermediate (fractional_bits doubled). Multiplication shifts right
+    // (rounds towards negative infinity); division truncates towards zero.
+
+    // fp8 * fp8 with 64-bit intermediate: (a.raw * b.raw) >> 8
+    public static Fp MulFp8(Fp a, Fp b) {
+        long tmp = (long)a.Raw * (long)b.Raw;
+        return new Fp((int)(tmp >> 8));
+    }
+
+    // fp8 / fp8 with 64-bit intermediate: (a.raw << 8) / b.raw
+    public static Fp DivFp8(Fp a, Fp b) {
+        long tmp = (long)a.Raw << 8;
+        return new Fp((int)(tmp / (long)b.Raw));
+    }
+
+    // fixed_point::divide_multiply: returns a / b * c, rounds towards 0.
+    // The C++ form is from_raw(a.raw_value / b.raw_value * c.raw_value) with
+    // the raw type being 32 bit, so the division happens in 32 bit.
+    public static Fp DivideMultiply(Fp a, Fp b, Fp c) {
+        return new Fp((a.Raw / b.Raw) * c.Raw);
+    }
+
+    // fixed_point::multiply_divide: returns a * b / c, rounds towards 0.
+    // The C++ code takes the 64-bit path when the raw type is not a native
+    // fast int; on x64 int_fast32_t is a native 32-bit int, so the 32-bit
+    // branch is used when both operands fit under max_value_no_overflow.
+    public static Fp MultiplyDivide(Fp a, Fp b, Fp c) {
+        return new Fp((int)((long)a.Raw * (long)b.Raw / (long)c.Raw));
+    }
+}
+
+// Unsigned 8.8 fixed point (ufp8). The C++ type stores the same 32-bit raw
+// value but interprets it as unsigned; operations that need the unsigned view
+// (unit_halt_distance) are done on the raw int in this port.
+public struct Ufp8 {
+    public int Raw;
+
+    public Ufp8(int raw) { Raw = raw; }
+
+    public static Ufp8 FromRaw(int raw) { return new Ufp8(raw); }
+    public int RawValue() { return Raw; }
+    public static Ufp8 Zero() { return new Ufp8(0); }
+
+    // ufp8 division truncates like an unsigned 32-bit division.
+    public static Ufp8 operator /(Ufp8 a, uint b) { return new Ufp8((int)((uint)a.Raw / b)); }
+}

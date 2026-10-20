@@ -1,0 +1,14 @@
+name=ZanBW
+name.zh=星际争霸母巢之战引擎重写
+category=Game Engine
+icon=shield
+kind=copy
+type=console
+target=exe
+entry=src/main.zan
+order=90
+desc=Bit-exact Zan rewrite of the OpenBW Brood War engine, verified against the original C++ with per-frame differential testing.
+desc.zh=OpenBW 母巢之战引擎的 Zan 逐位一致重写，与原 C++ 逐帧差分验证。
+category.zh=游戏引擎
+sketch=console
+caps=game

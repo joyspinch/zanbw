@@ -1,0 +1,66 @@
+using System;
+
+// direction_t: fixed_point<0, 8, true, true>.
+//
+// exact_integer_bits = true means every construction truncates the raw value
+// to 8 bits with sign extension. The stored raw value therefore always lies
+// in [-128, 127], and arithmetic on it wraps at 8 bits as well.
+//
+// Note: the C++ operator+ for fixed_point does NOT call wrap(), so direction
+// addition actually keeps the wider raw value until the next from_raw() call.
+// To stay bit-exact with the original, Dir.Add/Sub below reproduce that:
+// the result is truncated back into [-128, 127] exactly like from_raw() would.
+public struct Dir {
+    public int Raw;
+
+    public Dir(int raw) { Raw = Truncate(raw); }
+
+    public static Dir FromRaw(int raw) { return new Dir(raw); }
+    public static Dir Zero() { return new Dir(0); }
+
+    // fixed_point::from_raw for exact_integer_bits: sign-extend the low 8 bits.
+    public static int Truncate(int raw) {
+        int v = raw & 0xff;
+        if ((v & 0x80) != 0) v = v - 256;
+        return v;
+    }
+
+    public int RawValue() { return Raw; }
+
+    public static bool operator ==(Dir a, Dir b) { return a.Raw == b.Raw; }
+    public static bool operator !=(Dir a, Dir b) { return a.Raw != b.Raw; }
+    public static bool operator <(Dir a, Dir b) { return a.Raw < b.Raw; }
+    public static bool operator <=(Dir a, Dir b) { return a.Raw <= b.Raw; }
+    public static bool operator >(Dir a, Dir b) { return a.Raw > b.Raw; }
+    public static bool operator >=(Dir a, Dir b) { return a.Raw >= b.Raw; }
+
+    public static Dir operator +(Dir a, Dir b) { return new Dir(a.Raw + b.Raw); }
+    public static Dir operator -(Dir a, Dir b) { return new Dir(a.Raw - b.Raw); }
+
+    public Dir Neg() { return new Dir(-Raw); }
+}
+
+// Index helpers from bwgame.h:
+//
+//   size_t direction_index(direction_t dir) {
+//       auto v = dir.fractional_part();      // raw & 0xff, 0..255
+//       if (v < 0) return 256 + v; else return v;
+//   }
+//   direction_t direction_from_index(size_t index) {
+//       int v = (int)index;
+//       if (v >= 128) v = -(256 - v);
+//       return direction_t::from_raw(v);
+//   }
+public class DirIndex {
+    public static int Index(Dir dir) {
+        int v = dir.RawValue() & 0xff;
+        if (v < 0) return 256 + v;
+        return v;
+    }
+
+    public static Dir FromIndex(int index) {
+        int v = index;
+        if (v >= 128) v = -(256 - v);
+        return Dir.FromRaw(v);
+    }
+}

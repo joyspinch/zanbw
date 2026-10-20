@@ -1,0 +1,334 @@
+using System;
+
+// Headless movement simulation. Produces a trace in exactly the same format
+// as the C++ reference bed (tools/cppbed), so the two can be diffed frame by
+// frame.
+//
+//   zanc src/main.zan src/*.zan --auto-stdlib -o build/zanbw.exe
+//   zanbw.exe 600 > trace.txt
+//   diff trace.txt tools/cppbed/trace_s0.txt
+
+public class Program {
+    static int Main(string[] args) {
+        // Argument order is flexible: the scenario token (starting with 's')
+        // and the frame count may appear in either order.
+        int frames = 600;
+        string scenario = "";
+        foreach (string a in args) {
+            if (a.Length > 0 && a[0] == 's') scenario = a;
+            else frames = Convert.ToInt32(a);
+        }
+
+        Rng rng = new Rng();
+        Sim sim = new Sim(rng, 4096, 4096);
+
+        List<Scenario> specs = ScenarioParser.Parse(scenario);
+
+        List<Unit> units = new List<Unit>();
+        for (int i = 0; i < specs.Count; i++) {
+            Scenario sp = specs[i];
+            Unit u = CreateUnit(sim, i == 0 ? 0 : 1, new Xy(sp.X, sp.Y), 0);
+            units.Add(u);
+        }
+
+        // the real "unit becomes active" path: unhide and reset movement state
+        // openbw's bw_insert_list() pushes to the front of an empty list, and
+        // otherwise inserts at index 1 -- so the visible-unit order is not the
+        // creation order. Reproduce it exactly.
+        List<Unit> visible = new List<Unit>();
+        for (int i = 0; i < units.Count; i++) {
+            Unit u = units[i];
+            RefreshUnitPosition(sim, u);
+            if (visible.Count == 0) visible.Add(u);
+            else visible.Insert(1, u);
+        }
+        units = visible;
+
+        // movement issued directly at the flingy layer
+        for (int i = 0; i < units.Count; i++) {
+            Scenario sp = specs[i];
+            Kin.SetFlingyMoveTarget(units[i], new Xy(sp.TargetX, sp.TargetY));
+            SetNextTargetWaypoint(units[i], new Xy(sp.TargetX, sp.TargetY));
+        }
+
+        for (int frame = 0; frame < frames; frame++) {
+            foreach (Unit u in units) {
+                UpdateUnitMovement(sim, u);
+            }
+
+            Console.Write("F " + frame);
+            foreach (Unit u in units) {
+                Console.Write(" | " + u.Position.X + " " + u.Position.Y
+                    + " " + u.ExactPosition.X.RawValue() + " " + u.ExactPosition.Y.RawValue()
+                    + " " + u.Heading.RawValue()
+                    + " " + u.CurrentVelocityDirection.RawValue()
+                    + " " + u.CurrentSpeed.RawValue()
+                    + " " + u.Velocity.X.RawValue()
+                    + " " + u.MovementState
+                    + " " + u.MovementFlags
+                    + " " + u.FlingyTurnRate.RawValue()
+                    + " " + u.RepulseFlags
+                    + " " + u.RepulseDirection.RawValue()
+                    + " " + u.NextVelocityDirection.RawValue()
+                    + " " + u.NextSpeed.RawValue()
+                    + " 0");
+            }
+            Console.WriteLine("");
+        }
+
+        // Audit line: identical format to the C++ bed, printed last so that a
+        // plain diff of the two traces covers it as well.
+        string audit = "lcg_state=" + Convert.ToString(rng.State) + " total_rand=" + rng.TotalRandomCounts + " sources:";
+        for (int i = 0; i < 256; i++) {
+            if (rng.RandomCounts[i] != 0) {
+                audit = audit + " " + i + ":" + rng.RandomCounts[i];
+            }
+        }
+        Console.WriteLine(audit);
+        return 0;
+    }
+
+    // openbw: void set_next_target_waypoint(flingy_t* u, xy pos) {
+    //     if (u->next_target_waypoint == pos) return;
+    //     u->next_target_waypoint = pos;
+    // }
+    static void SetNextTargetWaypoint(Unit u, Xy pos) {
+        if (u.NextTargetWaypoint == pos) return;
+        u.NextTargetWaypoint = pos;
+    }
+
+    // openbw: bool initialize_unit_type(...) + initialize_flingy(...), reduced to
+    // the fields the movement simulation needs.
+    static Unit CreateUnit(Sim sim, int typeId, Xy pos, int owner) {
+        // openbw: create_unit() calls lcg_rand(14) before doing anything else.
+        sim.Rng.Rand(14);
+        Unit u = new Unit();
+        UnitType ut = MakeUnitType(typeId);
+        u.UnitType = ut;
+        u.FlingyType = ut.Flingy;
+        u.FlingyMovementType = ut.Flingy.MovementType;
+        u.Owner = owner;
+        u.Sprite = new Sprite();
+        u.Sprite.Position = pos;
+        u.Position = pos;
+        u.ExactPosition = new XyFp8(Fp.Integer(pos.X), Fp.Integer(pos.Y));
+        u.Hp = Fp.One();
+        u.FlingyTopSpeed = ut.Flingy.TopSpeed;
+        u.FlingyAcceleration = ut.Flingy.Acceleration;
+        u.FlingyTurnRate = ut.Flingy.TurnRate;
+        u.NextSpeed = Fp.Zero();
+        u.CurrentSpeed = Fp.Zero();
+        u.Velocity = new XyFp8(Fp.Zero(), Fp.Zero());
+        u.Heading = Dir.Zero();
+        u.NextVelocityDirection = Dir.Zero();
+        u.CurrentVelocityDirection = Dir.Zero();
+        u.DesiredVelocityDirection = Dir.Zero();
+        Kin.SetFlingyMoveTarget(u, pos);
+        SetNextTargetWaypoint(u, pos);
+        u.StatusFlagBits = 0;
+        u.SetStatus(StatusFlag.Flying);
+        u.SetStatus(StatusFlag.CanMove);
+        u.SetStatus(StatusFlag.CanTurn);
+        u.PathingFlags = 0;
+        if (ut.ElevationLevel < 12) u.PathingFlags = u.PathingFlags | 1;
+        u.MovementState = MovementStates.UM_Init;
+        u.UnitIdGeneration = u.UnitIdGeneration + 1;
+        u.WireframeRandomizer = sim.Rng.Rand(15) & 0xff;
+        u.Hp = ut.Hitpoints / Fp.Integer(10);
+        u.OrderId = 0;
+        u.Sprite.ElevationLevel = ut.ElevationLevel;
+        return u;
+    }
+
+    // The flingy type constants below must match tools/cppbed/main.cpp
+    // exactly: the C++ bed builds them with the same mix of fp8::integer()
+    // (raw << 8) and the _fp8 literal (raw as written).
+    static UnitType MakeUnitType(int typeId) {
+        if (typeId == 0) {
+            FlingyType ft = new FlingyType(0, Fp.Integer(385), Fp.FromRaw(12), Fp.Integer(500), Fp.FromRaw(11), 1);
+            return new UnitType(0, ft, 12,
+                UnitTypeFlag.CanMove | UnitTypeFlag.CanTurn | UnitTypeFlag.Flyer,
+                7, new Xy(-21, -15), new Xy(21, 15));
+        }
+        FlingyType ft2 = new FlingyType(1, Fp.Integer(100), Fp.FromRaw(4), Fp.Integer(1000), Fp.FromRaw(5), 1);
+        return new UnitType(1, ft2, 12,
+            UnitTypeFlag.CanMove | UnitTypeFlag.CanTurn | UnitTypeFlag.Flyer,
+            7, new Xy(-21, -15), new Xy(21, 15));
+    }
+
+    // openbw: void refresh_unit_position(unit_t* u) {
+    //     ... unhide, move to visible list, insert finder, reset movement ...
+    //     reset_movement_state(u);
+    // }
+    static void RefreshUnitPosition(Sim sim, Unit u) {
+        u.Sprite.Flags = u.Sprite.Flags & ~SpriteFlag.Hidden;
+        u.MovementState = MovementStates.UM_Init;
+        if (u.Sprite.ElevationLevel < 12) u.PathingFlags = u.PathingFlags | 1;
+        else u.PathingFlags = u.PathingFlags & ~1;
+        sim.IncrementRepulseField(u);
+    }
+
+    // openbw: void update_unit_movement(unit_t* u) {
+    //     auto prev_velocity_direction = u->next_velocity_direction;
+    //     bool refresh_vision = execute_movement(u);
+    //     if (refresh_vision) refresh_unit_vision(u);
+    //     ...
+    // }
+    static void UpdateUnitMovement(Sim sim, Unit u) {
+        Ems ems = new Ems();
+        ems.RefreshVision = false;
+        bool cont = true;
+        while (cont) {
+            cont = false;
+            switch (u.MovementState) {
+                case MovementStates.UM_Init:
+                    cont = MovementUmInit(sim, u, ems);
+                    break;
+                case MovementStates.UM_Flyer:
+                    cont = sim.MovementUmFlyer(u, ems);
+                    break;
+                case MovementStates.UM_AtRest:
+                    cont = MovementUmAtRest(sim, u, ems);
+                    break;
+                case MovementStates.UM_Dormant:
+                    cont = MovementUmDormant(sim, u, ems);
+                    break;
+                case MovementStates.UM_AtMoveTarget:
+                    cont = MovementUmAtMoveTarget(sim, u, ems);
+                    break;
+                default:
+                    cont = false;
+                    break;
+            }
+        }
+    }
+
+    // openbw: bool movement_UM_Init(unit_t* u, execute_movement_struct& ems) {
+    //     u->pathing_flags &= ~(1 | 2);
+    //     if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+    //     u->terrain_no_collision_bounds = {{0, 0}, {0, 0}};
+    //     int next_state = movement_states::UM_Lump;
+    //     if (!ut_turret(u) && u_iscript_nobrk(u)) next_state = movement_states::UM_InitSeq;
+    //     else if (!u->sprite || unit_dead(u)) next_state = movement_states::UM_Lump;
+    //     else if (u_in_bunker(u)) next_state = movement_states::UM_Bunker;
+    //     else if (us_hidden(u)) { ... next_state = movement_states::UM_Hidden; }
+    //     else if (u_burrowed(u)) next_state = movement_states::UM_Lump;
+    //     else if (u_can_move(u)) next_state = u->pathing_flags & 1 ? movement_states::UM_AtRest : movement_states::UM_Flyer;
+    //     else if (u_can_turn(u)) next_state = ut_turret(u) ? movement_states::UM_Turret : movement_states::UM_BldgTurret;
+    //     else if (u->pathing_flags & 1 && (u_movement_flag(u, 2) || !unit_is_at_move_target(u))) next_state = movement_states::UM_LumpWannabe;
+    //     u->movement_state = next_state;
+    //     return true;
+    // }
+    static bool MovementUmInit(Sim sim, Unit u, Ems ems) {
+        u.PathingFlags = u.PathingFlags & ~(1 | 2);
+        if (u.Sprite.ElevationLevel < 12) u.PathingFlags = u.PathingFlags | 1;
+        int nextState = MovementStates.UM_Lump;
+        if (!u.UtTurret() && u.UIscriptNobrk()) {
+            nextState = MovementStates.UM_InitSeq;
+        } else if (u.UInBunker()) {
+            nextState = MovementStates.UM_Bunker;
+        } else if ((u.Sprite.Flags & SpriteFlag.Hidden) != 0) {
+            nextState = MovementStates.UM_Hidden;
+        } else if (u.UBurrowed()) {
+            nextState = MovementStates.UM_Lump;
+        } else if (u.UCanMove()) {
+            nextState = (u.PathingFlags & 1) != 0 ? MovementStates.UM_AtRest : MovementStates.UM_Flyer;
+        } else if (u.UCanTurn()) {
+            nextState = u.UtTurret() ? MovementStates.UM_Turret : MovementStates.UM_BldgTurret;
+        } else if ((u.PathingFlags & 1) != 0 && (u.MovementFlag(2) || !u.IsAtMoveTarget())) {
+            nextState = MovementStates.UM_LumpWannabe;
+        }
+        u.MovementState = nextState;
+        return true;
+    }
+
+    // openbw: bool movement_UM_AtRest(unit_t* u, execute_movement_struct& ems) { ... }
+    // The full body handles pathing; the flyer path never reaches the parts
+    // that need region data, so the relevant parts are ported here.
+    static bool MovementUmAtRest(Sim sim, Unit u, Ems ems) {
+        if (!u.IsAtMoveTarget()) {
+            if (u.PathingCollisionCounter != 0) {
+                if (u.PathingCollisionCounter > 2) u.PathingCollisionCounter = 2;
+                else u.PathingCollisionCounter = u.PathingCollisionCounter - 1;
+            }
+        } else {
+            u.PathingCollisionCounter = 0;
+        }
+        bool goingToNextWaypoint = false;
+        bool goToNextWaypoint = GoToNextWaypoint(u);
+        if (goToNextWaypoint) {
+            goingToNextWaypoint = true;
+            sim.UpdateUnitMovementValues(u, ems);
+            // collision checks only matter for ground units
+            if (u.UGroundUnit()) {
+                sim.FinishUnitMovement(u, ems);
+            }
+        }
+        if (u.UCollision() && u.UGroundUnit()) {
+            u.MovementState = MovementStates.UM_CheckIllegal;
+            return false;
+        }
+        if (!u.IsAtMoveTarget() && !u.MovementFlag(4)) {
+            u.MovementState = MovementStates.UM_StartPath;
+            return true;
+        }
+        if (!goingToNextWaypoint) {
+            u.NextSpeed = Fp.Zero();
+            if (u.CurrentSpeed != Fp.Zero()) {
+                u.CurrentSpeed = Fp.Zero();
+                u.Velocity = new XyFp8(Fp.Zero(), Fp.Zero());
+            }
+            SetNextTargetWaypoint(u, u.Sprite.Position);
+            u.MovementState = MovementStates.UM_Dormant;
+        }
+        return false;
+    }
+
+    // the go_to_next_waypoint lambda of movement_UM_AtRest
+    static bool GoToNextWaypoint(Unit u) {
+        if (u.MovementFlag(4)) return true;
+        if (u.IsAtMoveTarget()) {
+            if (u.MovementFlag(2)) return true;
+            if (u.Position != u.NextTargetWaypoint) {
+                Dir dir = Kin.XyDirection(u.NextTargetWaypoint - u.Position);
+                if (u.Heading != dir) return true;
+                if (u.NextVelocityDirection != dir) return true;
+            }
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_Dormant(unit_t* u, execute_movement_struct& ems) {
+    //     bool rest = false;
+    //     if (u_collision(u) && u_ground_unit(u)) rest = true;
+    //     if (!unit_is_at_move_target(u)) rest = true;
+    //     if (u->position != u->next_target_waypoint) rest = true;
+    //     if (rest) { u->movement_state = movement_states::UM_AtRest; return true; }
+    //     return false;
+    // }
+    static bool MovementUmDormant(Sim sim, Unit u, Ems ems) {
+        bool rest = false;
+        if (u.UCollision() && u.UGroundUnit()) rest = true;
+        if (!u.IsAtMoveTarget()) rest = true;
+        if (u.Position != u.NextTargetWaypoint) rest = true;
+        if (rest) {
+            u.MovementState = MovementStates.UM_AtRest;
+            return true;
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_AtMoveTarget(unit_t* u, execute_movement_struct& ems) {
+    //     if (u->path) { free_path(u->path); u->path = nullptr; }
+    //     if (u->next_movement_waypoint != u->move_target.pos) u->next_movement_waypoint = u->move_target.pos;
+    //     if (!u_ground_unit(u) || u_movement_flag(u, 4)) u->movement_state = movement_states::UM_AtRest;
+    //     else u->movement_state = movement_states::UM_CheckIllegal;
+    //     return true;
+    // }
+    static bool MovementUmAtMoveTarget(Sim sim, Unit u, Ems ems) {
+        if (u.NextMovementWaypoint != u.MoveTargetPos) u.NextMovementWaypoint = u.MoveTargetPos;
+        if (!u.UGroundUnit() || u.MovementFlag(4)) u.MovementState = MovementStates.UM_AtRest;
+        else u.MovementState = MovementStates.UM_CheckIllegal;
+        return true;
+    }
+}
