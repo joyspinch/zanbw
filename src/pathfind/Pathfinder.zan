@@ -29,6 +29,30 @@ public class Pathfinder {
     public bool DestinationReached;
     public bool IsStuck;
 
+    // openbw: pf.consider_collision_with_unit -- the unit the path must
+    // go around even when it is on the move.
+    public bool HasConsiderCollisionWithUnit;
+    public int ConsiderCollisionWithUnitId;
+
+    // openbw: bool pathfinder_unit_can_collide_with(const unit_t* u, const unit_t* target, ...)
+    //
+    // The pathfinder only treats a unit as an obstacle when the unit stands
+    // still on its own move target: a unit that is on its way somewhere else
+    // is not in the way. The consider unit is the one the path was blocked
+    // by last time, so the new path goes around it even when it moves.
+    public bool UnitCanCollideWith(Sim sim, Unit u, Unit target) {
+        if (!HasConsiderCollisionWithUnit
+            || sim.GetUnitId(target) != ConsiderCollisionWithUnitId) {
+            if (!target.IsAtMoveTarget()) return false;
+        }
+        // The doors are never in the way.
+        if (target.UnitType.Id == (int)UnitTypes.SpecialUpperLevelDoor) return false;
+        if (target.UnitType.Id == (int)UnitTypes.SpecialRightUpperLevelDoor) return false;
+        if (target.UnitType.Id == (int)UnitTypes.SpecialPitDoor) return false;
+        if (target.UnitType.Id == (int)UnitTypes.SpecialRightPitDoor) return false;
+        return sim.UnitCanCollideWith(u, target);
+    }
+
     // the index into LongPath that the next short path hop starts from
     public int CurrentLongPathIndex;
     public int ShortAllNodesSize;

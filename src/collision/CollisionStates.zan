@@ -1,0 +1,336 @@
+// The unit-to-unit collision states of openbw's movement simulation.
+//
+// Port of openbw/bwgame.h:
+//   movement_UM_FixCollision()   11741-11839
+//   movement_UM_WaitFree()      11841-11878
+//   movement_UM_SlidePrep()     11880-11892
+//   movement_UM_SlideFree()     11894-11952
+//   movement_UM_GetFree()       11963-11983
+//   movement_UM_RepathMovers()  11954-11961
+//   movement_UM_ForceMoveFree() 11729-11739
+//
+// The states work on the unit finder: the unit a moving unit runs into
+// is found through the spatial index, and the unit that was hit is
+// remembered on the path so the next state can look it up again.
+
+// A rectangle, in the order openbw's rect_t uses: from and to.
+public class CollisionStates {
+    public StateMachine M;
+    public Sim Sim;
+    public Regions R;
+    public PathProgress Pathing;
+    public Unit U;
+
+    public CollisionStates(StateMachine m) {
+        M = m;
+        Sim = m.Sim;
+        R = m.R;
+        Pathing = m.Pathing;
+        U = m.U;
+    }
+
+    // openbw: bool movement_UM_FixCollision(unit_t* u, execute_movement_struct& ems)
+    public bool UmFixCollision(Ems ems) {
+        if (M.UnitUpdatePathMovementState(false)) return true;
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (Pathing.Current == null) {
+            U.MovementState = MovementStates.UM_FollowPath;
+            return false;
+        }
+        Unit collisionUnit = Sim.GetUnit(Pathing.Current.LastCollisionUnit);
+        if (collisionUnit == null || collisionUnit.USHidden()
+            || !Sim.UnitCanCollideWith(U, collisionUnit)) {
+            U.MovementState = MovementStates.UM_FollowPath;
+            return false;
+        }
+
+        Dir slideFreeDirection = Dir.FromRaw(0);
+        int state = 1;
+        bool hasMoveTargetUnit = U.HasMoveTargetUnit;
+        Unit moveTargetUnit = hasMoveTargetUnit ? Sim.GetUnit(U.MoveTargetUnitId) : null;
+
+        if (!hasMoveTargetUnit || moveTargetUnit == null
+            || !Box.Intersects(
+                U.SpriteBox(true), moveTargetUnit.SpriteBox(true))) {
+            if (Box.Intersects(
+                    collisionUnit.SpriteBox(false), U.InnerBoxAt(U.MoveTargetPos.X, U.MoveTargetPos.Y))) {
+                if (collisionUnit.PathingCollisionCounter >= 30) {
+                    state = hasMoveTargetUnit ? 3 : 2;
+                } else if (Box.Intersects(
+                        collisionUnit.InnerBoxAt(collisionUnit.MoveTargetPos.X, collisionUnit.MoveTargetPos.Y),
+                        U.InnerBoxAt(U.MoveTargetPos.X, U.MoveTargetPos.Y))) {
+                    state = hasMoveTargetUnit ? 3 : 2;
+                }
+            } else {
+                Box cb = collisionUnit.SpriteBox(false);
+                Box wb = U.InnerBoxAt(U.NextMovementWaypoint.X, U.NextMovementWaypoint.Y);
+                if (!Box.Intersects(cb, wb)) {
+                    if (MovementFlagOf(collisionUnit, 2)) {
+                        int index = DirIndex.Index(collisionUnit.NextVelocityDirection);
+                        int cardinal = Collision.CardinalDirectionFromTo(U, collisionUnit);
+                        if (cardinal == 0) {
+                            if (index <= 64 || index >= 192) state = 6;
+                        } else if (cardinal == 1) {
+                            if (index <= 128) state = 6;
+                        } else if (cardinal == 2) {
+                            if (index >= 64 && index <= 192) state = 6;
+                        } else if (cardinal == 3) {
+                            if (index == 0 || index >= 128) state = 6;
+                        }
+                        if (state == 1) {
+                            if (collisionUnit.PathingCollisionCounter <= 2) {
+                                if (!IsAtMoveTarget(collisionUnit)) {
+                                    if (collisionUnit.MovementState == MovementStates.UM_FollowPath
+                                        || collisionUnit.MovementState == MovementStates.UM_ScoutPath) {
+                                        state = 6;
+                                    } else if (collisionUnit.MovementState != MovementStates.UM_WaitFree) {
+                                        state = 4;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (state == 1) {
+                        if (Collision.CollisionGetSlideFreeDirection(M, U, collisionUnit, out slideFreeDirection)) {
+                            state = 7;
+                        } else {
+                            state = 5;
+                        }
+                    }
+                }
+                if (state == 1) {
+                    if (collisionUnit.PathingCollisionCounter >= 30) {
+                        state = 3;
+                    } else if (Box.Intersects(
+                            collisionUnit.InnerBoxAt(collisionUnit.MoveTargetPos.X, collisionUnit.MoveTargetPos.Y),
+                            U.InnerBoxAt(U.NextMovementWaypoint.X, U.NextMovementWaypoint.Y))) {
+                        state = 3;
+                    }
+                }
+            }
+            if (state == 1) {
+                Dir collisionDir = Kin.XyDirection(collisionUnit.Position - U.Position);
+                Dir cmpDir = Dir.FromRaw(0);
+                int index = DirIndex.Index(collisionUnit.NextVelocityDirection);
+                if (index < 32) cmpDir = Dir.FromRaw(0);
+                else if (index < 96) cmpDir = Dir.FromRaw(64);
+                else if (index < 160) cmpDir = Dir.FromRaw(-128);
+                else if (index < 224) cmpDir = Dir.FromRaw(-64);
+                // openbw: fp8::extend(cmp_dir - collision_dir).abs() > 64_fp8
+                int err = (int)Math.Abs(cmpDir.RawValue() - collisionDir.RawValue());
+                if (err > 128) err = 256 - err;
+                if (err > 64) {
+                    state = 4;
+                } else {
+                    state = 6;
+                }
+            }
+        }
+
+        if (Pathing.CurrentFrame - Pathing.Current.CreationFrame >= 7 || state < 3 || state > 5) {
+            if (state == 1) {
+                SetUnitImmovable();
+                U.UnsetStatus(StatusFlag.Immovable);
+                U.MovementState = MovementStates.UM_AtMoveTarget;
+            } else if (state == 2) {
+                SetUnitImmovable();
+                U.MovementState = MovementStates.UM_AtMoveTarget;
+            } else if (state == 3) {
+                U.MovementState = MovementStates.UM_Repath;
+            } else if (state == 4) {
+                U.MovementState = MovementStates.UM_RepathMovers;
+            } else if (state == 5) {
+                U.MovementState = MovementStates.UM_TurnAndStart;
+                Kin.SetNextSpeed(U, Fp.Zero());
+            } else if (state == 6) {
+                U.MovementState = MovementStates.UM_WaitFree;
+            } else if (state == 7) {
+                Pathing.Current.SlideFreeDirection = slideFreeDirection.RawValue();
+                U.MovementState = MovementStates.UM_SlidePrep;
+            } else if (state == 8) {
+                U.MovementState = MovementStates.UM_GetFree;
+            }
+        } else {
+            M.States.UpdateUnitPathingCollision();
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_WaitFree(unit_t* u, execute_movement_struct& ems)
+    public bool UmWaitFree(Ems ems) {
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        if (Pathing.Current == null) return false;
+        Kin.SetNextSpeed(U, Pathing.Current.LastCollisionSpeed);
+        Sim.UpdateUnitMovementValues(U, ems);
+        Unit collision = Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y);
+        if (collision != null) {
+            M.States.UpdateUnitPathingCollision();
+            Kin.SetNextSpeed(U, Fp.Zero());
+            if (U.NextVelocityDirection != Kin.XyDirection(U.NextMovementWaypoint - U.Position)) {
+                Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+            }
+            if (U.PathingCollisionCounter >= 25) {
+                if (Sim.Rng.Rand(51) < 0x7fff / 2) {
+                    U.MovementState = MovementStates.UM_ForceMoveFree;
+                } else {
+                    U.MovementState = MovementStates.UM_RepathMovers;
+                }
+            }
+        } else {
+            if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                U.MovementState = MovementStates.UM_Repath;
+            } else {
+                Sim.FinishUnitMovement(U, ems);
+                U.MovementState = MovementStates.UM_FollowPath;
+            }
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_SlidePrep(unit_t* u, execute_movement_struct& ems)
+    public bool UmSlidePrep(Ems ems) {
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        if (U.FlingyMovementType == 0) {
+            if (Pathing.Current != null) {
+                if (Pathing.Current.LastCollisionSpeed >= Fp.Integer(2)) {
+                    Pathing.Current.LastCollisionSpeed = Pathing.Current.LastCollisionSpeed / 2;
+                } else if (Pathing.Current.LastCollisionSpeed > Fp.Integer(1)) {
+                    Pathing.Current.LastCollisionSpeed = Fp.Integer(1);
+                }
+            }
+        }
+        Kin.SetCurrentVelocityDirection(U, U.NextVelocityDirection);
+        if (Pathing.Current != null) Kin.SetNextSpeed(U, Pathing.Current.LastCollisionSpeed);
+        U.MovementState = MovementStates.UM_SlideFree;
+        return true;
+    }
+
+    // openbw: bool movement_UM_SlideFree(unit_t* u, execute_movement_struct& ems)
+    public bool UmSlideFree(Ems ems) {
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        U.MovementFlags = U.MovementFlags | 1;
+        Dir slideFree = Dir.FromRaw(Pathing.Current.SlideFreeDirection);
+        Kin.SetDesiredVelocityDirection(U, slideFree);
+        Kin.UpdateUnitHeading(U, U.CurrentVelocityDirection);
+        if (U.FlingyMovementType == 2) {
+            U.CurrentSpeed = U.FlingyTopSpeed;
+        } else {
+            Kin.UpdateCurrentSpeedTowardsWaypoint(U);
+        }
+
+        Fp originalSpeed = U.CurrentSpeed;
+        Dir originalVelocityDirection = U.NextVelocityDirection;
+        Unit collisionUnit = Pathing.Current == null ? null : Sim.GetUnit(Pathing.Current.LastCollisionUnit);
+        Unit nextCollisionUnit = null;
+        bool forceMoveFree = false;
+
+        Fp speed = originalSpeed;
+        while (speed > Fp.Zero()) {
+            U.UnsetMovementFlag(1);
+            Kin.SetCurrentVelocityDirection(U, slideFree);
+            Kin.SetNextSpeed(U, speed < Fp.Integer(1) ? speed : Fp.Integer(1));
+            SlideMove(ems);
+            if (Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y) != null
+                || M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                forceMoveFree = true;
+                break;
+            }
+            Sim.FinishUnitMovement(U, ems);
+            U.NextVelocityDirection = originalVelocityDirection;
+            Kin.UpdateCurrentVelocityDirectionTowardsWaypoint(U);
+            Kin.SetNextSpeed(U, originalSpeed);
+            SlideMove(ems);
+            nextCollisionUnit = Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y);
+            if (nextCollisionUnit != collisionUnit) break;
+            speed = speed - Fp.Integer(1);
+        }
+
+        U.NextVelocityDirection = originalVelocityDirection;
+        Kin.SetCurrentVelocityDirection(U, U.NextVelocityDirection);
+        Kin.SetNextSpeed(U, originalSpeed);
+        if (forceMoveFree) {
+            U.MovementState = MovementStates.UM_ForceMoveFree;
+            return false;
+        }
+        if (nextCollisionUnit == null) {
+            U.SetMovementFlag(1);
+            if (Pathing.CurrentFrame - Pathing.Current.CreationFrame < 150) {
+                U.MovementState = MovementStates.UM_FollowPath;
+            } else {
+                U.MovementState = MovementStates.UM_TurnAndStart;
+            }
+        }
+        return false;
+    }
+
+    // The move lambda of movement_UM_SlideFree.
+    private void SlideMove(Ems ems) {
+        ems.PreMovementFlags = U.MovementFlags;
+        Sim.SetMovementFlags(U, ems);
+        Sim.SetMovementValues(U, ems);
+        ems.PostMovementFlags = U.MovementFlags;
+        U.MovementFlags = ems.PreMovementFlags;
+    }
+
+    // openbw: bool movement_UM_GetFree(unit_t* u, execute_movement_struct& ems)
+    public bool UmGetFree(Ems ems) {
+        if (U.PathingCollisionCounter < 255) U.PathingCollisionCounter++;
+        if (M.UnitUpdatePathMovementState(true)) return true;
+        if (Pathing.Current == null) return false;
+        Kin.SetNextSpeed(U, Pathing.Current.LastCollisionSpeed);
+        Sim.UpdateUnitMovementValues(U, ems);
+        Unit collisionUnit = Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y);
+        if (collisionUnit != null) {
+            if (U.NextVelocityDirection == Kin.XyDirection(U.NextMovementWaypoint - U.Position)) {
+                Pathing.Current = null;
+            }
+        } else {
+            if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                U.MovementState = MovementStates.UM_Repath;
+            } else {
+                Sim.FinishUnitMovement(U, ems);
+                U.MovementState = MovementStates.UM_FollowPath;
+            }
+        }
+        return false;
+    }
+
+    // openbw: bool movement_UM_RepathMovers(unit_t* u, execute_movement_struct& ems)
+    public bool UmRepathMovers(Ems ems) {
+        Pathing.Current = null;
+        int moveTargetX = U.MoveTargetPos.X;
+        int moveTargetY = U.MoveTargetPos.Y;
+        if (!Pathing.UnitPathTo(moveTargetX, moveTargetY) || U.HasStatusFlag(StatusFlag.Immovable)) {
+            U.MoveTargetPos = new Xy(moveTargetX, moveTargetY);
+            U.MovementState = MovementStates.UM_TurnAndStart;
+            return false;
+        }
+        U.MovementState = MovementStates.UM_FaceTarget;
+        return true;
+    }
+
+    // ---- helpers -----------------------------------------------------------
+
+    // openbw: bool unit_is_at_move_target(const flingy_t* u)
+    public bool IsAtMoveTarget(Unit u) {
+        return u.Position == u.MoveTargetPos;
+    }
+
+    // openbw: void set_unit_immovable(unit_t* u)
+    public void SetUnitImmovable() {
+        Kin.SetNextSpeed(U, Fp.Zero());
+        Sim.StopUnit(U);
+        Pathing.SetUnitMoveTarget(U.Position.X, U.Position.Y);
+        U.SetStatus(StatusFlag.Immovable);
+        U.UserActionFlags = U.UserActionFlags & ~2;
+    }
+
+    // openbw: bool unit_movement_flag(const unit_t* u, int flag)
+    public bool MovementFlagOf(Unit u, int flag) {
+        return (u.MovementFlags & flag) != 0;
+    }
+
+    // The bounding box of a unit, either the outer one (the sprite box) or
+}

@@ -31,6 +31,13 @@ public class Path {
     // in when it is stuck against terrain.
     public int SlideFreeDirection;
 
+    // openbw: path_t::last_collision_unit -- the unit this path last ran
+    // into, as a unit id. The collision states look it up again.
+    public int LastCollisionUnit;
+
+    // openbw: last_collision_unit is a unit id; zero means "no unit".
+    public bool HasLastCollisionUnit;
+
     public int SourceX;
     public int SourceY;
     public int DestinationX;
@@ -44,6 +51,8 @@ public class Path {
         Delay = 0;
         LastCollisionSpeed = Fp.Zero();
         SlideFreeDirection = -1;
+        LastCollisionUnit = -1;
+        HasLastCollisionUnit = false;
         CreationFrame = 0;
         StateFlags = 0;
         FullLongPathSize = 0;

@@ -106,3 +106,25 @@ public enum SpriteFlag {
     Burrowed = 0x40,
     IscriptNobrk = 0x80
 }
+
+// The order ids the movement code looks at. The values are the indexes
+// in openbw's Orders enum (bwenums.h), so they match the original.
+public enum Orders {
+    Die = 0,
+    Stop = 1,
+    Move = 6,
+    WaitForGas = 82,
+    ReturnGas = 84
+}
+
+// The unit type ids the movement code looks at. The values are the indexes
+// in openbw's UnitTypes enum (bwenums.h), so they match the original.
+public enum UnitTypes {
+    // The indices are the ones of openbw's UnitTypes enum. Only the ones
+    // the collision code needs are listed.
+    ZergLarva = 35,
+    SpecialUpperLevelDoor = 205,
+    SpecialRightUpperLevelDoor = 206,
+    SpecialPitDoor = 207,
+    SpecialRightPitDoor = 208
+}

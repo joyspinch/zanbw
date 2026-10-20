@@ -1,18 +1,31 @@
 using System;
 
-// Entry point of the movement state machine differential test.
+// Entry point of the unit-to-unit collision differential test.
 //
-//   zanbw_state.exe <terrain variant> <scenario>
+//   zanbw_collide.exe <terrain variant> <scenario>
 //
-// The output format matches tools/cppbed/state_bed.cpp exactly.
+// The output format matches tools/cppbed/collide_bed.cpp exactly.
+//
+// The bed creates two ground units, gives them a move order and lets the
+// real movement state machine run. A unit that stands still has its move
+// target on itself, and the pathfinder treats such a unit as an
+// obstacle, so the path goes around it. A unit that moves does not, so
+// the path goes straight through it and the collision happens at run
+// time. Both units therefore get a move order.
 
-public class StateMain {
+public class CollideMain {
     static int Main(string[] args) {
         int variant = 0;
         if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
         int scen = 0;
         if (args.Length >= 2) scen = Convert.ToInt32(args[1]);
         Terrain.Variant = variant;
+
+        // The scenarios must match the C++ bed one for one.
+        List<PairScenario> scenarios = ScenarioTable.Collision();
+        if (scen < 0 || scen >= scenarios.Count) return 1;
+        PairScenario scenario = scenarios[scen];
+        string name = scenario.Name;
 
         Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
         for (int y = 0; y < Terrain.TileHeight; y++) {
@@ -30,65 +43,78 @@ public class StateMain {
         RegionsMain rm = new RegionsMain(r);
         rm.RegionsCreate();
 
-        // The scenarios must match the C++ bed one for one.
-        string[] names = new string[] {
-            "straight", "diagonal", "around", "multistep", "back",
-            "wallhit", "same", "near", "turnback", "longway",
-            "retarget", "stuck", "reverse", "tight", "slow", "far",
-        };
-        int[] startX = new int[] {
-            100, 100, 100, 100, 600, 100, 100, 100, 400, 100, 100, 100, 800, 400, 100, 100 };
-        int[] startY = new int[] {
-            100, 100, 100, 100, 600, 100, 100, 100, 400, 100, 100, 100, 100, 400, 100, 100 };
-        int[][] steps = new int[][] {
-            new int[] { 800, 100, 4 },
-            new int[] { 700, 700, 4 },
-            new int[] { 400, 400, 3, 100, 700, 3 },
-            new int[] { 300, 100, 2, 300, 300, 2, 100, 600, 2 },
-            new int[] { 200, 200, 3 },
-            new int[] { 1000, 1000, 4 },
-            new int[] { 0, 0, 3 },
-            new int[] { 12, 12, 2 },
-            new int[] { 600, 100, 3, 100, 100, 3 },
-            new int[] { 1800, 1800, 4 },
-            new int[] { 200, 200, 1, 600, 600, 1, 100, 900, 1 },
-            new int[] { 100, 100, 1, 1900, 100, 1 },
-            new int[] { 600, 100, 2, 100, 400, 2 },
-            new int[] { 40, 40, 1, -40, 0, 1 },
-            new int[] { 300, 300, 6 },
-            new int[] { 1700, 300, 3 },
-        };
-        int[] stepCount = new int[] { 1, 1, 2, 3, 1, 1, 1, 1, 2, 1, 3, 2, 2, 2, 1, 1 };
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+        sim.MaxUnitWidth = 64;
+        sim.MaxUnitHeight = 64;
 
-        if (scen < 0 || scen >= names.Length) return 1;
-        string name = names[scen];
-        int sx = startX[scen];
-        int sy = startY[scen];
-        int[] sc = steps[scen];
-        int nsteps = stepCount[scen];
-
-        // The unit: a ground unit with the same dimensions as the C++ bed.
         FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
                                        Fp.Integer(512), Fp.Integer(8), 0);
-
         UnitType ut = new UnitType(0, ft, 0,
             (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 7,
-            new Xy(-8, -8), new Xy(8, 8));
+            new Xy(8, 8), new Xy(8, 8));
 
+        Unit a = MakeUnit(sim, r, ut, ft, scenario.First.StartX, scenario.First.StartY);
+        Unit b = MakeUnit(sim, r, ut, ft, scenario.Second.StartX, scenario.Second.StartY);
+
+        PathProgress ppA = new PathProgress(r, sim, a);
+        PathProgress ppB = new PathProgress(r, sim, b);
+        StateMachine smA = new StateMachine(sim, r, ppA, a);
+        StateMachine smB = new StateMachine(sim, r, ppB, b);
+
+        Console.WriteLine("scenario=" + name + " variant=" + variant);
+
+        int toAX = scenario.First.TargetX;
+        int toAY = scenario.First.TargetY;
+        ppA.SetUnitMoveTarget(toAX, toAY);
+        Console.WriteLine("S 0 frame=0 to=" + toAX + "," + toAY);
+        DumpUnit("  U", a, ppA);
+
+        int frame = 0;
+        int totalFrames = 40;
+
+        while (frame < totalFrames) {
+            if (frame == scenario.Second.Delay) {
+                int toBX = scenario.Second.TargetX;
+                int toBY = scenario.Second.TargetY;
+                ppB.SetUnitMoveTarget(toBX, toBY);
+                Console.WriteLine("S 1 frame=" + frame + " to=" + toBX + "," + toBY);
+                DumpUnit("  U", b, ppB);
+            }
+
+            smA.ExecuteMovement();
+            Console.WriteLine("  chainA f" + frame + ": " + ChainText(smA.Chain));
+            smB.ExecuteMovement();
+            Console.WriteLine("  chainB f" + frame + ": " + ChainText(smB.Chain));
+            frame = frame + 1;
+            ppA.CurrentFrame = frame;
+            ppB.CurrentFrame = frame;
+
+            if ((frame % 4) == 0) {
+                DumpUnit("F" + frame, a, ppA);
+                DumpUnit("F" + frame, b, ppB);
+            }
+        }
+
+        DumpUnit("FINAL", a, ppA);
+        DumpUnit("FINAL", b, ppB);
+        return 0;
+    }
+
+    // openbw: create_unit() plus the two things show_unit() does that the
+    // bed needs: the unit becomes visible and enters the unit finder.
+    static Unit MakeUnit(Sim sim, Regions r, UnitType ut, FlingyType ft, int x, int y) {
         Unit u = new Unit();
         u.UnitType = ut;
         u.FlingyType = ft;
         u.Owner = 0;
-        u.Position = new Xy(sx, sy);
+        u.Position = new Xy(x, y);
         u.ExactPosition = Kin.ToXyFp8(u.Position);
         u.Sprite = new Sprite();
         u.Sprite.Position = u.Position;
-        u.MoveTargetPos = new Xy(sx, sy);
-        u.NextMovementWaypoint = new Xy(sx, sy);
-        u.NextTargetWaypoint = new Xy(sx, sy);
+        u.MoveTargetPos = new Xy(x, y);
+        u.NextMovementWaypoint = new Xy(x, y);
+        u.NextTargetWaypoint = new Xy(x, y);
         u.NextSpeed = ft.TopSpeed;
-        // openbw: initialize_flingy leaves current_speed at zero; the bed
-        // only raises next_speed.
         u.CurrentSpeed = Fp.Zero();
         u.FlingyTopSpeed = ft.TopSpeed;
         u.FlingyAcceleration = ft.Acceleration;
@@ -97,62 +123,33 @@ public class StateMain {
         u.NextVelocityDirection = Dir.FromRaw(64);
         u.CurrentVelocityDirection = Dir.FromRaw(64);
         u.DesiredVelocityDirection = Dir.FromRaw(64);
-        // openbw: initialize_unit sets the status flags from the unit type:
-        //   u_set_status_flag(u, status_flag_can_turn, ut_can_turn(u));
-        //   u_set_status_flag(u, status_flag_can_move, ut_can_move(u));
-        // and the ground unit flag for a non-flying unit.
         u.SetStatus(StatusFlag.CanTurn);
         u.SetStatus(StatusFlag.CanMove);
         u.SetStatus(StatusFlag.GroundUnit);
-        // openbw: initialize_flingy calls set_flingy_move_target(f, pos), which
-        // clears movement flag 4 and sets movement flag 1.
         u.MovementFlags = 1;
+        u.PathingFlags = 1;
 
-        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+        u.UnitIdIndex = sim.Units.Count;
+        sim.Units.Add(u);
 
-        PathProgress pp = new PathProgress(r, sim, u);
-        pp.CurrentFrame = 0;
+        // openbw: show_unit() unhides the unit and inserts it into the
+        // unit finder.
+        u.Sprite.Flags = u.Sprite.Flags & ~((int)SpriteFlag.Hidden);
+        int fromX = u.Position.X - ut.DimensionsFrom.X;
+        int toX = u.Position.X + ut.DimensionsTo.X;
+        int fromY = u.Position.Y - ut.DimensionsFrom.Y;
+        int toY = u.Position.Y + ut.DimensionsTo.Y;
+        sim.Finder.Insert(u, fromX, toX, fromY, toY);
+        return u;
+    }
 
-        StateMachine sm = new StateMachine(sim, r, pp, u);
-
-        Console.WriteLine("scenario=" + name + " variant=" + variant);
-
-        int step = 0;
-        int frame = 0;
-        int totalFrames = 0;
-        for (int i = 0; i < nsteps; i++) totalFrames = totalFrames + sc[i * 3 + 2];
-        totalFrames = totalFrames + 10;
-        int[] waits = new int[8];
-
-        while (frame < totalFrames) {
-            if (step < nsteps) {
-                bool issue = (step == 0) || (waits[step - 1] >= sc[(step - 1) * 3 + 2]);
-                if (issue) {
-                    int toX = sx + sc[step * 3];
-                    int toY = sy + sc[step * 3 + 1];
-                    // The order sets the move target; the movement state
-                    // machine then asks for a path towards it.
-                    pp.SetUnitMoveTarget(toX, toY);
-                    Console.WriteLine("S " + step + " frame=" + frame + " to=" + toX + "," + toY);
-                    DumpUnit("  U", u, pp);
-                    step = step + 1;
-                } else {
-                    waits[step - 1] = waits[step - 1] + 1;
-                }
-            }
-
-            // One frame of the real movement state machine.
-            sm.ExecuteMovement();
-            frame = frame + 1;
-            pp.CurrentFrame = frame;
-
-            if ((frame % 4) == 0) {
-                DumpUnit("F" + frame, u, pp);
-            }
+    static string ChainText(List<int> chain) {
+        string r = "";
+        for (int i = 0; i < chain.Count; i++) {
+            if (i > 0) r = r + " ";
+            r = r + chain[i].ToString();
         }
-
-        DumpUnit("FINAL", u, pp);
-        return 0;
+        return r;
     }
 
     static void DumpUnit(string tag, Unit u, PathProgress pp) {
@@ -184,6 +181,12 @@ public class StateMain {
                 + " next=" + p.NextX + "," + p.NextY
                 + " long=" + p.LongPath.Count
                 + " short=" + p.ShortPath.Count + ")";
+            line = line + " sp=[";
+            for (int i = 0; i < p.ShortPath.Count; i++) {
+                if (i > 0) line = line + ",";
+                line = line + p.ShortPath[i][0] + "," + p.ShortPath[i][1];
+            }
+            line = line + "]";
         }
         Console.WriteLine(line);
     }

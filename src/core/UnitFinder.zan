@@ -1,0 +1,232 @@
+// openbw's unit finder: a spatial index over the ground units.
+//
+// The finder keeps two arrays of (unit, value) pairs, one sorted by the
+// unit's x span and one by its y span. A unit is entered twice in each
+// array, once for the low end of its span and once for the high end, so
+// a search can walk outwards from a position and stop as soon as the
+// entries are out of range.
+//
+// The entries are kept sorted by value, so the insert, remove and
+// reinsert operations all do a binary search.
+
+public class UnitFinderEntry {
+    public Unit Unit;
+    public int Value;
+
+    public UnitFinderEntry(Unit unit, int value) {
+        Unit = unit;
+        Value = value;
+    }
+}
+
+public class UnitFinder {
+    public List<UnitFinderEntry> X;
+    public List<UnitFinderEntry> Y;
+
+    // openbw: state_functions::unit_finder_search_index
+    //
+    // The depth of the currently running search. openbw refuses to
+    // modify the finder while a search is running, so the counter also
+    // guards the insert and remove operations.
+    public int SearchIndex;
+
+    public UnitFinder() {
+        X = new List<UnitFinderEntry>();
+        Y = new List<UnitFinderEntry>();
+        SearchIndex = 0;
+    }
+
+    // openbw: std::lower_bound(vec.begin(), vec.end(), value, cmp_l)
+    //
+    // The index of the first entry whose value is not less than the given
+    // one. The array is sorted by value.
+    public int LowerBound(List<UnitFinderEntry> vec, int value) {
+        int lo = 0;
+        int hi = vec.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (vec[mid].Value < value) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    // openbw: auto i = std::upper_bound(arr.begin(), arr.end(), value, cmp_u)
+    //
+    // The index of the first entry whose value is greater than the given
+    // one.
+    public int UpperBound(List<UnitFinderEntry> vec, int value) {
+        int lo = 0;
+        int hi = vec.Count;
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (value < vec[mid].Value) hi = mid;
+            else lo = mid + 1;
+        }
+        return lo;
+    }
+
+    // openbw: void unit_finder_insert(unit_t* u, rect bb)
+    //
+    // The unit enters the index at both ends of its span in both axes.
+    public void Insert(Unit u, int fromX, int toX, int fromY, int toY) {
+        if (SearchIndex != 0) {
+            Console.Write("attempt to modify unit finder while search is active");
+            return;
+        }
+        InsertInto(X, u, fromX, toX);
+        InsertInto(Y, u, fromY, toY);
+        u.UnitFinderFromX = fromX;
+        u.UnitFinderFromY = fromY;
+        u.UnitFinderToX = toX;
+        u.UnitFinderToY = toY;
+    }
+
+    private void InsertInto(List<UnitFinderEntry> vec, Unit u, int fromValue, int toValue) {
+        int fromI = LowerBound(vec, fromValue);
+        vec.Insert(fromI, new UnitFinderEntry(u, fromValue));
+        int toI = LowerBound(vec, toValue);
+        vec.Insert(toI, new UnitFinderEntry(u, toValue));
+    }
+
+    // openbw: void unit_finder_remove(unit_t* u)
+    public void Remove(Unit u) {
+        if (u.UnitFinderToX == -1) return;
+        if (SearchIndex != 0) {
+            Console.Write("attempt to modify unit finder while search is active");
+            return;
+        }
+        RemoveFrom(X, u, u.UnitFinderFromX);
+        RemoveFrom(X, u, u.UnitFinderToX);
+        RemoveFrom(Y, u, u.UnitFinderFromY);
+        RemoveFrom(Y, u, u.UnitFinderToY);
+        u.UnitFinderFromX = -1;
+        u.UnitFinderFromY = -1;
+        u.UnitFinderToX = -1;
+        u.UnitFinderToY = -1;
+    }
+
+    private void RemoveFrom(List<UnitFinderEntry> vec, Unit u, int value) {
+        int i = LowerBound(vec, value);
+        while (i < vec.Count && vec[i].Unit != u) {
+            i++;
+        }
+        if (i < vec.Count) {
+            vec.RemoveAt(i);
+        }
+    }
+
+    // openbw: void unit_finder_reinsert(unit_t* u, rect bb)
+    //
+    // The unit keeps its place in the sorted array, but its span ends
+    // move. The entries are shifted so that the array stays sorted.
+    public void Reinsert(Unit u, int fromX, int toX, int fromY, int toY) {
+        if (u.UnitFinderToX == -1) return;
+        if (SearchIndex != 0) {
+            Console.Write("attempt to modify unit finder while search is active");
+            return;
+        }
+        // openbw: the "to" entry is moved first when the box grew on the
+        // from side, so that the second search finds the right entry.
+        if (fromX <= u.UnitFinderFromX) {
+            ReinsertIn(X, u, u.UnitFinderFromX, fromX);
+            ReinsertIn(X, u, u.UnitFinderToX, toX);
+        } else {
+            ReinsertIn(X, u, u.UnitFinderToX, toX);
+            ReinsertIn(X, u, u.UnitFinderFromX, fromX);
+        }
+        if (fromY <= u.UnitFinderFromY) {
+            ReinsertIn(Y, u, u.UnitFinderFromY, fromY);
+            ReinsertIn(Y, u, u.UnitFinderToY, toY);
+        } else {
+            ReinsertIn(Y, u, u.UnitFinderToY, toY);
+            ReinsertIn(Y, u, u.UnitFinderFromY, fromY);
+        }
+        u.UnitFinderFromX = fromX;
+        u.UnitFinderFromY = fromY;
+        u.UnitFinderToX = toX;
+        u.UnitFinderToY = toY;
+    }
+
+    private void ReinsertIn(List<UnitFinderEntry> vec, Unit u, int oldValue, int newValue) {
+        if (oldValue == newValue) return;
+        int i = LowerBound(vec, oldValue);
+        while (i < vec.Count && vec[i].Unit != u) {
+            i++;
+        }
+        if (i >= vec.Count) return;
+        if (newValue > oldValue) {
+            int ni = i + 1;
+            while (ni < vec.Count && vec[ni].Value < newValue) {
+                vec[i] = vec[ni];
+                i++;
+                ni++;
+            }
+            vec[i] = new UnitFinderEntry(u, newValue);
+        } else {
+            while (i != 0) {
+                int ni = i;
+                i--;
+                if (vec[i].Value <= newValue) {
+                    i++;
+                    break;
+                }
+                vec[ni] = vec[i];
+            }
+            vec[i] = new UnitFinderEntry(u, newValue);
+        }
+    }
+
+    // openbw: unit_finder_search find_units(rect area)
+    //
+    // The units whose finder box intersects the area. The x axis is the
+    // index itself, so the entries are walked by their value; the y span
+    // is then checked against the area.
+    //
+    // openbw's iterator stops at an entry whose box starts at or after
+    // the end of the area, and skips the units which were already
+    // reported during this search.
+    public List<Unit> Find(Sim sim, int fromX, int toX, int fromY, int toY, bool expand) {
+        List<Unit> result = new List<Unit>();
+        if (SearchIndex == 4) return result;
+        int searchIndex = SearchIndex;
+        SearchIndex++;
+
+        int beginX = fromX;
+        int endX = toX;
+        int areaToX = toX;
+        int areaToY = toY;
+        if (expand) {
+            // openbw: the searched area grows to the largest unit size.
+            if (endX - beginX + 1 < sim.MaxUnitWidth) {
+                endX = beginX + sim.MaxUnitWidth - 1;
+                areaToX++;
+            }
+            if (areaToY - fromY + 1 < sim.MaxUnitHeight) {
+                areaToY++;
+            }
+        }
+
+        int iBegin = LowerBound(X, beginX);
+        int iEnd = LowerBound(X, endX);
+        for (int i = iBegin; i < iEnd; ++i) {
+            Unit u = X[i].Unit;
+            // openbw: the iterator skips the entries that are out of
+            // bounds and keeps walking; only the x axis is sorted, so the
+            // y bounds cannot stop the walk.
+            if (u.UnitFinderFromX >= areaToX) continue;
+            if (u.UnitFinderFromY >= areaToY) continue;
+            if (u.UnitFinderToY < fromY) continue;
+            if (u.UnitFinderVisited[searchIndex]) continue;
+            u.UnitFinderVisited[searchIndex] = true;
+            result.Add(u);
+        }
+        // The visited flags are cleared again, so that the next search
+        // starts from a clean slate.
+        for (int i = iBegin; i < iEnd; ++i) {
+            X[i].Unit.UnitFinderVisited[searchIndex] = false;
+        }
+        SearchIndex--;
+        return result;
+    }
+}

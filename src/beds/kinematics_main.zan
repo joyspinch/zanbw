@@ -148,12 +148,12 @@ public class Program {
             FlingyType ft = new FlingyType(0, Fp.Integer(385), Fp.FromRaw(12), Fp.Integer(500), Fp.FromRaw(11), 1);
             return new UnitType(0, ft, 12,
                 UnitTypeFlag.CanMove | UnitTypeFlag.CanTurn | UnitTypeFlag.Flyer,
-                7, new Xy(-21, -15), new Xy(21, 15));
+                7, new Xy(21, 15), new Xy(21, 15));
         }
         FlingyType ft2 = new FlingyType(1, Fp.Integer(100), Fp.FromRaw(4), Fp.Integer(1000), Fp.FromRaw(5), 1);
         return new UnitType(1, ft2, 12,
             UnitTypeFlag.CanMove | UnitTypeFlag.CanTurn | UnitTypeFlag.Flyer,
-            7, new Xy(-21, -15), new Xy(21, 15));
+            7, new Xy(21, 15), new Xy(21, 15));
     }
 
     // openbw: void refresh_unit_position(unit_t* u) {

@@ -308,7 +308,8 @@ public class MovementStatesImpl {
 
     // openbw: bool movement_UM_AnotherPath(unit_t* u, execute_movement_struct& ems)
     public bool UmAnotherPath(Ems ems) {
-        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y,
+                Sim.HasConsiderCollisionWithUnit, Sim.ConsiderCollisionWithUnitId)) {
             U.MovementState = MovementStates.UM_FollowPath;
         } else {
             U.MovementState = MovementStates.UM_FailedPath;
@@ -318,7 +319,8 @@ public class MovementStatesImpl {
 
     // openbw: bool movement_UM_StartPath(unit_t* u, execute_movement_struct& ems)
     public bool UmStartPath(Ems ems) {
-        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y,
+                Sim.HasConsiderCollisionWithUnit, Sim.ConsiderCollisionWithUnitId)) {
             MovementStates next = MovementStates.UM_FollowPath;
             if ((U.UserActionFlags & 2) != 0) {
                 U.UserActionFlags = U.UserActionFlags & ~2;
@@ -345,12 +347,53 @@ public class MovementStatesImpl {
         Fp speed = U.NextSpeed;
         Sim.UpdateUnitMovementValues(U, ems);
         if (U.FlingyMovementType == 0) speed = U.CurrentSpeed;
-        // The unit-to-unit collision check is not part of this layer, so
-        // only the terrain check can report a collision here.
-        if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
-            if (Pathing.Current != null) Pathing.Current.LastCollisionSpeed = speed;
-            U.MovementState = MovementStates.UM_FixTerrain;
-            return true;
+        // openbw: check_ground_unit_movement_unit_collision(u, ems) --
+        // only ground units collide with other units.
+        Unit collisionUnit = null;
+        if (U.UGroundUnit()) {
+            collisionUnit = Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y);
+        }
+        if (collisionUnit != null) {
+            bool fixCollision = false;
+            if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                fixCollision = true;
+            } else if (U.Velocity.X < Fp.Integer(32) && U.Velocity.Y < Fp.Integer(32)) {
+                fixCollision = true;
+            } else if (ems.Speed != U.CurrentSpeed) {
+                fixCollision = true;
+            } else {
+                // openbw: the half-speed and quarter-speed probes. A unit
+                // that still collides at a quarter of the speed is really
+                // in the way.
+                Xy pos = ems.Position;
+                XyFp8 exactPos = ems.ExactPosition;
+                ems.ExactPosition = U.ExactPosition + U.Velocity / 2;
+                ems.Position = Kin.ToXy(ems.ExactPosition);
+                if (Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y) != null) {
+                    ems.ExactPosition = U.ExactPosition + U.Velocity / 4;
+                    ems.Position = Kin.ToXy(ems.ExactPosition);
+                        if (Collision.CheckUnitMovementUnitCollision(Sim, U, ems.Position.X, ems.Position.Y) != null) {
+                        ems.Position = pos;
+                        ems.ExactPosition = exactPos;
+                        fixCollision = true;
+                    }
+                }
+            }
+            if (fixCollision) {
+                if (Pathing.Current != null) {
+                    Pathing.Current.LastCollisionUnit = Sim.GetUnitId(collisionUnit);
+                    Pathing.Current.HasLastCollisionUnit = true;
+                    Pathing.Current.LastCollisionSpeed = speed;
+                }
+                U.MovementState = MovementStates.UM_FixCollision;
+                return true;
+            }
+        } else {
+            if (M.CheckTerrainCollision(ems.Position.X - U.Position.X, ems.Position.Y - U.Position.Y)) {
+                if (Pathing.Current != null) Pathing.Current.LastCollisionSpeed = speed;
+                U.MovementState = MovementStates.UM_FixTerrain;
+                return true;
+            }
         }
         if (U.Sprite.Position != ems.Position) {
             if (U.PathingCollisionCounter != 0) {
@@ -383,9 +426,17 @@ public class MovementStatesImpl {
 
     // openbw: bool movement_UM_Repath(unit_t* u, execute_movement_struct& ems)
     public bool UmRepath(Ems ems) {
-        M.HasCollisionUnit = false;
-        Pathing.Current = null;
-        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+        // openbw: const unit_t* collision_unit = st.consider_collision_with_unit_bug;
+        bool hasCollisionUnit = Sim.HasConsiderCollisionWithUnit;
+        int collisionUnitId = Sim.ConsiderCollisionWithUnitId;
+        if (Pathing.Current != null) {
+            hasCollisionUnit = Pathing.Current.HasLastCollisionUnit;
+            collisionUnitId = Pathing.Current.LastCollisionUnit;
+            Pathing.Current = null;
+        }
+        Sim.HasConsiderCollisionWithUnit = false;
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y,
+                hasCollisionUnit, collisionUnitId)) {
             U.MovementState = MovementStates.UM_FollowPath;
         } else {
             U.MovementState = MovementStates.UM_FailedPath;
@@ -408,7 +459,8 @@ public class MovementStatesImpl {
             U.PathingCollisionCounter++;
             return false;
         }
-        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y,
+                Sim.HasConsiderCollisionWithUnit, Sim.ConsiderCollisionWithUnitId)) {
             U.MovementState = MovementStates.UM_FollowPath;
             return true;
         }
@@ -559,13 +611,22 @@ public class MovementStatesImpl {
 
     // openbw: bool movement_UM_TurnAndStart(unit_t* u, execute_movement_struct& ems)
     public bool UmTurnAndStart(Ems ems) {
-        M.HasCollisionUnit = false;
-        Pathing.Current = null;
+        // openbw: const unit_t* collision_unit = st.consider_collision_with_unit_bug;
+        bool hasCollisionUnit = Sim.HasConsiderCollisionWithUnit;
+        int collisionUnitId = Sim.ConsiderCollisionWithUnitId;
+        if (Pathing.Current != null) {
+            hasCollisionUnit = Pathing.Current.HasLastCollisionUnit;
+            collisionUnitId = Pathing.Current.LastCollisionUnit;
+            Pathing.Current = null;
+        }
+        Sim.HasConsiderCollisionWithUnit = hasCollisionUnit;
         if (M.IsAtMoveTarget() || (U.MovementFlags & 4) != 0) {
             U.MovementState = MovementStates.UM_AtMoveTarget;
             return true;
         }
-        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y)) {
+        Sim.HasConsiderCollisionWithUnit = false;
+        if (Pathing.UnitPathTo(U.MoveTargetPos.X, U.MoveTargetPos.Y,
+                hasCollisionUnit, collisionUnitId)) {
             U.MovementState = MovementStates.UM_FaceTarget;
             return false;
         }

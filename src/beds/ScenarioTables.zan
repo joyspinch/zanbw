@@ -1,0 +1,244 @@
+using System;
+
+// The scenario tables of the differential test beds.
+//
+// A scenario is one record: where the units start, where they are told to
+// go and when the second unit gets its order. The reference beds on the
+// C++ side carry the same table, so both sides run identical situations.
+//
+// The tables live here instead of in the individual beds so that all of
+// them share one definition. A scenario is a record, never a set of
+// parallel arrays indexed in lockstep.
+
+// A waypoint a unit is told to walk to, and the number of frames it waits
+// before the next one is issued.
+public class Waypoint {
+    public int X;
+    public int Y;
+    public int Frames;
+
+    public Waypoint(int x, int y, int frames) {
+        X = x;
+        Y = y;
+        Frames = frames;
+    }
+}
+
+// A waypoint that has been issued, together with the number of frames it
+// has waited since. The wait counter belongs to the waypoint, not to a
+// separate index-aligned list.
+public class PendingWaypoint {
+    public Waypoint Point;
+    public int Waited;
+
+    public PendingWaypoint(Waypoint point) {
+        Point = point;
+        Waited = 0;
+    }
+}
+
+// A scenario that drives a single unit through a list of waypoints.
+public class StepScenario {
+    public string Name;
+    public int StartX;
+    public int StartY;
+    public List<Waypoint> Waypoints;
+
+    public StepScenario(string name, int sx, int sy, List<Waypoint> waypoints) {
+        Name = name;
+        StartX = sx;
+        StartY = sy;
+        Waypoints = waypoints;
+    }
+}
+
+// The plan of one unit of a collision scenario: where it starts, where it
+// is told to go and when it gets the order.
+public class UnitPlan {
+    public int StartX;
+    public int StartY;
+    public int TargetX;
+    public int TargetY;
+    public int Delay;
+
+    public UnitPlan(int sx, int sy, int tx, int ty, int delay) {
+        StartX = sx;
+        StartY = sy;
+        TargetX = tx;
+        TargetY = ty;
+        Delay = delay;
+    }
+}
+
+// A collision scenario: two ground units driving at each other.
+public class PairScenario {
+    public string Name;
+    public UnitPlan First;
+    public UnitPlan Second;
+
+    public PairScenario(string name, UnitPlan first, UnitPlan second) {
+        Name = name;
+        First = first;
+        Second = second;
+    }
+}
+
+// A path query: where the path starts and where it ends.
+public class PathQuery {
+    public int StartX;
+    public int StartY;
+    public int TargetX;
+    public int TargetY;
+
+    public PathQuery(int sx, int sy, int tx, int ty) {
+        StartX = sx;
+        StartY = sy;
+        TargetX = tx;
+        TargetY = ty;
+    }
+}
+
+public class ScenarioTable {
+    // The short path queries: the source is always the same, the target
+    // walks through the interesting corners of the map.
+    public static List<PathQuery> ShortPathQueries() {
+        List<PathQuery> q = new List<PathQuery>();
+        q.Add(new PathQuery(100, 100, 1800, 1800));
+        q.Add(new PathQuery(100, 100, 400, 400));
+        q.Add(new PathQuery(100, 100, 1900, 100));
+        q.Add(new PathQuery(100, 100, 100, 1900));
+        q.Add(new PathQuery(100, 100, 1600, 1600));
+        q.Add(new PathQuery(100, 100, 100, 100));
+        q.Add(new PathQuery(100, 100, 900, 100));
+        q.Add(new PathQuery(100, 100, 100, 900));
+        q.Add(new PathQuery(100, 100, 1984, 1984));
+        q.Add(new PathQuery(100, 100, 500, 1200));
+        return q;
+    }
+
+    // The collision scenarios.
+    //
+    //   headon      -- straight at each other
+    //   pushpast    -- the second unit starts in the middle
+    //   headlate    -- the second unit gets its order late
+    //   cross       -- crossing paths
+    //   crosslate   -- crossing paths, the second unit starts late
+    //   shallow     -- a shallow crossing angle
+    //   steep       -- a steep crossing angle
+    //   graze       -- barely touching
+    //   apart       -- moving away from each other
+    //   follow      -- one unit follows the other
+    //   offset      -- the same line, offset
+    //   slowcross   -- a crossing with a late second unit
+    //   sametarget  -- both units go for the same spot
+    //   narrow      -- a narrow gap
+    //   diag        -- a diagonal approach
+    //   turn        -- the second unit turns
+    //   midway      -- they meet in the middle
+    public static List<PairScenario> Collision() {
+        List<PairScenario> s = new List<PairScenario>();
+        s.Add(new PairScenario("headon",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 300, 100, 300, 0)));
+        s.Add(new PairScenario("pushpast",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(400, 300, 400, 900, 0)));
+        s.Add(new PairScenario("headlate",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 300, 100, 300, 6)));
+        s.Add(new PairScenario("cross",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 100, 700, 700, 0)));
+        s.Add(new PairScenario("crosslate",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 100, 700, 700, 8)));
+        s.Add(new PairScenario("shallow",
+            new UnitPlan(100, 340, 700, 340, 0),
+            new UnitPlan(700, 260, 100, 260, 0)));
+        s.Add(new PairScenario("steep",
+            new UnitPlan(100, 200, 700, 200, 0),
+            new UnitPlan(700, 400, 100, 400, 0)));
+        s.Add(new PairScenario("graze",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(400, 180, 400, 780, 0)));
+        s.Add(new PairScenario("apart",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 300, 1300, 300, 0)));
+        s.Add(new PairScenario("follow",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(100, 500, 100, 1100, 0)));
+        s.Add(new PairScenario("offset",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 312, 100, 312, 0)));
+        s.Add(new PairScenario("slowcross",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 100, 700, 700, 0)));
+        s.Add(new PairScenario("sametarget",
+            new UnitPlan(100, 300, 300, 300, 0),
+            new UnitPlan(300, 320, 100, 340, 0)));
+        s.Add(new PairScenario("narrow",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 300, 100, 300, 12)));
+        s.Add(new PairScenario("diag",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(500, 500, 500, 200, 300)));
+        s.Add(new PairScenario("turn",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 300, 100, 300, 10)));
+        s.Add(new PairScenario("midway",
+            new UnitPlan(100, 300, 700, 300, 0),
+            new UnitPlan(700, 300, 100, 300, 0)));
+        return s;
+    }
+
+    // The pathfinding scenarios: one unit walking a list of waypoints.
+    public static List<StepScenario> Path() {
+        List<StepScenario> s = new List<StepScenario>();
+        s.Add(new StepScenario("straight", 100, 100, One(800, 100, 4)));
+        s.Add(new StepScenario("diagonal", 100, 100, One(700, 700, 4)));
+        s.Add(new StepScenario("around", 100, 100, Two(400, 400, 3, 100, 700, 3)));
+        s.Add(new StepScenario("multistep", 100, 100,
+            Three(300, 100, 2, 300, 300, 2, 100, 600, 2)));
+        s.Add(new StepScenario("back", 600, 600, One(200, 200, 3)));
+        s.Add(new StepScenario("wallhit", 100, 100, One(1000, 1000, 4)));
+        s.Add(new StepScenario("same", 100, 100, One(0, 0, 3)));
+        s.Add(new StepScenario("near", 100, 100, One(12, 12, 2)));
+        s.Add(new StepScenario("turnback", 400, 400, Two(600, 100, 3, 100, 100, 3)));
+        s.Add(new StepScenario("longway", 100, 100, One(1800, 1800, 4)));
+        return s;
+    }
+
+    // The movement state scenarios: the path scenarios plus the ones that
+    // exercise retargeting, getting stuck and reversing.
+    public static List<StepScenario> State() {
+        List<StepScenario> s = Path();
+        s.Add(new StepScenario("retarget", 100, 100,
+            Three(200, 100, 1, 600, 600, 1, 100, 900, 1)));
+        s.Add(new StepScenario("stuck", 100, 100, Two(100, 100, 1, 1900, 100, 1)));
+        s.Add(new StepScenario("reverse", 800, 100, Two(600, 100, 2, 100, 400, 2)));
+        s.Add(new StepScenario("tight", 400, 400, Two(40, 40, 1, -40, 0, 1)));
+        s.Add(new StepScenario("slow", 100, 100, One(300, 300, 6)));
+        s.Add(new StepScenario("far", 100, 100, One(1700, 300, 3)));
+        return s;
+    }
+
+    private static List<Waypoint> One(int x, int y, int frames) {
+        List<Waypoint> w = new List<Waypoint>();
+        w.Add(new Waypoint(x, y, frames));
+        return w;
+    }
+
+    private static List<Waypoint> Two(int x1, int y1, int f1, int x2, int y2, int f2) {
+        List<Waypoint> w = new List<Waypoint>();
+        w.Add(new Waypoint(x1, y1, f1));
+        w.Add(new Waypoint(x2, y2, f2));
+        return w;
+    }
+
+    private static List<Waypoint> Three(int x1, int y1, int f1, int x2, int y2, int f2,
+            int x3, int y3, int f3) {
+        List<Waypoint> w = Two(x1, y1, f1, x2, y2, f2);
+        w.Add(new Waypoint(x3, y3, f3));
+        return w;
+    }
+}

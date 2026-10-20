@@ -93,6 +93,104 @@ public class ShortPathRun {
         return false;
     }
 
+    // openbw: pf_add_local_units()
+    //
+    // The other units are put into the search as temporary obstacles, so
+    // that the path goes around them. Only the units that really block
+    // the way are added: a unit that is on the move is not an obstacle
+    // unless it is the one the path has to go around.
+    public void AddLocalUnits() {
+        Sim sim = S.Sim;
+        if (sim == null) return;
+
+        // The unit finder is walked by its value: the y list for the
+        // horizontal edges and the x list for the vertical ones.
+        List<UnitFinderEntry> ys = sim.Finder.Y;
+        List<UnitFinderEntry> xs = sim.Finder.X;
+
+        int i = sim.Finder.LowerBound(ys, S.CurPosMinY - S.Inner[0] - 1);
+        for (; i < ys.Count; ++i) {
+            Unit u = ys[i].Unit;
+            if (ys[i].Value >= S.CurPosY - S.Inner[0]) break;
+            if (ys[i].Value == u.UnitFinderToY) {
+                ShortContour c = new ShortContour();
+                c.V0 = u.UnitFinderToY;
+                c.V1 = u.UnitFinderFromX;
+                c.V2 = u.UnitFinderToX;
+                c.Dir = 0;
+                c.Flags = 0x3d;
+                if (c.V1 + S.Inner[1] <= S.CurPosMaxX && c.V2 + S.Inner[3] >= S.CurPosMinX) {
+                    if (IsTargetUnit(u) || S.Pf.UnitCanCollideWith(sim, S.U, u)) {
+                        AddLocalEdge(0, c);
+                    }
+                }
+            }
+        }
+
+        i = sim.Finder.LowerBound(xs, S.CurPosX - S.Inner[1]);
+        for (; i < xs.Count; ++i) {
+            Unit u = xs[i].Unit;
+            if (xs[i].Value > S.CurPosMaxX - S.Inner[1] + 1) break;
+            if (xs[i].Value == u.UnitFinderFromX) {
+                ShortContour c = new ShortContour();
+                c.V0 = u.UnitFinderFromX;
+                c.V1 = u.UnitFinderFromY;
+                c.V2 = u.UnitFinderToY;
+                c.Dir = 1;
+                c.Flags = 0x32;
+                if (c.V1 + S.Inner[2] <= S.CurPosMaxY && c.V2 + S.Inner[0] >= S.CurPosMinY) {
+                    if (IsTargetUnit(u) || S.Pf.UnitCanCollideWith(sim, S.U, u)) {
+                        AddLocalEdge(1, c);
+                    }
+                }
+            }
+        }
+
+        i = sim.Finder.LowerBound(ys, S.CurPosY - S.Inner[2]);
+        for (; i < ys.Count; ++i) {
+            Unit u = ys[i].Unit;
+            if (ys[i].Value > S.CurPosMaxY - S.Inner[2] + 1) break;
+            if (ys[i].Value == u.UnitFinderFromY) {
+                ShortContour c = new ShortContour();
+                c.V0 = u.UnitFinderFromY;
+                c.V1 = u.UnitFinderFromX;
+                c.V2 = u.UnitFinderToX;
+                c.Dir = 2;
+                c.Flags = 0x3d;
+                if (c.V1 + S.Inner[1] <= S.CurPosMaxX && c.V2 + S.Inner[3] >= S.CurPosMinX) {
+                    if (IsTargetUnit(u) || S.Pf.UnitCanCollideWith(sim, S.U, u)) {
+                        AddLocalEdge(2, c);
+                    }
+                }
+            }
+        }
+
+        i = sim.Finder.LowerBound(xs, S.CurPosMinX - S.Inner[3] - 1);
+        for (; i < xs.Count; ++i) {
+            Unit u = xs[i].Unit;
+            if (xs[i].Value >= S.CurPosX - S.Inner[3]) break;
+            if (xs[i].Value == u.UnitFinderToX) {
+                ShortContour c = new ShortContour();
+                c.V0 = u.UnitFinderToX;
+                c.V1 = u.UnitFinderFromY;
+                c.V2 = u.UnitFinderToY;
+                c.Dir = 3;
+                c.Flags = 0x32;
+                if (c.V1 + S.Inner[2] <= S.CurPosMaxY && c.V2 + S.Inner[0] >= S.CurPosMinY) {
+                    if (IsTargetUnit(u) || S.Pf.UnitCanCollideWith(sim, S.U, u)) {
+                        AddLocalEdge(3, c);
+                    }
+                }
+            }
+        }
+    }
+
+    // openbw: i->u == w.target_unit
+    private bool IsTargetUnit(Unit u) {
+        if (!S.HasTargetUnit) return false;
+        return S.Sim.GetUnitId(u) == S.TargetUnitId;
+    }
+
     // openbw: pf_add_local_edge(n, c)
     public void AddLocalEdge(int n, ShortContour c) {
         List<ShortContour> edges = S.LocalEdges[n];
@@ -227,8 +325,7 @@ public class ShortPathRun {
         }
 
         AddLocalTerrain();
-        // pf_add_local_units() is omitted: the reference bed has no other
-        // units, so the unit finder lists are empty.
+        AddLocalUnits();
 
         S.NearestEdge[0] = null;
         S.NearestEdge[1] = null;

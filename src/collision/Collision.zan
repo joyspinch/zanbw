@@ -1,0 +1,253 @@
+// The unit-to-unit collision layer of openbw's movement simulation.
+//
+// This holds the pieces the collision states need: the check that finds
+// the unit a moving unit runs into, the rules that decide whether two
+// units collide at all, and the helper that looks for a direction the
+// unit can slide into.
+
+public class Collision {
+
+// openbw: unit_t* check_unit_movement_unit_collision(unit_t* u, const execute_movement_struct& ems)
+//
+// The unit the moving unit runs into, or null. The search walks the unit
+// finder along the axis the unit moves on, so only the units in the
+// direction of the movement are looked at.
+    public static Unit CheckUnitMovementUnitCollision(Sim sim, Unit u, int emsX, int emsY) {
+    if (u.Sprite.HasFlag(SpriteFlag.Hidden)) return null;
+    int movementX = emsX - u.Position.X;
+    int movementY = emsY - u.Position.Y;
+
+    int newFromX = u.UnitFinderFromX + movementX;
+    int newToX = u.UnitFinderToX + movementX;
+    int newFromY = u.UnitFinderFromY + movementY;
+    int newToY = u.UnitFinderToY + movementY;
+
+    if (movementX < 0) {
+        int i = sim.Finder.UpperBound(sim.Finder.X, u.UnitFinderFromX);
+        while (i > 0) {
+            i--;
+            UnitFinderEntry e = sim.Finder.X[i];
+            if (e.Value < newFromX) break;
+            Unit other = e.Unit;
+            if (other.UnitFinderFromY <= newToY && other.UnitFinderToY >= newFromY) {
+                if (sim.UnitCanCollideWith(u, other) && other.HasStatusFlag(StatusFlag.GroundUnit)) {
+                    return other;
+                }
+            }
+        }
+    } else if (movementX > 0) {
+        int i = sim.Finder.LowerBound(sim.Finder.X, u.UnitFinderToX);
+        while (i < sim.Finder.X.Count) {
+            UnitFinderEntry e = sim.Finder.X[i];
+            if (e.Value > newToX) break;
+            Unit other = e.Unit;
+            if (other.UnitFinderFromY <= newToY && other.UnitFinderToY >= newFromY) {
+                if (sim.UnitCanCollideWith(u, other) && other.HasStatusFlag(StatusFlag.GroundUnit)) {
+                    return other;
+                }
+            }
+            i++;
+        }
+    }
+    if (movementY < 0) {
+        int i = sim.Finder.UpperBound(sim.Finder.Y, u.UnitFinderFromY);
+        while (i > 0) {
+            i--;
+            UnitFinderEntry e = sim.Finder.Y[i];
+            if (e.Value < newFromY) break;
+            Unit other = e.Unit;
+            if (other.UnitFinderFromX <= newToX && other.UnitFinderToX >= newFromX) {
+                if (sim.UnitCanCollideWith(u, other) && other.HasStatusFlag(StatusFlag.GroundUnit)) {
+                    return other;
+                }
+            }
+        }
+    } else if (movementY > 0) {
+        int i = sim.Finder.LowerBound(sim.Finder.Y, u.UnitFinderToY);
+        while (i < sim.Finder.Y.Count) {
+            UnitFinderEntry e = sim.Finder.Y[i];
+            if (e.Value > newToY) break;
+            Unit other = e.Unit;
+            if (other.UnitFinderFromX <= newToX && other.UnitFinderToX >= newFromX) {
+                if (sim.UnitCanCollideWith(u, other) && other.HasStatusFlag(StatusFlag.GroundUnit)) {
+                    return other;
+                }
+            }
+            i++;
+        }
+    }
+    return null;
+}
+
+// openbw: bool unit_finder_unit_in_bounds(unit_t* u, rect bounds)
+    public static bool UnitFinderUnitInBounds(Unit u, int fromX, int toX, int fromY, int toY) {
+    return u.UnitFinderFromX <= toX && u.UnitFinderToX >= fromX
+        && u.UnitFinderFromY <= toY && u.UnitFinderToY >= fromY;
+}
+
+// openbw: unit_t* get_largest_blocking_unit(const unit_t* u, rect bounds)
+//
+// The unit with the biggest area that blocks the way, or null.
+    public static Unit GetLargestBlockingUnit(Sim sim, Unit u, int fromX, int toX, int fromY, int toY) {
+    int largestUnitArea = 0;
+    Unit largestUnit = null;
+    List<Unit> units = sim.Finder.Find(sim, fromX, toX, fromY, toY, true);
+    for (int i = 0; i < units.Count; ++i) {
+        Unit nu = units[i];
+        if (sim.UnitCanCollideWith(u, nu) && UnitFinderUnitInBounds(nu, fromX, toX, fromY, toY)) {
+            // openbw: rect n_bb = unit_type_bounding_box(nu->unit_type);
+            int nFromX = -nu.UnitType.DimensionsFrom.X;
+            int nFromY = -nu.UnitType.DimensionsFrom.Y;
+            int nToX = nu.UnitType.DimensionsTo.X + 1;
+            int nToY = nu.UnitType.DimensionsTo.Y + 1;
+            int p = (nToX - nFromX) * (nToY - nFromY);
+            if (p > largestUnitArea) {
+                largestUnitArea = p;
+                largestUnit = nu;
+            }
+        }
+    }
+    return largestUnit;
+}
+
+// openbw: std::pair<bool, unit_t*> is_blocked(const unit_t* u, xy pos) const {
+//     rect bounds = unit_inner_bounding_box(u, pos);
+//     if (!is_in_inner_map_bounds(bounds)) return {true, nullptr};
+//     unit_t* largest_unit = get_largest_blocking_unit(u, bounds);
+//     if (!largest_unit) return {!unit_type_can_fit_at(u->unit_type, pos), nullptr};
+//     return {true, largest_unit};
+// }
+//
+// Whether the unit cannot be at the given position: either the position
+// is off the map, another unit is in the way, or the terrain does not fit.
+public static bool IsBlocked(StateMachine m, Unit u, int posX, int posY) {
+    // openbw: unit_type_inner_bounding_box(u, origin) is
+    //     { origin - dimensions.from, origin + dimensions.to }
+    int fromX = posX - u.UnitType.DimensionsFrom.X;
+    int fromY = posY - u.UnitType.DimensionsFrom.Y;
+    int toX = posX + u.UnitType.DimensionsTo.X;
+    int toY = posY + u.UnitType.DimensionsTo.Y;
+    if (!m.IsInInnerMapBounds(fromX, fromY, toX, toY)) return true;
+    Unit largestUnit = GetLargestBlockingUnit(m.Sim, u, fromX, toX, fromY, toY);
+    if (largestUnit == null) return !m.UnitTypeCanFitAt(u.UnitType, posX, posY);
+    return true;
+}
+
+// openbw: int cardinal_direction_from_to(const unit_t* from_u, const unit_t* to_u)
+//
+// Which of the four sides the other unit is on, as 0 = below, 1 = right,
+// 2 = above, 3 = left.
+    public static int CardinalDirectionFromTo(Unit fromU, Unit toU) {
+    // openbw: unit_sprite_inner_bounding_box(u) is
+    //     { position - dimensions.from, position + dimensions.to }
+    int aFromX = toU.Position.X - toU.UnitType.DimensionsFrom.X;
+    int aToX = toU.Position.X + toU.UnitType.DimensionsTo.X;
+    int aFromY = toU.Position.Y - toU.UnitType.DimensionsFrom.Y;
+    int aToY = toU.Position.Y + toU.UnitType.DimensionsTo.Y;
+    int bFromX = fromU.Position.X - fromU.UnitType.DimensionsFrom.X;
+    int bToX = fromU.Position.X + fromU.UnitType.DimensionsTo.X;
+    int bFromY = fromU.Position.Y - fromU.UnitType.DimensionsFrom.Y;
+    int bToY = fromU.Position.Y + fromU.UnitType.DimensionsTo.Y;
+
+    if (aToX < bFromX) return 3;
+    if (aFromX > bToX) return 1;
+    if (aToY < bFromY) return 0;
+    if (aFromY > bToY) return 2;
+
+    int upDistance = (int)Math.Abs(aToY - bFromY);
+    int rightDistance = (int)Math.Abs(aFromX - bToX);
+    int downDistance = (int)Math.Abs(aFromY - bToY);
+    int leftDistance = (int)Math.Abs(aToX - bFromX);
+    int[] distances = new int[4];
+    distances[0] = rightDistance;
+    distances[1] = leftDistance;
+    distances[2] = downDistance;
+    distances[3] = upDistance;
+    // openbw: std::array<int, 4> r = {1, 3, 2, 0};
+    int[] r = new int[4];
+    r[0] = 1;
+    r[1] = 3;
+    r[2] = 2;
+    r[3] = 0;
+    return r[GetBestScore(distances, 0) - 0];
+}
+
+// openbw: size_t get_best_score(const std::array<int, 4>& scores, F&& f)
+//
+// The index of the smallest score.
+    public static int GetBestScore(int[] scores, int unused) {
+    int best = 0;
+    for (int i = 1; i < scores.Count; ++i) {
+        if (scores[i] < scores[best]) best = i;
+    }
+    return best;
+}
+
+// openbw: bool collision_get_slide_free_direction(const unit_t* u, const unit_t* collision_unit, direction_t& slide_free_direction)
+//
+// Looks for a direction the unit can slide into, to get around the unit
+// it ran into. Returns false when there is none.
+    public static bool CollisionGetSlideFreeDirection(StateMachine m, Unit u, Unit collisionUnit, out Dir slideFreeDirection) {
+    // openbw: slide_free_direction = -1_dir -- the "no direction" value.
+    slideFreeDirection = Dir.FromRaw(-1);
+    if (collisionUnit.USHidden()) return false;
+
+    Dir targetDir = Kin.XyDirection(u.NextMovementWaypoint - u.Position);
+    int targetDirQuadrant = DirIndex.Index(targetDir) / 64;
+    // openbw: auto dir_err = fp8::extend(target_dir - u->current_velocity_direction).abs();
+    // The subtraction happens on the raw direction values, which are
+    // signed bytes.
+    int err = targetDir.RawValue() - u.CurrentVelocityDirection.RawValue();
+    if (err < 0) err = -err;
+    if (err >= 80) return false;
+
+    int leftX = collisionUnit.UnitFinderFromX - u.UnitType.DimensionsTo.X - 1;
+    int rightX = collisionUnit.UnitFinderToX + u.UnitType.DimensionsFrom.X + 1;
+    int upY = collisionUnit.UnitFinderFromY - u.UnitType.DimensionsTo.Y - 1;
+    int downY = collisionUnit.UnitFinderToY + u.UnitType.DimensionsFrom.Y + 1;
+
+    // openbw: xy target_pos -- only one of the two components is set.
+    int targetX = 0;
+    int targetY = 0;
+    int cardinal = CardinalDirectionFromTo(u, collisionUnit);
+    if (cardinal == 0) {
+        targetY = downY;
+        if (targetDirQuadrant == 3) slideFreeDirection = Dir.FromRaw(-64);
+        else if (targetDirQuadrant == 0) slideFreeDirection = Dir.FromRaw(64);
+    } else if (cardinal == 1) {
+        targetX = leftX;
+        if (targetDirQuadrant == 0) slideFreeDirection = Dir.FromRaw(0);
+        else if (targetDirQuadrant == 1) slideFreeDirection = Dir.FromRaw(-128);
+    } else if (cardinal == 2) {
+        targetY = upY;
+        if (targetDirQuadrant == 1) slideFreeDirection = Dir.FromRaw(64);
+        else if (targetDirQuadrant == 2) slideFreeDirection = Dir.FromRaw(-64);
+    } else if (cardinal == 3) {
+        targetX = rightX;
+        if (targetDirQuadrant == 2) slideFreeDirection = Dir.FromRaw(-128);
+        else if (targetDirQuadrant == 3) slideFreeDirection = Dir.FromRaw(0);
+    }
+
+    for (int i = 0; i != 2; ++i) {
+        if (slideFreeDirection.RawValue() == 0) {
+            targetY = upY;
+            if (!IsBlocked(m, u, targetX, targetY)) return true;
+            slideFreeDirection = Dir.FromRaw(-128);
+        } else if (slideFreeDirection.RawValue() == -128) {
+            targetY = downY;
+            if (!IsBlocked(m, u, targetX, targetY)) return true;
+            slideFreeDirection = Dir.FromRaw(0);
+        } else if (slideFreeDirection.RawValue() == 64) {
+            targetX = rightX;
+            if (!IsBlocked(m, u, targetX, targetY)) return true;
+            slideFreeDirection = Dir.FromRaw(-64);
+        } else if (slideFreeDirection.RawValue() == -64) {
+            targetX = leftX;
+            if (!IsBlocked(m, u, targetX, targetY)) return true;
+            slideFreeDirection = Dir.FromRaw(64);
+        }
+    }
+
+    return false;
+    }
+}

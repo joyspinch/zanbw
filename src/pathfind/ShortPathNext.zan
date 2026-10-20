@@ -11,6 +11,12 @@ public class ShortPathNext {
     public Regions R;
     public Pathfinder Pf;
 
+    // The unit the path is computed for, and the simulation it lives in.
+    // They are needed for the target-unit search: a unit standing on the
+    // destination changes how the destination is approached.
+    public Sim Sim;
+    public Unit U;
+
     // The unit's half-extent, taken from the unit type dimensions.
     public int DimFromX;
     public int DimFromY;
@@ -38,6 +44,12 @@ public class ShortPathNext {
         int targetX = Pf.Destination;
         int targetY = Pf.DestinationY;
         bool isNearDestination = true;
+        bool hasTargetUnit = false;
+        Unit spTargetUnit = null;
+        int spTargetUnitBbFromX = 0;
+        int spTargetUnitBbFromY = 0;
+        int spTargetUnitBbToX = 0;
+        int spTargetUnitBbToY = 0;
         if (Pf.LongPath.Count - Pf.CurrentLongPathIndex > 3) {
             int midRegion = Pf.LongPath[Pf.CurrentLongPathIndex + 2];
             // openbw: to_xy(region->center) -- the center is an fp8, and the
@@ -62,17 +74,78 @@ public class ShortPathNext {
         }
 
         if (isNearDestination) {
-            // The bed has no other units, so there is never a target unit.
-            int[] adjusted = AdjustTargetPos(targetX, targetY);
-            if (adjusted[0] != 0 && (adjusted[1] != targetX || adjusted[2] != targetY)) {
-                targetX = adjusted[1];
-                targetY = adjusted[2];
-                Pf.Destination = targetX;
-                Pf.DestinationY = targetY;
+            // openbw: pf.target_unit = pf.u->move_target.unit; -- the unit
+            // the order points at, if any.
+            Unit targetUnit = U.HasMoveTargetUnit ? Sim.GetUnit(U.MoveTargetUnitId) : null;
+            if (targetUnit == null) {
+                // openbw: the units standing on the destination are looked
+                // for; the first one that blocks the path becomes the
+                // target unit.
+                Box unitBb = U.BoundingBoxAt(Pf.Destination, Pf.DestinationY);
+                int addX = Sim.MaxUnitWidth / 2 + 1;
+                int addY = Sim.MaxUnitHeight / 2 + 1;
+                List<Unit> found = Sim.Finder.Find(Sim,
+                    Pf.Destination - addX, Pf.Destination + addX,
+                    Pf.DestinationY - addY, Pf.DestinationY + addY, false);
+                for (int i = 0; i < found.Count; ++i) {
+                    Unit other = found[i];
+                    bool inter = Box.Intersects(unitBb, other.SpriteBox(true));
+                    bool can = Pf.UnitCanCollideWith(Sim, U, other);
+                    if (inter && can) {
+                        targetUnit = other;
+                        break;
+                    }
+                }
+            }
+            if (targetUnit != null) {
+                // openbw: the target unit's box is grown by the moving
+                // unit's dimensions, and the goal is a spot on the border
+                // of that box.
+                int bbFromX = targetUnit.Position.X - targetUnit.UnitType.DimensionsFrom.X
+                    - U.UnitType.DimensionsTo.X - 1;
+                int bbFromY = targetUnit.Position.Y - targetUnit.UnitType.DimensionsFrom.Y
+                    - U.UnitType.DimensionsTo.Y - 1;
+                int bbToX = targetUnit.Position.X + targetUnit.UnitType.DimensionsTo.X
+                    + U.UnitType.DimensionsFrom.X + 1;
+                int bbToY = targetUnit.Position.Y + targetUnit.UnitType.DimensionsTo.Y
+                    + U.UnitType.DimensionsFrom.Y + 1;
+                bool isGoal = false;
+                if (Pf.Source == bbFromX || Pf.Source == bbToX) {
+                    if (Pf.SourceY >= bbFromY && Pf.SourceY <= bbToY) isGoal = true;
+                }
+                if (Pf.SourceY == bbFromY || Pf.SourceY == bbToY) {
+                    if (Pf.Source >= bbFromX && Pf.Source <= bbToX) isGoal = true;
+                }
+                if (isGoal) {
+                    Pf.ShortPath = new List<int[]>();
+                    Pf.ShortPath.Add(new int[] { Pf.Source, Pf.SourceY });
+                    Pf.Destination = Pf.Source;
+                    Pf.DestinationY = Pf.SourceY;
+                    Pf.ShortPathIndex = 0;
+                    Pf.DestinationReached = true;
+                    Pf.IsStuck = false;
+                    return true;
+                }
+                spTargetUnit = targetUnit;
+                spTargetUnitBbFromX = bbFromX;
+                spTargetUnitBbFromY = bbFromY;
+                spTargetUnitBbToX = bbToX;
+                spTargetUnitBbToY = bbToY;
+                hasTargetUnit = true;
+            } else {
+                int[] adjusted = AdjustTargetPos(targetX, targetY);
+                if (adjusted[0] != 0 && (adjusted[1] != targetX || adjusted[2] != targetY)) {
+                    targetX = adjusted[1];
+                    targetY = adjusted[2];
+                    Pf.Destination = targetX;
+                    Pf.DestinationY = targetY;
+                }
             }
         }
 
         ShortPath sp = new ShortPath(R, Pf);
+        sp.Sim = Sim;
+        sp.U = U;
         sp.SourceRegion = Pf.SourceRegion;
         sp.DestinationRegion = Pf.GetRegionAt(Pf.Destination, Pf.DestinationY);
         sp.TargetX = targetX;
@@ -89,11 +162,12 @@ public class ShortPathNext {
         sp.Inner[3] = DimFromX;
         sp.Outer[3] = DimFromX + 1;
 
-        sp.HasTargetUnit = false;
-        sp.TargetUnitBbFromX = -32000;
-        sp.TargetUnitBbFromY = -32000;
-        sp.TargetUnitBbToX = -32000;
-        sp.TargetUnitBbToY = -32000;
+        sp.HasTargetUnit = hasTargetUnit;
+        sp.TargetUnitId = hasTargetUnit ? Sim.GetUnitId(spTargetUnit) : 0;
+        sp.TargetUnitBbFromX = hasTargetUnit ? spTargetUnitBbFromX : -32000;
+        sp.TargetUnitBbFromY = hasTargetUnit ? spTargetUnitBbFromY : -32000;
+        sp.TargetUnitBbToX = hasTargetUnit ? spTargetUnitBbToX : -32000;
+        sp.TargetUnitBbToY = hasTargetUnit ? spTargetUnitBbToY : -32000;
 
         ShortPathRun run = new ShortPathRun(sp);
         run.TraceOn = Trace;

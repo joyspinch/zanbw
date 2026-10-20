@@ -12,6 +12,8 @@ CXX="${CXX:-g++}"
 
 cd "$ROOT"
 
+. ./zan_sources.sh
+
 if [ "$#" -ge 1 ]; then
     VARIANTS="$1"
 else
@@ -22,9 +24,11 @@ echo "== building C++ A* bed =="
 (cd tools/cppbed && "$CXX" -std=c++17 -I../../../openbw -O0 -g astar_bed.cpp -o astar_bed.exe) || exit 1
 
 echo "== building Zan A* port =="
-"$ZANC" src/astar_main.zan src/Regions.zan src/RegionsCreate.zan src/RegionsRefresh.zan \
-        src/RegionsMain.zan src/RegionsContours.zan src/RegionsDump.zan src/Terrain.zan \
-        src/Pathfinder.zan src/AStar.zan src/Fp.zan src/Dir.zan src/Enums.zan \
+"$ZANC" src/beds/astar_main.zan \
+        "${ZAN_SOURCES_BASE[@]}" \
+        "${ZAN_SOURCES_REGIONS[@]}" \
+        "${ZAN_SOURCES_CORE[@]}" \
+        "${ZAN_SOURCES_ASTAR[@]}" \
         --auto-stdlib -o build/astar_zan.exe || exit 1
 
 FAIL=0

@@ -12,6 +12,8 @@ CXX="${CXX:-g++}"
 
 cd "$ROOT"
 
+. ./zan_sources.sh
+
 if [ "$#" -ge 1 ]; then
     VARIANTS="$1"
 else
@@ -27,11 +29,13 @@ python3 tools/cppbed/gen_traced.py > /dev/null || exit 1
 (cd tools/cppbed && "$CXX" -std=c++17 -I. -I../../../openbw -O0 -g shortpath_trace2.cpp -o shortpath_trace2.exe) || exit 1
 
 echo "== building Zan short path port =="
-"$ZANC" src/shortpath_main.zan src/Regions.zan src/RegionsCreate.zan src/RegionsRefresh.zan \
-        src/RegionsMain.zan src/RegionsContours.zan src/RegionsDump.zan src/Terrain.zan \
-        src/Pathfinder.zan src/AStar.zan src/ShortPath.zan src/ShortPathNeighbors.zan \
-        src/ShortPathAddNeighbors.zan src/ShortPathSearch.zan src/ShortPathRun.zan \
-        src/ShortPathNext.zan src/Fp.zan src/Dir.zan src/Enums.zan \
+"$ZANC" src/beds/shortpath_main.zan \
+        "${ZAN_SOURCES_BASE[@]}" \
+        "${ZAN_SOURCES_SCENARIOS[@]}" \
+        "${ZAN_SOURCES_CORE[@]}" \
+        "${ZAN_SOURCES_REGIONS[@]}" \
+        "${ZAN_SOURCES_ASTAR[@]}" \
+        "${ZAN_SOURCES_SHORTPATH[@]}" \
         --auto-stdlib -o build/shortpath_zan.exe || exit 1
 
 FAIL=0

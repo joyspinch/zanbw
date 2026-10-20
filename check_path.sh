@@ -13,6 +13,8 @@ CXX="${CXX:-g++}"
 
 cd "$ROOT"
 
+. ./zan_sources.sh
+
 if [ "$#" -ge 1 ]; then
     VARIANTS="$1"
 else
@@ -23,13 +25,12 @@ echo "== building C++ path bed =="
 (cd tools/cppbed && "$CXX" -std=c++17 -I../../../openbw -O0 -g path_bed.cpp -o path_bed.exe) || exit 1
 
 echo "== building Zan path port =="
-"$ZANC" src/path_main.zan src/Regions.zan src/RegionsCreate.zan src/RegionsRefresh.zan \
-        src/RegionsMain.zan src/RegionsContours.zan src/RegionsDump.zan src/Terrain.zan \
-        src/Pathfinder.zan src/AStar.zan src/ShortPath.zan src/ShortPathNeighbors.zan \
-        src/ShortPathAddNeighbors.zan src/ShortPathSearch.zan src/ShortPathRun.zan \
-        src/ShortPathNext.zan src/Path.zan src/PathProgress.zan \
-        src/Fp.zan src/Dir.zan src/Enums.zan src/Unit.zan src/Sim.zan src/Kinematics.zan \
-        src/Rng.zan src/Tables.zan \
+"$ZANC" src/beds/path_main.zan \
+        "${ZAN_SOURCES_BASE[@]}" \
+        "${ZAN_SOURCES_SCENARIOS[@]}" \
+        "${ZAN_SOURCES_CORE[@]}" \
+        "${ZAN_SOURCES_REGIONS[@]}" \
+        "${ZAN_SOURCES_PATH[@]}" \
         --auto-stdlib -o build/path_zan.exe || exit 1
 
 FAIL=0

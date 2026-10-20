@@ -108,10 +108,17 @@ public class ShortPath {
 
     // the target unit, if any; the search treats its bounding box as the goal
     public bool HasTargetUnit;
+    public int TargetUnitId;
     public int TargetUnitBbFromX;
     public int TargetUnitBbFromY;
     public int TargetUnitBbToX;
     public int TargetUnitBbToY;
+
+    // The unit the path is computed for and the simulation it lives in.
+    // The short path search needs them to treat the other units as
+    // obstacles.
+    public Sim Sim;
+    public Unit U;
 
     public ShortPath(Regions r, Pathfinder pf) {
         R = r;

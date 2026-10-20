@@ -32,25 +32,29 @@ public class ShortPathMain {
 
         Pathfinder pf = new Pathfinder(r);
 
-        int[][] queries = new int[][] {
-            new int[] { 100, 100, 1800, 1800 },
-            new int[] { 100, 100, 400, 400 },
-            new int[] { 100, 100, 1900, 100 },
-            new int[] { 100, 100, 100, 1900 },
-            new int[] { 100, 100, 1600, 1600 },
-            new int[] { 100, 100, 100, 100 },
-            new int[] { 100, 100, 900, 100 },
-            new int[] { 100, 100, 100, 900 },
-            new int[] { 100, 100, 1984, 1984 },
-            new int[] { 100, 100, 500, 1200 },
-        };
+        List<PathQuery> queries = ScenarioTable.ShortPathQueries();
 
-        for (int q = 0; q < queries.Length; q++) {
-            int[] qq = queries[q];
-            int srcX = qq[0];
-            int srcY = qq[1];
-            int dstX = qq[2];
-            int dstY = qq[3];
+        // The unit the path is computed for, matching the C++ bed: a ground
+        // unit that sits at a fixed position.
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+        FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
+                                       Fp.Integer(512), Fp.Integer(8), 0);
+        UnitType ut = new UnitType(0, ft, 0,
+            (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 7,
+            new Xy(8, 8), new Xy(8, 8));
+        Unit u = new Unit();
+        u.UnitType = ut;
+        u.FlingyType = ft;
+        u.Owner = 0;
+        u.Position = new Xy(100, 100);
+        u.Sprite = new Sprite();
+
+        for (int q = 0; q < queries.Count; q++) {
+            PathQuery qq = queries[q];
+            int srcX = qq.StartX;
+            int srcY = qq.StartY;
+            int dstX = qq.TargetX;
+            int dstY = qq.TargetY;
 
             pf.Source = srcX;
             pf.SourceY = srcY;
@@ -71,10 +75,14 @@ public class ShortPathMain {
             // The short path search: one hop of the long path.
             pf.CurrentLongPathIndex = -1;
             ShortPathNext spn = new ShortPathNext(r, pf);
-            spn.DimFromX = -8;
-            spn.DimFromY = -8;
-            spn.DimToX = 8;
-            spn.DimToY = 8;
+            spn.Sim = sim;
+            spn.U = u;
+            // The inner and outer offsets come from the unit type
+            // dimensions (openbw bwgame.h 9467-9474).
+            spn.DimFromX = ut.DimensionsFrom.X;
+            spn.DimFromY = ut.DimensionsFrom.Y;
+            spn.DimToX = ut.DimensionsTo.X;
+            spn.DimToY = ut.DimensionsTo.Y;
             bool found = spn.FindNextShortPath();
             List<int[]> points = pf.ShortPath;
 

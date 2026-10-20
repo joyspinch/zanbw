@@ -20,6 +20,8 @@ CXX="${CXX:-g++}"
 
 cd "$ROOT"
 
+. ./zan_sources.sh
+
 if [ "$#" -ge 1 ]; then
     SCENARIOS="$1"
     FRAMES="${2:-600}"
@@ -32,8 +34,9 @@ echo "== building C++ bed =="
 (cd tools/cppbed && "$CXX" -std=c++17 -I../../../openbw -O0 -g main.cpp -o bed.exe) || exit 1
 
 echo "== building Zan port =="
-"$ZANC" src/main.zan src/Enums.zan src/Fp.zan src/Dir.zan src/Rng.zan \
-        src/Tables.zan src/Unit.zan src/Kinematics.zan src/Sim.zan src/Scenario.zan \
+"$ZANC" src/beds/kinematics_main.zan \
+        "${ZAN_SOURCES_BASE[@]}" \
+        "${ZAN_SOURCES_CORE[@]}" \
         --auto-stdlib -o build/zanbw.exe || exit 1
 
 FAIL=0

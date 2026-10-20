@@ -5,58 +5,55 @@ raw 值都必须与原 C++ 实现完全相同。
 
 ## 目录
 
+`src/` 按**职责**分层，不按 C++ 的文件切分。上层只依赖下层。
+
 | 路径 | 内容 |
 |------|------|
-| `src/` | Zan 移植代码（按 C++ 模块分文件） |
-| `src/Fp.zan` | `fixed_point` 定点数模板的移植（fp8 / ufp8 / fp16 语义） |
-| `src/Dir.zan` | `direction_t`（8 位截断方向值） |
-| `src/Enums.zan` | 与 `bwenums.h` / `game_types.h` 对齐的枚举与标志位 |
-| `src/Rng.zan` | LCG 随机数（`lcg_rand`） |
-| `src/Tables.zan` | **机械导出**的静态表（tan_table / direction_table / repulse_adjust_table） |
-| `src/Unit.zan` | 实体结构（unit_t / flingy_t / sprite_t 精简版） |
-| `src/Kinematics.zan` | 方向数学 + 速度/转向积分 |
-| `src/Sim.zan` | movement 状态机（UM_*）、repulse 场、边界钳制 |
-| `src/Scenario.zan` | 场景描述与解析（两侧共用同一字符串格式） |
-| `src/main.zan` | 无头仿真主循环 + trace 输出 |
-| `src/Terrain.zan` | 合成地形规格（regions 层用，与 C++ 床逐条对应） |
-| `src/Regions.zan` | regions 层数据结构（region / split_region / contour） |
-| `src/RegionsCreate.zan` | `regions_create()` 的粗区域划分部分 |
-| `src/RegionsRefresh.zan` | `refresh_regions()`：面积、tile 数、邻居、连通组 |
-| `src/RegionsMain.zan` | 主流程 + 合并小区域 + reindex + split_regions |
-| `src/RegionsContours.zan` | contours（精细边界，短线寻路依赖） |
-| `src/RegionsDump.zan` | regions 层的 trace 输出（与 C++ 床同格式） |
-| `src/regions_main.zan` | regions 层对拍入口 |
-| `src/Pathfinder.zan` | 寻路入口：region 定位 + 长路径组装 |
-| `src/AStar.zan` | 长路径 A*（region 级）+ 二叉堆 |
-| `src/astar_main.zan` | 长路径 A* 对拍入口 |
-| `src/ShortPath.zan` | 短路径核心结构（contour / neighbor / visited 列） |
-| `src/ShortPathNeighbors.zan` | `expand_inner/outer`、`pf_local_edges_find`、`pf_add_neighbor`、`visit_area` |
-| `src/ShortPathAddNeighbors.zan` | `add_neighbors` 四方向逐段移植（约 400 行） |
-| `src/ShortPathSearch.zan` | `pf_mark_visited` / `pf_remove_visited_flags`（列式 visited 区） |
-| `src/ShortPathRun.zan` | 短路径主循环 + `pf_generate_neighbors` + `pf_add_local_terrain` |
-| `src/ShortPathNext.zan` | `pathfinder_find_next_short_path` + 两个 target 调整函数 |
-| `src/shortpath_main.zan` | 短路径对拍入口 |
-| `src/Path.zan` | `path_t`：单位携带的路径对象（长路径 + 短路径 + 索引） |
-| `src/PathProgress.zan` | `path_progress` / `unit_path_to` / `create_single_step_path` |
-| `src/path_main.zan` | 路径执行层对拍入口 |
-| `src/StateMachine.zan` | 运动状态机调度器 + 地形碰撞（两阶段收缩 + 扫描） |
-| `src/MovementStates.zan` | 各 UM_* 状态的具体实现（路径跟随 / 撞地形 / 卡墙） |
-| `src/state_main.zan` | 运动状态机对拍入口 |
-| `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
-| `tools/cppbed/regions_bed.cpp` | regions 层的 C++ 对照床 |
-| `tools/cppbed/astar_bed.cpp` | 长路径 A* 的 C++ 对照床 |
-| `tools/cppbed/astar_trace.cpp` | A* 逐步 trace 床（定位堆序问题用） |
-| `tools/cppbed/shortpath_bed.cpp` | 短路径的 C++ 对照床 |
-| `tools/cppbed/openbw_traced.h` | **加 trace 钩子的 openbw 副本**（由脚本从真源码生成） |
-| `tools/cppbed/shortpath_trace2.cpp` | 短路径逐步 trace 床（编译 traced 副本） |
-| `tools/cppbed/path_bed.cpp` | 路径执行层的 C++ 对照床（真 create_unit + 真移动积分） |
-| `tools/cppbed/state_bed.cpp` | 运动状态机的 C++ 对照床（真 execute_movement 驱动） |
-| `check.sh` | 运动学层一键逐位对拍 |
-| `check_regions.sh` | regions 层一键逐位对拍 |
-| `check_astar.sh` | 长路径 A* 一键逐位对拍 |
-| `check_shortpath.sh` | 短路径搜索一键逐位对拍 |
-| `check_path.sh` | 路径执行层一键逐位对拍 |
-| `check_state.sh` | 运动状态机一键逐位对拍（7 地形 × 16 场景） |
+| `src/core/` | 核心实体与全局状态：`Unit`、`Sim`、`UnitFinder`、`Kinematics`、`Scenario`、`Enums` |
+| `src/math/` | 定点数（`Fp`）、方向（`Dir`）、静态表（`Tables`）、矩形（`Box`） |
+| `src/regions/` | regions 层：区域划分、contours、split regions、合成地形 |
+| `src/pathfind/` | 寻路：长路径 A*、短路径 contour 搜索、`path_t` 生命周期 |
+| `src/collision/` | 单位间碰撞：碰撞规则、unit finder 查询、运动状态机各 `UM_*` 状态 |
+| `src/beds/` | 各层对拍入口与它们用的场景表 |
+| `zan_sources.sh` | 各层的源文件清单，对拍脚本共用 |
+
+层间依赖单向：`core ← math ← regions ← pathfind ← collision`。
+
+### 分层的判据
+
+代码放哪一层，看的是**它依赖谁**，不是它抄的是哪个 C++ 文件：
+
+- 只依赖 `Unit` / `Sim` 的规则放 `core`（例：`unit_can_collide_with` 是两个单位
+  之间的规则，不是"碰撞层"的规则）。
+- 只用坐标和整数的几何放 `math`（例：`Box`、`is_intersecting`）。
+- 只依赖 `Pathfinder` 的寻路逻辑放 `pathfind`（例：`pathfinder_unit_can_collide_with`
+  是寻路的障碍过滤规则，不是碰撞规则）。
+- 依赖 `StateMachine` 和 unit finder 的放 `collision`。
+
+**反向依赖就是错的**：`pathfind` 不许引用 `collision`，`regions` 不许引用
+`pathfind`。发现反向依赖时，先问"这条规则到底归谁"，再搬家，不要加
+`using` 或把类型下沉硬凑。
+
+### 场景表是一份实体，不是平行数组
+
+对拍场景（位置、目标、延迟、路点）都是**记录**，用实体类承载，一个字段
+一个含义。原版曾用 `int[] ax; int[] ay; int[] bx; ...` 按下标对齐，
+改一个场景就得同时改八行 —— 这正是"多处真相"。现在：
+
+- `src/beds/ScenarioTables.zan` 持有所有场景表。
+- `PairScenario` / `StepScenario` / `UnitPlan` / `Waypoint` / `PathQuery`
+  各自是一个记录。
+- 路点的等待帧数挂在路点自己身上（`PendingWaypoint.Waited`），不另开一个
+  按下标对齐的计数数组。
+
+**C++ 侧的场景表是唯一真值来源**：改场景时先改 `tools/cppbed/*.cpp` 里的
+C++ 表，再照抄到 Zan 的实体表，两边不能各写一份再祈祷它们一致。
+
+### 对照床不进版本控制
+
+`tools/cppbed/` 下的 C++ 床与生成脚本是**开发工具**，不是移植产物：它们
+直接 `#include` 真实 `openbw/bwgame.h`，是逐位验证的唯一手段。仓库里不
+保留它们（`.gitignore` 排除），干净克隆后从别处复制进来即可。
 
 ## 构建与验证
 
@@ -97,9 +94,11 @@ bash check_state.sh 3
 cd tools/cppbed && g++ -std=c++17 -I../../../openbw -O0 -g main.cpp -o bed.exe
 ./bed.exe s0 600 > build/trace_cpp.txt
 
-# Zan 端
-D:/project/zan-lang/build/zanc.exe src/main.zan src/Enums.zan src/Fp.zan src/Dir.zan \
-    src/Rng.zan src/Tables.zan src/Unit.zan src/Kinematics.zan src/Sim.zan src/Scenario.zan \
+# Zan 端（源文件清单在 zan_sources.sh 里，各脚本共用）
+D:/project/zan-lang/build/zanc.exe src/beds/kinematics_main.zan \
+    src/math/Fp.zan src/math/Dir.zan src/math/Tables.zan src/core/Rng.zan \
+    src/core/Enums.zan src/core/Unit.zan src/core/Sim.zan src/core/Kinematics.zan \
+    src/core/Scenario.zan \
     --auto-stdlib -o build/zanbw.exe
 ./build/zanbw.exe s0 600 > build/trace_zan.txt
 
@@ -109,7 +108,7 @@ diff build/trace_cpp.txt build/trace_zan.txt
 重新生成静态表（改动 openbw 后）：
 
 ```bash
-./tools/cppbed/bed.exe --dump-tables > src/Tables.zan
+./tools/cppbed/bed.exe --dump-tables > src/math/Tables.zan
 ```
 
 ## 翻译纪律（踩过的坑）
@@ -379,7 +378,7 @@ for (auto* nr : move_to_region->walkable_neighbors) {
 ## 路径执行层（path_t / path_progress / unit_path_to）
 
 对应 openbw/bwgame.h 10751-10906。参照床 `tools/cppbed/path_bed.cpp`，
-Zan 侧 `src/Path.zan` + `src/PathProgress.zan`，检查脚本 `check_path.sh`
+Zan 侧 `src/pathfind/Path.zan` + `src/pathfind/PathProgress.zan`，检查脚本 `check_path.sh`
 （7 变体 × 10 场景）。
 
 ### 25. `pathfinder_adjust_target_pos` 的包围盒是 `-from`，不是 `+from`
@@ -431,7 +430,7 @@ Zan 侧 `List` 没有 `resize`，且**不能**边遍历边替换自身
 `move_target`、`next_movement_waypoint`——这些初始状态直接决定
 第一帧的行为，必须让两侧一致。
 
-### 31. 参照床的地形必须与 `src/Terrain.zan` 逐条对齐
+### 31. 参照床的地形必须与 `src/regions/Terrain.zan` 逐条对齐
 
 包括 `tile_flags` 和 `mega_tile_index` 两个函数：variant 6 是
 "partially walkable"地形，flag 是 `flag_partially_walkable | flag_walkable`、

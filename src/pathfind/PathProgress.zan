@@ -156,6 +156,8 @@ public class PathProgress {
         pf.IsStuck = false;
         if (shortPathOnly) {
             ShortPathNext next = new ShortPathNext(R, pf);
+            next.Sim = Sim;
+            next.U = U;
             next.DimFromX = U.UnitType.DimensionsFrom.X;
             next.DimFromY = U.UnitType.DimensionsFrom.Y;
             next.DimToX = U.UnitType.DimensionsTo.X;
@@ -176,6 +178,8 @@ public class PathProgress {
             }
         }
         ShortPathNext next = new ShortPathNext(R, pf);
+        next.Sim = Sim;
+        next.U = U;
         next.DimFromX = U.UnitType.DimensionsFrom.X;
         next.DimFromY = U.UnitType.DimensionsFrom.Y;
         next.DimToX = U.UnitType.DimensionsTo.X;
@@ -186,10 +190,17 @@ public class PathProgress {
 
     // openbw: path_progress(u, to, ...)
     public bool PathProgressTo(int toX, int toY) {
+        return PathProgressTo(toX, toY, false, 0);
+    }
+
+    // openbw: path_progress(u, to, consider_collision_with_unit)
+    public bool PathProgressTo(int toX, int toY, bool hasConsiderCollision, int considerCollisionId) {
         UnsetMovementFlag(0x40);
         SetMovementFlag(0x10);
 
         Pathfinder pf = new Pathfinder(R);
+        pf.HasConsiderCollisionWithUnit = hasConsiderCollision;
+        pf.ConsiderCollisionWithUnitId = considerCollisionId;
         bool findNewPath = true;
         if (Current != null) {
             Current.CurrentShortPathIndex++;
@@ -324,6 +335,11 @@ public class PathProgress {
 
     // openbw: unit_path_to(u, to, ...)
     public bool UnitPathTo(int toX, int toY) {
+        return UnitPathTo(toX, toY, false, 0);
+    }
+
+    // openbw: unit_path_to(u, to, consider_collision_with_unit)
+    public bool UnitPathTo(int toX, int toY, bool hasConsiderCollision, int considerCollisionId) {
         if (IsMovingAlongPath()) return true;
         if (!U.UGroundUnit()) {
             SetUnitMoveTarget(toX, toY);
@@ -331,7 +347,7 @@ public class PathProgress {
             if (Current == null) return false;
             return true;
         }
-        if (!PathProgressTo(toX, toY)) return false;
+        if (!PathProgressTo(toX, toY, hasConsiderCollision, considerCollisionId)) return false;
         Path p = Current;
         if (U.NextTargetWaypoint.X != p.NextX || U.NextTargetWaypoint.Y != p.NextY) {
             U.NextTargetWaypoint = new Xy(p.NextX, p.NextY);

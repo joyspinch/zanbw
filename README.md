@@ -14,23 +14,27 @@ OpenBW（星际争霸：母巢之战引擎）的 **Zan 逐位一致重写**。
 | 长路径 A*（region 级） | 逐位一致 | 7 变体 × 12 查询 |
 | 短路径（contour 级） | 逐位一致 | 7 变体 × 10 查询 |
 | 路径执行层（`path_t` 生命周期） | 逐位一致 | 7 变体 × 10 场景 |
-| 运动状态机（`execute_movement`） | 逐位一致 | 7 变体 × 16 场景 |
+| 运动状态机（`execute_movement`） | 107/112 通过 | 7 变体 × 16 场景 |
+| 单位间碰撞 + 空间索引 | 103/119 通过 | 7 变体 × 17 场景 |
 
 ## 目录
 
+`src/` 按**职责**分层，不按 C++ 的文件切分。上层只依赖下层，没有反向依赖。
+
 | 路径 | 内容 |
 |------|------|
-| `src/` | Zan 移植代码（按 C++ 模块分文件，函数名与原实现保持一致） |
-| `src/Terrain.zan` | 合成地形规格（7 个变体）——**C++ 床与被测物共用这一份** |
-| `src/Regions*.zan` | regions 层：区域划分、contours、split regions |
-| `src/Pathfinder.zan` / `src/AStar.zan` | 寻路入口与长路径 A* |
-| `src/ShortPath*.zan` | 短路径（contour 级）搜索 |
-| `src/Path.zan` / `src/PathProgress.zan` | `path_t` 生命周期与 `path_progress` |
-| `src/StateMachine.zan` / `src/MovementStates.zan` | 运动状态机调度器与各 `UM_*` 状态 |
-| `src/Unit.zan` / `src/Sim.zan` / `src/Kinematics.zan` | 实体结构、移动积分、repulse 场 |
-| `src/Fp.zan` / `src/Dir.zan` / `src/Tables.zan` | 定点数、方向、静态表 |
-| `tools/cppbed/` | **C++ 对照床**：直接 `#include` 真实 `openbw/bwgame.h` |
+| `src/core/` | 核心实体与全局状态：`Unit`、`Sim`、`UnitFinder`、`Kinematics`、`Scenario`、`Enums` |
+| `src/math/` | 定点数（`Fp`）、方向（`Dir`）、静态表（`Tables`）、矩形（`Box`） |
+| `src/regions/` | regions 层：区域划分、contours、split regions、合成地形 |
+| `src/pathfind/` | 寻路：长路径 A*、短路径 contour 搜索、`path_t` 生命周期 |
+| `src/collision/` | 单位间碰撞：碰撞规则、unit finder 查询、运动状态机各 `UM_*` 状态 |
+| `src/beds/` | 各层对拍入口与它们用的场景表 |
+| `zan_sources.sh` | 各层的源文件清单，对拍脚本共用 |
+| `tools/cppbed/` | **C++ 对照床**（不进仓库）：直接 `#include` 真实 `openbw/bwgame.h` |
 | `AGENTS.md` | 本项目的移植纪律（含每一层踩过的坑） |
+
+层间依赖：`core ← math ← regions ← pathfind ← collision`。跨层调用一律走
+下层的公开方法，不反向引用。
 
 ## 构建与验证
 
@@ -43,6 +47,7 @@ bash check_astar.sh     # 长路径 A*
 bash check_shortpath.sh # 短路径
 bash check_path.sh      # 路径执行层
 bash check_state.sh     # 运动状态机
+bash check_collide.sh   # 单位间碰撞
 ```
 
 单场景 / 单变体：
@@ -50,6 +55,7 @@ bash check_state.sh     # 运动状态机
 ```bash
 bash check.sh s6 900
 bash check_state.sh 3 5
+bash check_collide.sh 6 2
 ```
 
 ## 对照床依赖
@@ -63,16 +69,19 @@ bash check_state.sh 3 5
   zanbw/           # 本仓库
 ```
 
-编译命令（床的源文件头部注释里也写了）：
+**对照床不在版本控制内**（见 `.gitignore`）——它们是开发工具，不是移植产物。
+从干净克隆开始时，把床复制进来即可：
 
 ```bash
-cd tools/cppbed && g++ -std=c++17 -I../../../openbw -O0 -g state_bed.cpp -o state_bed.exe
+cp -r <openbw-bed-dir>/. tools/cppbed/
+python3 tools/cppbed/gen_traced.py        # 生成带 trace 钩子的 openbw 副本
+python3 tools/cppbed/gen_collide_traced.py
 ```
 
 Zan 侧需要 `zanc`：
 
 ```bash
-D:/project/zan-lang/build/zanc.exe src/state_main.zan <...> --auto-stdlib -o build/state_zan.exe
+D:/project/zan-lang/build/zanc.exe src/beds/state_main.zan <...> --auto-stdlib -o build/state_zan.exe
 ```
 
 ## 为什么这么费劲

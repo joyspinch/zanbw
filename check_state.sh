@@ -22,45 +22,26 @@ CXX="${CXX:-g++}"
 
 cd "$ROOT"
 
+. ./zan_sources.sh
+
 VARIANTS="${1:-0 1 2 3 4 5 6}"
 SCENARIOS="${2:-0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15}"
 
 ZAN_SRC=(
-    src/state_main.zan
-    src/StateMachine.zan
-    src/MovementStates.zan
-    src/Path.zan
-    src/PathProgress.zan
-    src/Pathfinder.zan
-    src/AStar.zan
-    src/ShortPath.zan
-    src/ShortPathNeighbors.zan
-    src/ShortPathAddNeighbors.zan
-    src/ShortPathSearch.zan
-    src/ShortPathRun.zan
-    src/ShortPathNext.zan
-    src/Regions.zan
-    src/RegionsCreate.zan
-    src/RegionsRefresh.zan
-    src/RegionsMain.zan
-    src/RegionsContours.zan
-    src/RegionsDump.zan
-    src/Terrain.zan
-    src/Unit.zan
-    src/Sim.zan
-    src/Kinematics.zan
-    src/Fp.zan
-    src/Dir.zan
-    src/Enums.zan
-    src/Rng.zan
-    src/Tables.zan
+    src/beds/state_main.zan \
+    "${ZAN_SOURCES_BASE[@]}" \
+    "${ZAN_SOURCES_SCENARIOS[@]}" \
+    "${ZAN_SOURCES_CORE[@]}" \
+    "${ZAN_SOURCES_REGIONS[@]}" \
+    "${ZAN_SOURCES_PATH[@]}" \
+    "${ZAN_SOURCES_COLLISION[@]}"
 )
 
 echo "== building the Zan side =="
 "$ZANC" "${ZAN_SRC[@]}" --auto-stdlib -o build/state_zan.exe || exit 1
 
 echo "== building the C++ side =="
-"$CXX" -std=c++17 -I../openbw -O0 -g tools/cppbed/state_bed.cpp -o tools/cppbed/state_bed.exe || exit 1
+"$CXX" -std=c++17 -I../openbw -O0 -g tools/cppbed/state_bed.cpp -o ./tools/cppbed/state_bed.exe || exit 1
 
 mkdir -p build
 FAIL=0

@@ -1,11 +1,10 @@
 # Build output
 build/
 
-# C++ reference bed binaries and traces
-tools/cppbed/*.exe
-tools/cppbed/trace_*.txt
-tools/cppbed/audit_*.txt
+# The C++ reference beds. They are development tools, not part of the port:
+# the beds include the real openbw source verbatim and are only needed to
+# run the differential tests. They live outside the repository.
+tools/cppbed/
 
 # Throwaway probes
 _scratch/
-tools/cppbed/openbw_traced.h

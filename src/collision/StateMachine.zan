@@ -31,15 +31,28 @@ public class StateMachine {
     public PathProgress Pathing;
     public Unit U;
 
+    // The movement states and the collision states, so that a state can
+    // call into the other group.
+    public MovementStatesImpl States;
+    public CollisionStates CollisionStates;
+
     // openbw: st.consider_collision_with_unit_bug
     public bool HasCollisionUnit;
     public int CollisionUnitId;
+
+    // The movement states the dispatcher ran through, in order. The
+    // execute_movement loop runs several states per frame, so the frame's
+    // final state alone does not show what happened.
+    public List<int> Chain;
 
     public StateMachine(Sim sim, Regions r, PathProgress pathing, Unit u) {
         Sim = sim;
         R = r;
         Pathing = pathing;
         U = u;
+        States = new MovementStatesImpl(this);
+        CollisionStates = new CollisionStates(this);
+        Chain = new List<int>();
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -81,11 +94,13 @@ public class StateMachine {
     // false. The states that return true have changed the movement state,
     // so the loop continues with the new one.
     public bool ExecuteMovement() {
-        MovementStatesImpl states = new MovementStatesImpl(this);
+        MovementStatesImpl states = States;
         Ems ems = new Ems();
         ems.RefreshVision = false;
+        Chain.Clear();
         while (true) {
             bool cont = false;
+            Chain.Add((int)U.MovementState);
             switch (U.MovementState) {
                 case MovementStates.UM_Init:
                     cont = states.UmInit(ems);
@@ -146,6 +161,24 @@ public class StateMachine {
                     break;
                 case MovementStates.UM_UIOrderDelay:
                     cont = states.UmUIOrderDelay(ems);
+                    break;
+                case MovementStates.UM_FixCollision:
+                    cont = CollisionStates.UmFixCollision(ems);
+                    break;
+                case MovementStates.UM_WaitFree:
+                    cont = CollisionStates.UmWaitFree(ems);
+                    break;
+                case MovementStates.UM_GetFree:
+                    cont = CollisionStates.UmGetFree(ems);
+                    break;
+                case MovementStates.UM_SlidePrep:
+                    cont = CollisionStates.UmSlidePrep(ems);
+                    break;
+                case MovementStates.UM_SlideFree:
+                    cont = CollisionStates.UmSlideFree(ems);
+                    break;
+                case MovementStates.UM_RepathMovers:
+                    cont = CollisionStates.UmRepathMovers(ems);
                     break;
                 default:
                     cont = false;
@@ -248,18 +281,11 @@ public class StateMachine {
     //     return {true, largest_unit};
     // }
     //
-    // The unit finder is not part of this layer, so no other unit can
-    // block the way.
-    public bool IsBlocked(int posX, int posY) {
-        // openbw: unit_type_inner_bounding_box(u, origin) is
-        //     { origin - dimensions.from, origin + dimensions.to }
-        // and dimensions.from is negative, so the "from" side grows.
-        int fromX = posX - U.UnitType.DimensionsFrom.X;
-        int fromY = posY - U.UnitType.DimensionsFrom.Y;
-        int toX = posX + U.UnitType.DimensionsTo.X;
-        int toY = posY + U.UnitType.DimensionsTo.Y;
-        if (!IsInInnerMapBounds(fromX, fromY, toX, toY)) return true;
-        return !UnitTypeCanFitAt(U.UnitType, posX, posY);
+    // Whether the unit cannot be at the given position: either the
+    // position is off the map, another unit is in the way, or the terrain
+    // does not fit.
+    public bool IsBlocked(Unit u, int posX, int posY) {
+        return Collision.IsBlocked(this, u, posX, posY);
     }
 
     // openbw: check_unit_movement_terrain_collision(u, movement)

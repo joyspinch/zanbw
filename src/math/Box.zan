@@ -1,0 +1,35 @@
+using System;
+
+// An axis aligned rectangle.
+//
+// The box is stored as the two corners: the low corner (from) and the high
+// corner (to). The engine uses boxes for the unit bounding boxes, the
+// search areas and the local edges of the short path walk.
+//
+// openbw: struct rect { xy from; xy to; };
+
+public class Box {
+    public int FromX;
+    public int ToX;
+    public int FromY;
+    public int ToY;
+
+    public Box(int fromX, int toX, int fromY, int toY) {
+        FromX = fromX;
+        ToX = toX;
+        FromY = fromY;
+        ToY = toY;
+    }
+
+    // openbw: bool is_intersecting(rect a, rect b)
+    //
+    // The two boxes overlap when neither of them lies entirely on one side
+    // of the other. The edges count as overlapping.
+    public static bool Intersects(Box a, Box b) {
+        if (b.FromX > a.ToX) return false;
+        if (b.FromY > a.ToY) return false;
+        if (a.FromX > b.ToX) return false;
+        if (a.FromY > b.ToY) return false;
+        return true;
+    }
+}

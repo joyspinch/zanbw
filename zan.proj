@@ -1,4 +1,4 @@
 name = ZanBW
 type = console
-entry = src/main.zan
+entry = src/beds/kinematics_main.zan
 target = exe

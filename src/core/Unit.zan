@@ -63,11 +63,21 @@ public class Sprite {
     public Xy Position;
     public int ElevationLevel;
 
+    // openbw: sprite_t::owner -- the player that owns the sprite, which
+    // can differ from the unit's owner for a neutral unit.
+    public int Owner;
+
     public Sprite() {
         Flags = 0;
         Position = new Xy(0, 0);
         ElevationLevel = 4;
+        Owner = 0;
     }
+
+    // openbw: bool s_flag(const sprite_t* u, sprite_t::flags_t flag)
+    public bool HasFlag(SpriteFlag flag) { return (Flags & (int)flag) != 0; }
+    public void SetFlag(SpriteFlag flag) { Flags = Flags | (int)flag; }
+    public void UnsetFlag(SpriteFlag flag) { Flags = Flags & ~((int)flag); }
 }
 
 // Flingy type (openbw flingy_type_t).
@@ -124,6 +134,10 @@ public class Unit {
 
     public Xy MoveTargetPos;
     public bool HasMoveTargetUnit;
+
+    // openbw: move_target.unit -- the unit the move order points at, as a
+    // unit id.
+    public int MoveTargetUnitId;
     public Xy NextMovementWaypoint;
     public Xy NextTargetWaypoint;
     public int MovementFlags;
@@ -175,11 +189,29 @@ public class Unit {
 
     public int UnitIdGeneration;
 
+    // The unit's index in the game's unit table. Together with the
+    // generation counter it makes up the unit id.
+    public int UnitIdIndex;
+
+    // openbw: unit_t::unit_finder_bounding_box -- the span of the unit
+    // in the unit finder. A value of -1 in "to.x" means the unit is not
+    // in the finder at all.
+    public int UnitFinderFromX;
+    public int UnitFinderFromY;
+    public int UnitFinderToX;
+    public int UnitFinderToY;
+
+    // openbw: unit_t::unit_finder_visited -- one flag per search slot.
+    // A unit is reported at most once per search, even though it appears
+    // twice in the index.
+    public bool[] UnitFinderVisited;
+
     public Unit() {
         Hp = Fp.Zero();
         Sprite = new Sprite();
         MoveTargetPos = new Xy(0, 0);
         HasMoveTargetUnit = false;
+        MoveTargetUnitId = -1;
         NextMovementWaypoint = new Xy(0, 0);
         NextTargetWaypoint = new Xy(0, 0);
         MovementFlags = 0;
@@ -218,12 +250,57 @@ public class Unit {
         TerrainNoCollisionToX = 0;
         TerrainNoCollisionToY = 0;
         UnitIdGeneration = 0;
+        UnitIdIndex = 0;
+        UnitFinderFromX = -1;
+        UnitFinderFromY = -1;
+        UnitFinderToX = -1;
+        UnitFinderToY = -1;
+        UnitFinderVisited = new bool[4];
     }
 
     // ---- status helpers (openbw bwgame.h u_* helpers) ----------------------
 
     public bool HasStatusFlag(StatusFlag flag) { return (StatusFlagBits & (int)flag) != 0; }
     public void SetStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits | (int)flag; }
+    public void UnsetStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits & ~((int)flag); }
+
+    // ---- geometry ----------------------------------------------------------
+
+    // openbw: rect unit_bounding_box(const unit_t* u, xy origin)
+    //
+    // The outer box of the unit at the given origin:
+    // { origin - from, origin + to + (1, 1) }.
+    public Box BoundingBoxAt(int originX, int originY) {
+        return new Box(originX - UnitType.DimensionsFrom.X,
+                       originX + UnitType.DimensionsTo.X + 1,
+                       originY - UnitType.DimensionsFrom.Y,
+                       originY + UnitType.DimensionsTo.Y + 1);
+    }
+
+    // The inner box of the unit at the given origin: { origin - from,
+    // origin + to }.
+    public Box InnerBoxAt(int originX, int originY) {
+        return new Box(originX - UnitType.DimensionsFrom.X,
+                       originX + UnitType.DimensionsTo.X,
+                       originY - UnitType.DimensionsFrom.Y,
+                       originY + UnitType.DimensionsTo.Y);
+    }
+
+    // The box of the unit at its own position. The outer box is one pixel
+    // bigger on the far side than the inner one.
+    public Box SpriteBox(bool outer) {
+        int toX = Position.X + UnitType.DimensionsTo.X;
+        int toY = Position.Y + UnitType.DimensionsTo.Y;
+        if (outer) {
+            toX = toX + 1;
+            toY = toY + 1;
+        }
+        return new Box(Position.X - UnitType.DimensionsFrom.X, toX,
+                       Position.Y - UnitType.DimensionsFrom.Y, toY);
+    }
+
+    // openbw: bool us_hidden(const thingy_t* u) const
+    public bool USHidden() { return Sprite.HasFlag(SpriteFlag.Hidden); }
     public void ClearStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits & ~(int)flag; }
 
     public bool UCanMove() { return HasStatusFlag(StatusFlag.CanMove); }

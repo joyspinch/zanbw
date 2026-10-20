@@ -15,6 +15,8 @@ CXX="${CXX:-g++}"
 
 cd "$ROOT"
 
+. ./zan_sources.sh
+
 if [ "$#" -ge 1 ]; then
     VARIANTS="$1"
 else
@@ -25,9 +27,9 @@ echo "== building C++ regions bed =="
 (cd tools/cppbed && "$CXX" -std=c++17 -I../../../openbw -O0 -g regions_bed.cpp -o regions_bed.exe) || exit 1
 
 echo "== building Zan regions port =="
-"$ZANC" src/regions_main.zan src/Regions.zan src/RegionsCreate.zan src/RegionsRefresh.zan \
-        src/RegionsMain.zan src/RegionsContours.zan src/RegionsDump.zan src/Terrain.zan \
-        src/Fp.zan src/Dir.zan src/Enums.zan \
+"$ZANC" src/beds/regions_main.zan \
+        "${ZAN_SOURCES_BASE[@]}" \
+        "${ZAN_SOURCES_REGIONS[@]}" \
         --auto-stdlib -o build/regions_zan.exe || exit 1
 
 FAIL=0

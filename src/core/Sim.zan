@@ -45,6 +45,34 @@ public class Sim {
     public int MapTileHeight;
     public int[] RepulseField;
 
+    // openbw: game_st::max_unit_width / max_unit_height -- the size of the
+    // biggest unit, used to widen the unit finder searches.
+    public int MaxUnitWidth;
+    public int MaxUnitHeight;
+
+    // openbw: state::unit_finder_x / unit_finder_y -- the spatial index
+    // over the ground units.
+    public UnitFinder Finder;
+
+    // openbw: state::units -- the units of the game, by id. The collision
+    // states look the colliding unit up by the id stored in the path.
+    public List<Unit> Units;
+
+    // openbw: st.consider_collision_with_unit_bug
+    //
+    // The unit the next path has to go around, even though it is on the
+    // move. The engine keeps it as a global, and the collision states
+    // read and write it.
+    public bool HasConsiderCollisionWithUnit;
+    public int ConsiderCollisionWithUnitId;
+
+    // openbw: state::current_frame
+    public int CurrentFrame;
+
+    // openbw: state::alliances -- the alliance matrix. A zero means the
+    // two players are enemies.
+    public int[] Alliances;
+
     public Sim(Rng rng, int mapWidth, int mapHeight) {
         Rng = rng;
         MapWidth = mapWidth;
@@ -52,6 +80,73 @@ public class Sim {
         MapTileWidth = mapWidth / 32;
         MapTileHeight = mapHeight / 32;
         RepulseField = new int[((mapWidth + 47) / 48) * ((mapHeight + 47) / 48)];
+        MaxUnitWidth = 64;
+        MaxUnitHeight = 64;
+        Finder = new UnitFinder();
+        Units = new List<Unit>();
+        CurrentFrame = 0;
+        Alliances = new int[12 * 12];
+        for (int i = 0; i < 12; ++i) {
+            for (int j = 0; j < 12; ++j) {
+                Alliances[i * 12 + j] = (i == j) ? 1 : 0;
+            }
+        }
+    }
+
+    // openbw: bool unit_target_is_enemy(const unit_t* u, const unit_t* target) const
+    public bool UnitTargetIsEnemy(Unit u, Unit target) {
+        int nOwner = target.Owner;
+        if (nOwner == 11) nOwner = target.Sprite.Owner;
+        return Alliances[u.Owner * 12 + nOwner] == 0;
+    }
+
+    // openbw: bool unit_can_collide_with(const unit_t* u, const unit_t* target)
+    //
+    // Whether the two units collide with each other at all. The rules
+    // depend on the unit types, the status flags and the owners.
+    public bool UnitCanCollideWith(Unit u, Unit target) {
+        if (target == u) return false;
+        // openbw: ~target->pathing_flags & 1 -- the unit is not on the ground
+        // and therefore cannot be collided with.
+        if ((target.PathingFlags & 1) == 0) return false;
+        if (target.HasStatusFlag(StatusFlag.NoCollide)) return false;
+        if (target.HasStatusFlag(StatusFlag.Flag400000)) {
+            // The unit only collides with units of the same side.
+            if (UnitTargetIsEnemy(u, target)) return false;
+        }
+        if (u.HasStatusFlag(StatusFlag.Gathering) && !target.HasStatusFlag(StatusFlag.GroundedBuilding)) {
+            // A gathering unit only collides with the gas it is gathering.
+            if (!target.HasStatusFlag(StatusFlag.Gathering)) return false;
+            if (u.OrderId == (int)Orders.ReturnGas) return false;
+            if (target.OrderId != (int)Orders.WaitForGas) return false;
+        }
+        if (u.UnitType.Id == (int)UnitTypes.ZergLarva) {
+            // A larva only collides with grounded buildings.
+            if (!target.HasStatusFlag(StatusFlag.GroundedBuilding)) return false;
+        } else if (target.UnitType.Id == (int)UnitTypes.ZergLarva) {
+            return false;
+        }
+        return true;
+    }
+
+    // openbw: unit_t* get_unit(unit_id id)
+    //
+    // The unit with the given id, or null. The id carries a generation
+    // counter in its high bits, so a stale id does not find a unit that
+    // was replaced.
+    public Unit GetUnit(int id) {
+        if (id < 0) return null;
+        int index = id & 0x7ff;
+        if (index >= Units.Count) return null;
+        Unit u = Units[index];
+        if (u == null) return null;
+        if ((id >> 11) != u.UnitIdGeneration) return null;
+        return u;
+    }
+
+    // openbw: unit_id get_unit_id(const unit_t* u)
+    public int GetUnitId(Unit u) {
+        return u.UnitIdIndex | (u.UnitIdGeneration << 11);
     }
 
     // ---- map bounds --------------------------------------------------------
@@ -411,6 +506,13 @@ public class Sim {
     public void StopUnit(Unit u) {
         if ((u.PathingFlags & 2) != 0) u.PathingFlags = u.PathingFlags | 4;
         StopFlingy(u);
+        // openbw: xy move_target = restrict_move_target_to_valid_bounds(u, u->move_target.pos);
+        Xy restricted = RestrictUnitPosToBounds(u.MoveTargetPos, u.UnitType,
+                                               new Xy(0, 0), new Xy(MapWidth, MapHeight - 32));
+        if (u.MoveTargetPos != restricted) {
+            u.MoveTargetPos = restricted;
+            u.NextMovementWaypoint = restricted;
+        }
         u.MoveTargetTimer = 15;
     }
 
@@ -446,7 +548,22 @@ public class Sim {
         Xy prevPos = u.Position;
         if (!FinishFlingyMovement(u, ems)) return false;
         if (TileIndex(prevPos) != TileIndex(u.Position)) ems.RefreshVision = true;
+        // openbw: unit_finder_reinsert(u) -- the unit's box moved, so the
+        // spatial index has to follow.
+        UnitFinderReinsert(u);
         return true;
+    }
+
+    // openbw: void unit_finder_reinsert(unit_t* u)
+    //
+    // The unit's bounding box in the finder follows its position.
+    public void UnitFinderReinsert(Unit u) {
+        if (u.UnitFinderToX == -1) return;
+        int fromX = u.Position.X - u.UnitType.DimensionsFrom.X;
+        int toX = u.Position.X + u.UnitType.DimensionsTo.X;
+        int fromY = u.Position.Y - u.UnitType.DimensionsFrom.Y;
+        int toY = u.Position.Y + u.UnitType.DimensionsTo.Y;
+        Finder.Reinsert(u, fromX, toX, fromY, toY);
     }
 
     // openbw: size_t tile_index(xy pos) const {
