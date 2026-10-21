@@ -104,6 +104,15 @@ bash check_unittype.sh
 # 玩家状态层对拍（7 个变体 × 12 玩家 × 每玩家表格 + 256 格子可见性）
 bash check_player.sh
 
+# 单位指令许可层对拍（7 个变体 × 10993 行：unit_order_allowed + 状态谓词）
+bash check_unitorder.sh
+
+# 科技/升级许可层对拍（7 个变体 × 384721 行：research / use_tech / upgrade）
+bash check_unittech.sh
+
+# 单位状态/类型标志层对拍（7 个变体 × 262 行：50 个单行位包装）
+bash check_unitflags.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -118,6 +127,9 @@ bash check_creep.sh 3 5
 bash check_order.sh 3 5
 bash check_unittype.sh 3
 bash check_player.sh 3
+bash check_unitorder.sh 3
+bash check_unittech.sh 3
+bash check_unitflags.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -1080,6 +1092,91 @@ struct type_indexed_array { ... };
 顺带一条判定依据：`max_upgrade_levels` 和 `tech_available` 在
 `game_st`，其余（`unit_counts` / `upgrade_levels` / `tech_researched` /
 `tech_researching` / `upgrade_upgrading`）在 `st`。放错边会编译不过。
+
+### 75. 枚举的 `None` 哨兵是**显式值**，不是成员个数
+
+`TechTypes::None = 44` 但 `TechTypes` 只有 36 个成员；`UpgradeTypes::None = 61`
+但只有 56 个成员。中间跳过的号是历史遗留的废弃 id。
+
+C++ 的 `type_indexed_array<T, E>` 长度取 `E::None`，所以有效 id 是
+`0 .. None-1`，中间的空洞是合法但没人用的槽位。
+
+**坑**：从 C++ 头文件抽枚举时，如果只按"数成员"生成，`None` 的值会变成
+36 / 56，数组长度全错。抽枚举必须**认 `= 数字` 的显式赋值**。
+
+### 76. 同一个量有两种读法时，要分成**两个参数**
+
+`player_upgrade_level(owner, upgrade->id)` 和
+`player_upgrade_level(owner, UpgradeTypes::Zerg_Carapace)` 读的是不同的槽位：
+前者读"当前正在升级的那个升级"，后者读"某个指定升级的等级"。
+
+移植时如果用同一个参数接，`Zerg_Carapace` 的三级 switch 就会读到
+"当前升级"的等级而不是自己的等级。
+
+**坑**：更隐蔽的是**替换顺序**。用正则把 `player_upgrade_level(owner, upgrade->id)`
+换成标量参数名之后，再跑一条正则匹配
+`player_upgrade_level(owner, UpgradeTypes::X)`，第二条会命中第一条的
+**结果**（因为结果里也含 `player_upgrade_level`），于是把标量参数
+`p.UpgradeLevel` 变成 `p.UpgradeLevel[UpgradeTypes.X]`——对着 int 写下标，
+zanc 报 `GEP base pointer is not a vector`，错误信息完全不指向真正的原因。
+
+**做法**：先做带 id 的替换，再做标量的替换；或者用不同的名字。
+
+### 77. 嵌套 switch 里的 `case 1:` / `case 2:` 是**数字**标签
+
+C++ 的嵌套 switch 用 `case 1:` 这种裸数字标签，不是枚举。写解析器时如果
+只认 `case Enum::Name:`，这些 case 会被静默丢掉，生成出**空 switch**——
+编译能过，结果全错。
+
+**做法**：解析器要认数字 case，并且 `case`/`default` 都要能终止当前语句块。
+
+### 78. `unit_is_constructing` 会顺着指针读**别的单位**
+
+C++ 的 `unit_is_constructing(u)` → `unit_is_building_addon(u)` →
+读 `u->secondary_order_type->id`、`u->current_build_unit`、
+`u->order_target.unit`。
+
+对拍床里单位没有这些指针就会段错误。`secondary_order_type` 必须指向
+一个真的 `order_type_t`（C++ 直接解引用取 `->id`）。
+
+**做法**：床里给每个单位挂上：
+- `order_type`（挂 `Orders::Stop`）
+- `secondary_order_type`（挂 `Orders::Stop` 或 `Orders::BuildAddon`，按用例变）
+- `current_build_unit` / `order_target.unit`（按用例置空或指向自己）
+
+指向自己时，`u_completed(current_build_unit)` 读的就是这个单位自己的
+完成标志——Zan 侧对应传 `IsCompleted(u)`。
+
+### 79. 一行式位包装要**合并成一层**，别散着抄
+
+C++ 里 `u_completed` / `u_burrowed` / `u_cloaked` … 共 26 个状态位谓词，
+`ut_turret` / `ut_worker` / `ut_hero` … 共 24 个类型位谓词，形状完全一样：
+读一个位，判非零。
+
+移植时手工抄 50 个函数体，必然和已有的 `UnitStatus` 重复。正确做法是
+生成一层 `UnitFlags`，把 `UnitStatus` 里**重复的实现改成转发**，
+只留一份实现。
+
+**坑**：Zan **不支持按参数类型重载**。`CanTurn(Unit)` 和 `CanTurn(UnitType)`
+不能共存，类型的那批要加前缀（如 `TypeCanTurn`）。
+
+### 80. 状态位 0x80000000 用**无符号掩码**测
+
+`unit_t::status_flag_lifetime_expired = 0x80000000`，有符号 32 位枚举放不下
+（zanc 的 enum 成员是 32 位有符号）。测这一位只能写成
+`(u.StatusFlagBits & unchecked((int)0x80000000)) != 0`。
+
+C++ 侧对应 `(uint_fast32_t)1 << 31`，两边都要**显式无符号**，否则 C++ 的
+`1 << 31` 是 UB / 实现定义的。
+
+### 81. 对拍床的位型要让**每个位都真被测到**
+
+用 `(c * 0x1041) & 0x7fffffff` 这种乘数位型，很多标志位**一次都不会
+置上**——测试看着全绿，其实那几个谓词从没被真正判定过。
+
+**做法**：用 `0x55555555` 轮转，每 case 左移一位，任何单 bit 标志在
+32 个 case 里都会置上 16 次。改完要回头统计每个标志的 `=1` 次数，
+确认没有恒为 0 的。
 
 ## 已知 zanc 缺陷
 
