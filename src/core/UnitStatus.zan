@@ -15,32 +15,32 @@ using System;
 public class UnitStatus {
     // openbw: bool u_grounded_building(const unit_t* u)
     public static bool IsGroundedBuilding(Unit u) {
-        return u.HasStatusFlag(StatusFlag.GroundedBuilding);
+        return UnitFlags.GroundedBuilding(u);
     }
 
     // openbw: bool u_completed(const unit_t* u)
     public static bool IsCompleted(Unit u) {
-        return u.HasStatusFlag(StatusFlag.Completed);
+        return UnitFlags.Completed(u);
     }
 
     // openbw: bool u_flying(const unit_t* u)
     public static bool IsFlying(Unit u) {
-        return u.HasStatusFlag(StatusFlag.Flying);
+        return UnitFlags.Flying(u);
     }
 
     // openbw: bool u_burrowed(const unit_t* u)
     public static bool IsBurrowed(Unit u) {
-        return u.HasStatusFlag(StatusFlag.Burrowed);
+        return UnitFlags.Burrowed(u);
     }
 
     // openbw: bool u_hallucination(const unit_t* u)
     public static bool IsHallucination(Unit u) {
-        return u.HasStatusFlag(StatusFlag.Hallucination);
+        return UnitFlags.Hallucination(u);
     }
 
     // openbw: bool u_invincible(const unit_t* u)
     public static bool IsInvincible(Unit u) {
-        return u.HasStatusFlag(StatusFlag.Invincible);
+        return UnitFlags.Invincible(u);
     }
 
     // openbw: bool u_disabled(const unit_t* u)
@@ -251,7 +251,7 @@ public class UnitStatus {
 
     // openbw: bool unit_type_has_flag(const unit_type_t* ut, flag)
     public static bool UnitTypeHasFlag(UnitType ut, int flag) {
-        return (ut.Flags & flag) != 0;
+        return UnitFlags.UnitTypeHasFlag(ut, flag);
     }
 
     // openbw: bool unit_provides_space(const unit_t* u) const
@@ -267,12 +267,12 @@ public class UnitStatus {
 
     // openbw: bool u_cloaked(const unit_t* u) const
     public static bool IsCloaked(Unit u) {
-        return u.HasStatusFlag(StatusFlag.Cloaked);
+        return UnitFlags.Cloaked(u);
     }
 
     // openbw: bool u_requires_detector(const unit_t* u) const
     public static bool UnitRequiresDetector(Unit u) {
-        return u.HasStatusFlag(StatusFlag.RequiresDetector);
+        return UnitFlags.RequiresDetector(u);
     }
 
     // openbw: size_t unit_spider_mine_count(const unit_t* u) const

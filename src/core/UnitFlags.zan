@@ -1,0 +1,229 @@
+using System;
+
+// openbw: the unit status and unit type flag wrappers (bwgame.h)
+//
+// The C++ has a long list of one-line wrappers, each testing a single
+// bit of the unit's status flags or the unit type's flags:
+//
+//   bool u_xxx(const unit_t* u) const {
+//       return u_status_flag(u, unit_t::status_flag_xxx);
+//   }
+//
+// They are all the same shape, so they are all one layer here.
+//
+// The status flag values are the C++'s unit_t::status_flags_t, which
+// are a bit per flag and nothing else. The unit type flag values are
+// unit_type_t::flags_t.
+public class UnitFlags {
+    // openbw: bool ut_flag(unit_type_autocast ut, unit_type_t::flags_t flag) const
+    //
+    // The generic unit type flag test. Every ut_xxx wrapper below is
+    // this call with a fixed flag.
+    public static bool UnitTypeHasFlag(UnitType ut, int flag) {
+        return (ut.Flags & flag) != 0;
+    }
+
+    // openbw: bool u_completed(const unit_t* u) const
+    public static bool Completed(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Completed);
+    }
+    // openbw: bool u_in_bunker(const unit_t* u) const
+    public static bool InBunker(Unit u) {
+        return u.HasStatusFlag(StatusFlag.InBunker);
+    }
+    // openbw: bool u_loaded(const unit_t* u) const
+    public static bool Loaded(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Loaded);
+    }
+    // openbw: bool u_immovable(const unit_t* u) const
+    public static bool Immovable(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Immovable);
+    }
+    // openbw: bool u_disabled(const unit_t* u) const
+    public static bool Disabled(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Disabled);
+    }
+    // openbw: bool u_burrowed(const unit_t* u) const
+    public static bool Burrowed(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Burrowed);
+    }
+    // openbw: bool u_can_turn(const unit_t* u) const
+    public static bool CanTurn(Unit u) {
+        return u.HasStatusFlag(StatusFlag.CanTurn);
+    }
+    // openbw: bool u_can_move(const unit_t* u) const
+    public static bool CanMove(Unit u) {
+        return u.HasStatusFlag(StatusFlag.CanMove);
+    }
+    // openbw: bool u_grounded_building(const unit_t* u) const
+    public static bool GroundedBuilding(Unit u) {
+        return u.HasStatusFlag(StatusFlag.GroundedBuilding);
+    }
+    // openbw: bool u_hallucination(const unit_t* u) const
+    public static bool Hallucination(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Hallucination);
+    }
+    // openbw: bool u_lifetime_expired(const unit_t* u) const
+    public static bool LifetimeExpired(Unit u) {
+        // The C++'s status_flag_lifetime_expired is 0x80000000, which
+        // does not fit in a signed 32-bit enum, so the test is done
+        // on the raw mask.
+        return (u.StatusFlagBits & unchecked((int)0x80000000)) != 0;
+    }
+    // openbw: bool u_flying(const unit_t* u) const
+    public static bool Flying(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Flying);
+    }
+    // openbw: bool u_speed_upgrade(const unit_t* u) const
+    public static bool SpeedUpgrade(Unit u) {
+        return u.HasStatusFlag(StatusFlag.SpeedUpgrade);
+    }
+    // openbw: bool u_cooldown_upgrade(const unit_t* u) const
+    public static bool CooldownUpgrade(Unit u) {
+        return u.HasStatusFlag(StatusFlag.CooldownUpgrade);
+    }
+    // openbw: bool u_gathering(const unit_t* u) const
+    public static bool Gathering(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Gathering);
+    }
+    // openbw: bool u_requires_detector(const unit_t* u) const
+    public static bool RequiresDetector(Unit u) {
+        return u.HasStatusFlag(StatusFlag.RequiresDetector);
+    }
+    // openbw: bool u_cloaked(const unit_t* u) const
+    public static bool Cloaked(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Cloaked);
+    }
+    // openbw: bool u_cannot_attack(const unit_t* u) const
+    public static bool CannotAttack(Unit u) {
+        return u.HasStatusFlag(StatusFlag.CannotAttack);
+    }
+    // openbw: bool u_order_not_interruptible(const unit_t* u) const
+    public static bool OrderNotInterruptible(Unit u) {
+        return u.HasStatusFlag(StatusFlag.OrderNotInterruptible);
+    }
+    // openbw: bool u_iscript_nobrk(const unit_t* u) const
+    public static bool IscriptNobrk(Unit u) {
+        return u.HasStatusFlag(StatusFlag.IscriptNobrk);
+    }
+    // openbw: bool u_collision(const unit_t* u) const
+    public static bool Collision(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Collision);
+    }
+    // openbw: bool u_ground_unit(const unit_t* u) const
+    public static bool GroundUnit(Unit u) {
+        return u.HasStatusFlag(StatusFlag.GroundUnit);
+    }
+    // openbw: bool u_no_collide(const unit_t* u) const
+    public static bool NoCollide(Unit u) {
+        return u.HasStatusFlag(StatusFlag.NoCollide);
+    }
+    // openbw: bool u_invincible(const unit_t* u) const
+    public static bool Invincible(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Invincible);
+    }
+    // openbw: bool u_ready_to_attack(const unit_t* u) const
+    public static bool ReadyToAttack(Unit u) {
+        return u.HasStatusFlag(StatusFlag.ReadyToAttack);
+    }
+    // openbw: bool u_passively_cloaked(const unit_t* u) const
+    public static bool PassivelyCloaked(Unit u) {
+        return u.HasStatusFlag(StatusFlag.PassivelyCloaked);
+    }
+    // openbw: bool ut_turret(unit_type_autocast ut) const
+    public static bool Turret(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Turret);
+    }
+    // openbw: bool ut_worker(unit_type_autocast ut) const
+    public static bool Worker(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Worker);
+    }
+    // openbw: bool ut_hero(unit_type_autocast ut) const
+    public static bool Hero(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Hero);
+    }
+    // openbw: bool ut_building(unit_type_autocast ut) const
+    public static bool Building(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Building);
+    }
+    // openbw: bool ut_addon(unit_type_autocast ut) const
+    public static bool Addon(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Addon);
+    }
+    // openbw: bool ut_flyer(unit_type_autocast ut) const
+    public static bool Flyer(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Flyer);
+    }
+    // openbw: bool ut_can_turn(unit_type_autocast ut) const
+    public static bool TypeCanTurn(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.CanTurn);
+    }
+    // openbw: bool ut_can_move(unit_type_autocast ut) const
+    public static bool TypeCanMove(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.CanMove);
+    }
+    // openbw: bool ut_invincible(unit_type_autocast ut) const
+    public static bool TypeInvincible(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Invincible);
+    }
+    // openbw: bool ut_two_units_in_one_egg(unit_type_autocast ut) const
+    public static bool TwoUnitsInOneEgg(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.TwoUnitsInOneEgg);
+    }
+    // openbw: bool ut_regens_hp(unit_type_autocast ut) const
+    public static bool RegensHp(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.RegensHp);
+    }
+    // openbw: bool ut_flying_building(unit_type_autocast ut) const
+    public static bool FlyingBuilding(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.FlyingBuilding);
+    }
+    // openbw: bool ut_requires_psionic_matrix(unit_type_autocast ut) const
+    public static bool RequiresPsionicMatrix(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.RequiresPsionicMatrix);
+    }
+    // openbw: bool ut_can_burrow(unit_type_autocast ut) const
+    public static bool CanBurrow(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.CanBurrow);
+    }
+    // openbw: bool ut_has_energy(unit_type_autocast ut) const
+    public static bool HasEnergy(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.HasEnergy);
+    }
+    // openbw: bool ut_resource_depot(unit_type_autocast ut) const
+    public static bool ResourceDepot(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.ResourceDepot);
+    }
+    // openbw: bool ut_resource(unit_type_autocast ut) const
+    public static bool Resource(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Resource);
+    }
+    // openbw: bool ut_initially_cloaked(unit_type_autocast ut) const
+    public static bool InitiallyCloaked(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.InitiallyCloaked);
+    }
+    // openbw: bool ut_detector(unit_type_autocast ut) const
+    public static bool Detector(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Detector);
+    }
+    // openbw: bool ut_requires_creep(unit_type_autocast ut) const
+    public static bool RequiresCreep(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.RequiresCreep);
+    }
+    // openbw: bool ut_mechanical(unit_type_autocast ut) const
+    public static bool Mechanical(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Mechanical);
+    }
+    // openbw: bool ut_organic(unit_type_autocast ut) const
+    public static bool Organic(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Organic);
+    }
+    // openbw: bool ut_robotic(unit_type_autocast ut) const
+    public static bool Robotic(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Robotic);
+    }
+    // openbw: bool ut_powerup(unit_type_autocast ut) const
+    public static bool Powerup(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Powerup);
+    }
+}

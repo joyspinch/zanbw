@@ -1,0 +1,119 @@
+using System;
+
+// The Zan side of the unit status / unit type flag bed.
+//
+// The bed drives the same wrappers over the same unit types and flag
+// patterns as the C++ bed (tools/cppbed/unitflags_bed.cpp), so the two
+// traces must match byte for byte.
+
+public class UnitFlagsBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The unit types.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, (i % 7) + 1, new Xy(8, 8), new Xy(8, 8));
+            t.Flags = (i * 0x9 + variant * 0x37) & 0x7fffffff;
+            t.RightClickAction = i % 6;
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The status flag patterns.
+        for (int c = 0; c < 32; ++c) {
+            // The pattern is a rotation, so every status bit is set in
+            // some case: 0x55555555 rotated left by one per case, with
+            // the variant shifting the rotation.
+            int flags = unchecked((int)0x55555555);
+            int shift = c % 32;
+            if (shift != 0) {
+                flags = unchecked((int)(((uint)flags << shift) | ((uint)flags >> (32 - shift))));
+            }
+            flags = flags ^ unchecked((int)(variant * 0x01010101));
+            // The lifetime-expired flag is 0x80000000, which the
+            // pattern above never sets on its own; a few cases set it.
+            if (c % 4 == 1) flags = flags | unchecked((int)0x80000000);
+            int movementFlags = (c * 0x37 + variant) & 0xff;
+
+            Unit u = new Unit();
+            u.StatusFlagBits = flags;
+            u.MovementFlags = movementFlags;
+
+            string line = "F " + c;
+            line = line + " completed=" + B(UnitFlags.Completed(u));
+            line = line + " in_bunker=" + B(UnitFlags.InBunker(u));
+            line = line + " loaded=" + B(UnitFlags.Loaded(u));
+            line = line + " immovable=" + B(UnitFlags.Immovable(u));
+            line = line + " disabled=" + B(UnitFlags.Disabled(u));
+            line = line + " burrowed=" + B(UnitFlags.Burrowed(u));
+            line = line + " can_turn=" + B(UnitFlags.CanTurn(u));
+            line = line + " can_move=" + B(UnitFlags.CanMove(u));
+            line = line + " grounded_building=" + B(UnitFlags.GroundedBuilding(u));
+            line = line + " hallucination=" + B(UnitFlags.Hallucination(u));
+            line = line + " lifetime_expired=" + B(UnitFlags.LifetimeExpired(u));
+            line = line + " flying=" + B(UnitFlags.Flying(u));
+            line = line + " speed_upgrade=" + B(UnitFlags.SpeedUpgrade(u));
+            line = line + " cooldown_upgrade=" + B(UnitFlags.CooldownUpgrade(u));
+            line = line + " gathering=" + B(UnitFlags.Gathering(u));
+            line = line + " requires_detector=" + B(UnitFlags.RequiresDetector(u));
+            line = line + " cloaked=" + B(UnitFlags.Cloaked(u));
+            line = line + " cannot_attack=" + B(UnitFlags.CannotAttack(u));
+            line = line + " order_not_interruptible=" + B(UnitFlags.OrderNotInterruptible(u));
+            line = line + " iscript_nobrk=" + B(UnitFlags.IscriptNobrk(u));
+            line = line + " collision=" + B(UnitFlags.Collision(u));
+            line = line + " ground_unit=" + B(UnitFlags.GroundUnit(u));
+            line = line + " no_collide=" + B(UnitFlags.NoCollide(u));
+            line = line + " invincible=" + B(UnitFlags.Invincible(u));
+            line = line + " ready_to_attack=" + B(UnitFlags.ReadyToAttack(u));
+            line = line + " passively_cloaked=" + B(UnitFlags.PassivelyCloaked(u));
+            line = line + " movement_flag1=" + B((movementFlags & 1) != 0);
+            line = line + " movement_flag2=" + B((movementFlags & 2) != 0);
+            line = line + " movement_flag4=" + B((movementFlags & 4) != 0);
+            line = line + " movement_flag64=" + B((movementFlags & 64) != 0);
+            Console.WriteLine(line);
+        }
+
+        // The unit type flag wrappers.
+        for (int i = 0; i < types.Count; ++i) {
+            UnitType ut = types[i];
+            string line = "T " + i;
+            line = line + " turret=" + B(UnitFlags.Turret(ut));
+            line = line + " worker=" + B(UnitFlags.Worker(ut));
+            line = line + " hero=" + B(UnitFlags.Hero(ut));
+            line = line + " building=" + B(UnitFlags.Building(ut));
+            line = line + " addon=" + B(UnitFlags.Addon(ut));
+            line = line + " flyer=" + B(UnitFlags.Flyer(ut));
+            line = line + " can_turn=" + B(UnitFlags.TypeCanTurn(ut));
+            line = line + " can_move=" + B(UnitFlags.TypeCanMove(ut));
+            line = line + " invincible=" + B(UnitFlags.TypeInvincible(ut));
+            line = line + " two_units_in_one_egg=" + B(UnitFlags.TwoUnitsInOneEgg(ut));
+            line = line + " regens_hp=" + B(UnitFlags.RegensHp(ut));
+            line = line + " flying_building=" + B(UnitFlags.FlyingBuilding(ut));
+            line = line + " requires_psionic_matrix=" + B(UnitFlags.RequiresPsionicMatrix(ut));
+            line = line + " can_burrow=" + B(UnitFlags.CanBurrow(ut));
+            line = line + " has_energy=" + B(UnitFlags.HasEnergy(ut));
+            line = line + " resource_depot=" + B(UnitFlags.ResourceDepot(ut));
+            line = line + " resource=" + B(UnitFlags.Resource(ut));
+            line = line + " initially_cloaked=" + B(UnitFlags.InitiallyCloaked(ut));
+            line = line + " detector=" + B(UnitFlags.Detector(ut));
+            line = line + " requires_creep=" + B(UnitFlags.RequiresCreep(ut));
+            line = line + " mechanical=" + B(UnitFlags.Mechanical(ut));
+            line = line + " organic=" + B(UnitFlags.Organic(ut));
+            line = line + " robotic=" + B(UnitFlags.Robotic(ut));
+            line = line + " powerup=" + B(UnitFlags.Powerup(ut));
+            Console.WriteLine(line);
+        }
+
+        return 0;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}
