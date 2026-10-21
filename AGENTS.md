@@ -15,11 +15,12 @@ raw 值都必须与原 C++ 实现完全相同。
 | `src/pathfind/` | 寻路：长路径 A*、短路径 contour 搜索、`path_t` 生命周期 |
 | `src/collision/` | 单位间碰撞：碰撞规则、unit finder 查询、运动状态机各 `UM_*` 状态 |
 | `src/vision/` | 视野：视距表生成、地形高度、迷雾揭开 |
+| `src/creep/` | 菌毯：铺展、蔓延、消退，以及 `creep_life` 簿记结构 |
 | `src/beds/` | 各层对拍入口与它们用的场景表 |
 | `zan_sources.sh` | 各层的源文件清单，对拍脚本共用 |
 
 层间依赖单向：`core ← math ← regions ← pathfind ← collision`，
-`core ← math ← vision`。
+`core ← math ← vision`，`core ← creep`。
 
 ### 分层的判据
 
@@ -33,6 +34,8 @@ raw 值都必须与原 C++ 实现完全相同。
 - 依赖 `StateMachine` 和 unit finder 的放 `collision`。
 - 只依赖 tile 表和整数掩码运算的放 `vision`（例：`reveal_sight_at` 是迷雾
   揭开规则，不依赖任何单位或路径）。
+- 只依赖 tile 表和 RNG 的放 `creep`（例：`recede_creep` 是菌毯规则，
+  和视野层互不相干）。
 
 **反向依赖就是错的**：`pathfind` 不许引用 `collision`，`regions` 不许引用
 `pathfind`。发现反向依赖时，先问"这条规则到底归谁"，再搬家，不要加
@@ -89,6 +92,9 @@ bash check_collide.sh
 # 视野层对拍（7 个地形变体 × 16 个场景：视距表 + 迷雾揭开）
 bash check_vision.sh
 
+# 菌毯层对拍（7 个地形变体 × 18 个场景：铺展 + 蔓延 + 消退）
+bash check_creep.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -99,6 +105,7 @@ bash check_state.sh 3
 bash check_state2.sh 3
 bash check_collide.sh 5 3
 bash check_vision.sh 3 5
+bash check_creep.sh 3 5
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -778,6 +785,91 @@ very high）。
 的 16 个标志当成 tile flags——那会把"12 个 high + 4 个普通"这种
 边界情况算错。
 
+## 菌毯层（creep life / 铺展 / 蔓延 / 消退）
+
+移植的是 `openbw` 的 `set_tile_creep`、`count_neighboring_creep_tiles`、
+`tile_can_have_creep`、`set_creep_receding`、`spread_creep`、
+`spread_creep_completely`、`recede_creep`，以及 `creep_life_t` 簿记结构。
+
+### 57. 菌毯的簿记结构里，**链表的顺序**是行为的一部分
+
+`recede_creep()` 从某个链表里**随机**挑一个元素消退：
+
+```cpp
+std::advance(it, lcg_rand(27, 0, (int)size - 1));
+```
+
+随机数选的是**下标**，不是元素。所以同一个 RNG 状态下，链表顺序不同
+→ 消退的 tile 不同 → 后续 `set_tile_creep` 的连锁反应不同。
+
+C++ 的 `intrusive_list` 是双链表，`push_front` 插到头、`push_back` 插到尾。
+移植时链表实现必须**逐个方法对齐**（`push_front` / `push_back` /
+`remove` / `pop_front` 各自的效果），不能只保证"元素集合一样"。
+
+对照床要**逐条 dump 链表的内容和顺序**（`LIST 7 size=8: (34,33,7)
+(33,33,7) ...`），只 dump 数量是验不出来的。
+
+### 58. 侵入式链表的元素在 C++ 里是**内嵌**的，移植时要另设归属
+
+C++ 的 `intrusive_list<entry, void, &entry::list_link>` 把链表指针
+**存在元素内部**，所以从链表节点能直接反推元素（`&v -
+entry_container.data()` 就是下标）。
+
+Zan 没有内嵌成员指针，链表节点是独立对象，所以元素里要额外记一份
+"我属于哪个节点"。这里用**下标**（`OwnerIndex`）而不是对象引用——
+因为 `List<T>` 的元素没有稳定的地址，下标才是。
+
+### 59. `size_t` 的算术回绕是**承重**的，不能"顺手修正"
+
+`set_tile_creep` 和 `count_neighboring_creep_tiles` 用一个跑动的
+`size_t index` 走八个邻居：
+
+```cpp
+index -= width;  --tile_pos.x;
+index -= 1;      --tile_pos.y;
+```
+
+坐标也是 `size_t`，所以回到上一行时**下标和坐标一起回绕**。看起来像
+bug，但边界判断（`tile_pos.y != 0`、`tile_pos.x != width - 1`）正是
+靠这个回绕来保证不越界。
+
+Zan 侧用有符号 `int` 就会算出负下标 → 越界。用 `uint` 复刻
+（C++ 的 `size_t` 是 64 位，Zan 的 `uint` 也是 64 位，回绕行为一致）。
+
+**规则**：C++ 里凡是 `size_t` / `unsigned` 参与的减法，移植时用
+`uint`，不要用 `int`。
+
+### 60. 菌毯的"会铺菌毯"是**单位类型的属性**，由 id 决定
+
+`unit_type_spreads_creep(ut, is_completed)` 是一串 id 的硬编码比较
+（`Zerg_Hatchery` / `Zerg_Lair` / `Zerg_Hive` / `Zerg_Creep_Colony` /
+`Zerg_Spore_Colony` / `Zerg_Sunken_Colony`）。**只有这几个**会铺。
+
+它决定 `get_max_creep_bb()` 走哪条分支：会铺的按固定半径
+（±320, ±200），不会铺的按 `placement_size`。
+
+对照床要同时造**两种**单位类型（会铺的 / 不会铺的），否则
+`get_max_creep_bb` 的另一条分支永远走不到。注意 `Zerg_Sunken_Colony`
+**会**铺菌毯——名字听起来像"只占自己的格子"，实际不是。
+
+### 61. `spread_creep` 的分桶是 8 个，不是 9 个
+
+```cpp
+std::array<static_vector<size_t, 240>, 8> target_tiles;
+...
+target_tiles[n - 1].push_back(index);
+```
+
+`n` 是 creep 邻居数（1..8），所以下标是 0..7 —— 8 个桶。
+**遍历时是倒序**（`for (auto& v : reverse(target_tiles))`），所以
+邻居最多的桶先被试。
+
+桶的下标是 `n - 1`，而 `n` 最多 8（一个 tile 只有 8 个邻居），
+所以 `n = 9` 不可能发生，`target_tiles[8]` 越界是理论问题。
+
+随机选桶内元素：`v[(lcg_rand(26) >> 4) % v.size()]`——注意是
+`>> 4` 之后再取模，不是 `lcg_rand(26) % v.size()`。
+
 ## 已知 zanc 缺陷
 
 - **一元运算符重载**（`operator-`）在非整型上会触发 irgen bug
@@ -788,6 +880,16 @@ very high）。
 - 顶层 `const` 不支持，要放进类里。
 - 类的 `const` 字段不能作 switch 标签（必须是编译期常量），所以标志位用
   原生 `enum` 表达。
+- **`!` 只能作用于 bool**。`if (!someInt)` 是硬错误（zanc 收紧一元运算
+  符检查后暴露的旧代码）。0/1 的 int 标志要写成 `if (someInt == 0)`。
+- **Zan 的 `uint` 是 64 位**，和 C++ 的 `size_t` 一样；`int` 是有符号的。
+  移植 `size_t` 运算用 `uint`，`int` 的回绕行为对不上。
+- **`for` 的第三段不支持逗号运算符**（`for (i = 0, j = 0; ...; ++i, j += 32)`），
+  要拆成嵌套循环或在循环体末尾手动推进。
+- **类实例的 `==` 是引用比较**（同一对象为真），不是字段比较；Zan 没有
+  `Object` 基类，跨类型持有"任意对象"要用下标或自己定基类。
+- **可空返回值的成员访问会被检查**：`Front()` 返回可空时，直接
+  `front.Field` 是编译错误（运行期会崩）。要先存下来判空。
 
 ## 扩展方法
 

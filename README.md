@@ -30,12 +30,14 @@ OpenBW（星际争霸：母巢之战引擎）的 **Zan 逐位一致重写**。
 | `src/pathfind/` | 寻路：长路径 A*、短路径 contour 搜索、`path_t` 生命周期 |
 | `src/collision/` | 单位间碰撞：碰撞规则、unit finder 查询、运动状态机各 `UM_*` 状态 |
 | `src/vision/` | 视野：视距表生成、地形高度、迷雾揭开 |
+| `src/creep/` | 菌毯：铺展、蔓延、消退，以及 `creep_life` 簿记结构 |
 | `src/beds/` | 各层对拍入口与它们用的场景表 |
 | `zan_sources.sh` | 各层的源文件清单，对拍脚本共用 |
 | `tools/cppbed/` | **C++ 对照床**（不进仓库）：直接 `#include` 真实 `openbw/bwgame.h` |
 | `AGENTS.md` | 本项目的移植纪律（含每一层踩过的坑） |
 
-层间依赖：`core ← math ← regions ← pathfind ← collision`，`core ← math ← vision`。跨层调用一律走
+层间依赖：`core ← math ← regions ← pathfind ← collision`，`core ← math ← vision`，
+`core ← creep`。跨层调用一律走
 下层的公开方法，不反向引用。
 
 ## 构建与验证
@@ -52,6 +54,7 @@ bash check_state.sh     # 运动状态机
 bash check_state2.sh    # 特殊单位运动状态（炮塔/建筑/飞行/隐藏…）
 bash check_collide.sh   # 单位间碰撞
 bash check_vision.sh    # 视野层（视距表 + 迷雾揭开）
+bash check_creep.sh     # 菌毯层（铺展 + 蔓延 + 消退）
 ```
 
 单场景 / 单变体：
