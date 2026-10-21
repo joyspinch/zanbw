@@ -137,6 +137,11 @@ public class UnitType {
     // How much cargo space the unit needs.
     public int SpaceRequired;
 
+    // openbw: unit_type_t::target_acquisition_range
+    //
+    // How far the unit type can acquire targets.
+    public int TargetAcquisitionRange;
+
     // openbw: unit_type_t::ground_weapon / unit_type_t::air_weapon
     //
     // The unit's weapons against ground and air targets. Null when the

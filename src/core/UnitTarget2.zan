@@ -1,0 +1,181 @@
+using System;
+
+// openbw: the target range, priority and tech-target layer (bwgame.h)
+//
+// The queries that decide how far a unit can reach, which target it
+// prefers, and whether a spell may be cast on a target.
+//
+// The player's upgrade levels and the unit's own state are passed in
+// rather than reached for, so this layer does not depend on the game
+// state.
+
+public class UnitTarget2 {
+    // openbw: int unit_target_acquisition_range(const unit_t* u) const
+    //
+    // How far the unit can acquire targets.
+    //
+    // A cloaked unit (or one that needs a detector) that is not holding
+    // position acquires nothing, unless it is a Ghost. The upgrade
+    // bonuses are per unit type.
+    public static int UnitTargetAcquisitionRange(Unit u, bool hasAcquireUpgrade, int orderTypeId) {
+        if ((UnitStatus.IsCloaked(u) || UnitFlags.RequiresDetector(u)) && orderTypeId != (int)Orders.HoldPosition) {
+            if (UnitTypeIds.UnitIsGhost(u.UnitType)) return 0;
+        }
+        int bonus = 0;
+        int id = u.UnitType.Id;
+        if (id == (int)UnitTypes.Terran_Marine && hasAcquireUpgrade) bonus = 1;
+        if (id == (int)UnitTypes.Zerg_Hydralisk && hasAcquireUpgrade) bonus = 1;
+        if (id == (int)UnitTypes.Protoss_Dragoon && hasAcquireUpgrade) bonus = 2;
+        if (id == (int)UnitTypes.Hero_Fenix_Dragoon) bonus = 2;
+        if (id == (int)UnitTypes.Terran_Goliath && hasAcquireUpgrade) bonus = 3;
+        if (id == (int)UnitTypes.Terran_Goliath_Turret && hasAcquireUpgrade) bonus = 3;
+        if (id == (int)UnitTypes.Hero_Alan_Schezar) bonus = 3;
+        if (id == (int)UnitTypes.Hero_Alan_Schezar_Turret) bonus = 3;
+        return u.UnitType.TargetAcquisitionRange + bonus;
+    }
+
+    // openbw: the acquire upgrade of the unit type, in
+    // unit_target_acquisition_range. None when the unit type has no
+    // acquire upgrade.
+    public static int UnitAcquireUpgradeOf(UnitType ut) {
+        int id = ut.Id;
+        if (id == (int)UnitTypes.Terran_Marine) return (int)UpgradeTypes.U_238_Shells;
+        if (id == (int)UnitTypes.Zerg_Hydralisk) return (int)UpgradeTypes.Grooved_Spines;
+        if (id == (int)UnitTypes.Protoss_Dragoon) return (int)UpgradeTypes.Singularity_Charge;
+        if (id == (int)UnitTypes.Terran_Goliath) return (int)UpgradeTypes.Charon_Boosters;
+        if (id == (int)UnitTypes.Terran_Goliath_Turret) return (int)UpgradeTypes.Charon_Boosters;
+        return (int)UpgradeTypes.None;
+    }
+
+    // openbw: bool unit_can_attack(const unit_t* u) const
+    //
+    // Whether the unit has any way of attacking: a weapon, or fighters
+    // it can launch.
+    public static bool UnitCanAttack(Unit u, Unit subunit) {
+        if (UnitTarget.UnitOrSubunitGroundWeapon(u, subunit) != null) return true;
+        if (UnitTarget.UnitOrSubunitAirWeapon(u, subunit) != null) return true;
+        if (UnitGeometry.UnitInterceptorCount(u) != 0) return true;
+        if (UnitGeometry.UnitScarabCount(u) != 0) return true;
+        return false;
+    }
+
+    // openbw: int unit_target_attack_priority(const unit_t* u, const unit_t* target) const
+    //
+    // Which priority the target has for the unit. Lower is preferred.
+    //
+    // A Bunker is judged by the unit it carries. Larvae and eggs have a
+    // fixed priority. A target that cannot fight back is preferred over
+    // one that can, and an unfinished one over a finished one.
+    //
+    // The C++ asks two separate questions of the target: whether it can
+    // attack the unit in question (the outer condition) and whether it
+    // has any weapon at all (the inner check). Both are passed in.
+    //
+    // The three questions are asked of the **resolved** target: the unit
+    // a Bunker carries, if it carries one. The C++ reassigns `target`
+    // before asking them, so the caller must resolve first.
+    public static int UnitTargetAttackPriority(Unit target, bool isLoadedUnit,
+                                                bool targetCanAttackUnit,
+                                                bool targetCanAttack, bool targetCanMove) {
+        if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Zerg_Larva)) return 5;
+        if (UnitTypeIds.UnitIsEgg(target.UnitType)) return 5;
+        int r = 0;
+        if (UnitFlags.Worker(target.UnitType)) {
+            r = r + 2;
+        } else if (!targetCanAttackUnit) {
+            if (targetCanAttack) r = r + 2;
+            else if (targetCanMove) r = r + 3;
+            else r = r + 4;
+        }
+        if (isLoadedUnit || !UnitFlags.Completed(target)) r = r + 1;
+        if (r == 0 && UnitFlags.CannotAttack(target)) r = r + 1;
+        return r;
+    }
+
+    // openbw: the "loaded unit" part of unit_target_attack_priority
+    //
+    // A Bunker is judged by the unit it carries, and a unit that is
+    // still being built counts as one less. The C++ tracks the second
+    // with a flag; the caller adds one for the loaded unit.
+    public static bool UnitTargetIsLoadedUnit(Unit target, Unit firstLoadedUnit) {
+        if (!UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Terran_Bunker)) return false;
+        return firstLoadedUnit != null;
+    }
+
+    // openbw: bool unit_can_fire_from_bunker(unit_t* u)
+    //
+    // Whether the unit can shoot out of a Bunker.
+    public static bool UnitCanFireFromBunker(Unit u) {
+        if (UnitTypeIds.UnitIsMarine(u.UnitType)) return true;
+        if (UnitTypeIds.UnitIsFirebat(u.UnitType)) return true;
+        if (UnitTypeIds.UnitIsGhost(u.UnitType)) return true;
+        return false;
+    }
+
+    // openbw: bool unit_tech_target_valid(const unit_t* u, const tech_type_t* tech, const unit_t* target) const
+    //
+    // Whether the tech may be cast on the target.
+    public static bool UnitTechTargetValid(Unit u, int techId, Unit target) {
+        if (target.StasisTimer != 0) return false;
+        if (techId == (int)TechTypes.Feedback) {
+            if (UnitFlags.Building(target.UnitType)) return false;
+            if (!UnitFlags.HasEnergy(target.UnitType)) return false;
+            if (UnitFlags.Hallucination(target)) return false;
+            return true;
+        }
+        if (techId == (int)TechTypes.Mind_Control) {
+            if (target.Owner == u.Owner) return false;
+            if (UnitFlags.Building(target.UnitType)) return false;
+            if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Terran_Vulture_Spider_Mine)) return false;
+            if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+            if (UnitTypeIds.UnitIsEgg(target.UnitType)) return false;
+            if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Protoss_Interceptor)) return false;
+            if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Protoss_Scarab)) return false;
+            return true;
+        }
+        if (techId == (int)TechTypes.Hallucination) {
+            if (UnitFlags.Building(target.UnitType)) return false;
+            if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Protoss_Interceptor)) return false;
+            return true;
+        }
+        if (techId == (int)TechTypes.Defensive_Matrix
+            || techId == (int)TechTypes.Irradiate
+            || techId == (int)TechTypes.Restoration
+            || techId == (int)TechTypes.Optical_Flare) {
+            if (UnitFlags.Building(target.UnitType)) return false;
+            return true;
+        }
+        if (techId == (int)TechTypes.Consume) {
+            if (UnitFlags.Building(target.UnitType)) return false;
+            if (target.Owner != u.Owner) return false;
+            if (UnitStatus.UnitRace(target) == Race.Terran) return false;
+            if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+            return true;
+        }
+        return false;
+    }
+
+    // openbw: bool unit_target_out_of_max_range(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the target is beyond the weapon's range.
+    public static bool UnitTargetOutOfMaxRange(Unit u, Unit target, WeaponType w, int distance, int movementRange) {
+        if (!UnitTarget.UnitCanSeeTarget(u, target)) return true;
+        if (w == null) return false;
+        int maxRange = UnitTarget.WeaponMaxRange(u, w, false);
+        maxRange = maxRange + movementRange;
+        return distance > maxRange;
+    }
+
+    // openbw: bool unit_target_in_weapon_movement_range(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the target is within the weapon's range plus the movement
+    // range.
+    public static bool UnitTargetInWeaponMovementRange(Unit u, Unit target, WeaponType w, int distance, int movementRange) {
+        if (!UnitTarget.UnitCanSeeTarget(u, target)) return false;
+        if (w == null) return false;
+        if (w.MinRange != 0 && distance <= w.MinRange) return false;
+        int maxRange = UnitTarget.WeaponMaxRange(u, w, false);
+        maxRange = maxRange + movementRange;
+        return distance <= maxRange;
+    }
+}

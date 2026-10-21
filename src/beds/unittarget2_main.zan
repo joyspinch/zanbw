@@ -1,0 +1,196 @@
+using System;
+
+// The Zan side of the target range / priority / tech-target layer bed.
+//
+// The bed drives the same predicates over the same unit, tech and
+// player configurations as the C++ bed
+// (tools/cppbed/unittarget2_bed.cpp), so the two traces must match byte
+// for byte.
+
+public class UnitTarget2Bed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The weapons.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 116; ++i) {
+            WeaponType w = new WeaponType();
+            w.Id = i;
+            w.Label = i;
+            w.MinRange = (i % 3 == 0) ? (i % 8) : 0;
+            w.MaxRange = 32 + (i % 7) * 16;
+            weapons.Add(w);
+        }
+
+        // The unit types: the weapons, the acquire range, the flags.
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            if (i % 3 != 2) t.GroundWeapon = weapons[i % 116];
+            if (i % 4 != 3) t.AirWeapon = weapons[(i + 5) % 116];
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            // The flags accumulate, as they do in the C++ bed.
+            if (i % 9 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+            if (i % 8 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.HasEnergy;
+            if (i % 6 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Worker;
+            t.TargetAcquisitionRange = i % 7;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // ---- the acquisition range, the bunker, the can-attack --------------
+        for (int i = 0; i < 229; ++i) {
+            int statusFlags = 0;
+            if ((i + variant) % 7 == 0) statusFlags = statusFlags | (int)StatusFlag.Cloaked;
+            if ((i + variant) % 9 == 0) statusFlags = statusFlags | (int)StatusFlag.RequiresDetector;
+            Unit u = MakeUnit(types[i], i % 12, statusFlags);
+            // The order type: a holding unit still acquires.
+            u.OrderId = (i % 2) == 1 ? (int)Orders.HoldPosition : (int)Orders.Stop;
+
+            Unit sub = MakeUnit(types[(i + 3) % 229], i % 12, 0);
+            bool hasSub = (i % 2) == 1;
+
+            // The acquire upgrade, per unit type.
+            bool hasAcquireUpgrade = false;
+            int acquireUpgradeId = UnitTarget2.UnitAcquireUpgradeOf(types[i]);
+            if (acquireUpgradeId != (int)UpgradeTypes.None) {
+                hasAcquireUpgrade = (i % 3) == 0;
+            }
+
+            Console.WriteLine("A " + i + " "
+                + UnitTarget2.UnitTargetAcquisitionRange(u, hasAcquireUpgrade, u.OrderId) + " "
+                + B(UnitTarget2.UnitCanFireFromBunker(u)) + " "
+                + B(UnitTarget2.UnitCanAttack(u, hasSub ? sub : null)));
+        }
+
+        // ---- the attack priority --------------------------------------------
+        for (int i = 0; i < 229; ++i) {
+            // The attacker.
+            Unit u = MakeUnit(types[i], i % 12, 0);
+            Unit uSub = MakeUnit(types[(i + 3) % 229], i % 12, 0);
+            bool hasSub = (i % 2) == 1;
+
+            // The target, with a spread of statuses.
+            int targetFlags = 0;
+            if ((i + variant) % 3 == 0) targetFlags = targetFlags | (int)StatusFlag.CannotAttack;
+            if ((i + variant) % 4 == 0) targetFlags = targetFlags | (int)StatusFlag.CanMove;
+            if ((i + variant) % 5 == 0) targetFlags = targetFlags | (int)StatusFlag.Completed;
+            Unit target = MakeUnit(types[(i + 7) % 229], (i + 1) % 12, targetFlags);
+
+            // A Bunker with a unit inside, so the loaded-unit path is used.
+            Unit bunker = MakeUnit(types[(int)UnitTypes.Terran_Bunker], (i + 1) % 12, 0);
+            Unit loaded = MakeUnit(types[(i + 11) % 229], (i + 1) % 12, targetFlags);
+            Unit bunkerLoaded = null;
+            if ((i + variant) % 2 == 0) bunkerLoaded = loaded;
+
+            // The C++ reassigns the target to the unit a Bunker carries
+            // before asking the three questions, so the caller resolves
+            // the target first and asks about the resolved one.
+            Console.WriteLine("P " + i + " "
+                + Priority(u, target, null) + " "
+                + Priority(u, bunker, bunkerLoaded) + " "
+                + Priority(u, loaded, null));
+        }
+
+        // ---- the tech target validity ----------------------------------------
+        List<int> techs = new List<int>();
+        techs.Add((int)TechTypes.Feedback);
+        techs.Add((int)TechTypes.Mind_Control);
+        techs.Add((int)TechTypes.Hallucination);
+        techs.Add((int)TechTypes.Defensive_Matrix);
+        techs.Add((int)TechTypes.Irradiate);
+        techs.Add((int)TechTypes.Restoration);
+        techs.Add((int)TechTypes.Optical_Flare);
+        techs.Add((int)TechTypes.Consume);
+        techs.Add((int)TechTypes.None);
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 12, 0);
+            int targetFlags = 0;
+            if ((i + variant) % 3 == 0) targetFlags = targetFlags | (int)StatusFlag.Hallucination;
+            Unit target = MakeUnit(types[(i + 7) % 229], (i + 1) % 12, targetFlags);
+            if ((i + variant) % 8 == 0) target.StasisTimer = 5;
+
+            for (int ti = 0; ti < techs.Count; ++ti) {
+                Console.WriteLine("K " + i + " " + techs[ti] + " "
+                    + B(UnitTarget2.UnitTechTargetValid(u, techs[ti], target)));
+            }
+        }
+
+        // ---- the range checks ------------------------------------------------
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 12, 0);
+            Unit target = MakeUnit(types[(i + 7) % 229], (i + 1) % 12, 0);
+            target.VisibilityFlags = (1 << (i % 12));
+
+            WeaponType w = UnitTarget.UnitTargetWeapon(u, target, UnitGeometry.UnitAttackingUnit(u, null));
+            // The target sits at a distance that grows with the case index.
+            target.SpritePosition = new Xy(16 + (i % 9) * 16, 0);
+            int distance = UnitsDistance(u, target);
+            // The C++'s unit_target_movement_range is zero unless the
+            // unit has the movement flag, and the bed's units do not.
+            int movementRange = 0;
+
+            Console.WriteLine("R " + i + " "
+                + B(UnitTarget2.UnitTargetOutOfMaxRange(u, target, w, distance, movementRange)) + " "
+                + B(UnitTarget2.UnitTargetInWeaponMovementRange(u, target, w, distance, movementRange)) + " "
+                + (w == null ? -1 : w.MinRange));
+        }
+
+        return 0;
+    }
+
+    // The target's priority for the attacker.
+    //
+    // A Bunker is judged by the unit it carries, so the target is
+    // resolved first; the three questions are then asked of the
+    // resolved target, as the C++ does.
+    private static int Priority(Unit attacker, Unit target, Unit firstLoadedUnit) {
+        bool isLoadedUnit = false;
+        if (UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Terran_Bunker)) {
+            if (firstLoadedUnit != null) {
+                target = firstLoadedUnit;
+                isLoadedUnit = true;
+            }
+        }
+        bool targetCanAttackUnit = UnitTarget.UnitCanAttackTarget(target, attacker, null, true);
+        bool targetCanAttack = UnitTarget2.UnitCanAttack(target, null);
+        bool targetCanMove = UnitFlags.CanMove(target);
+        return UnitTarget2.UnitTargetAttackPriority(target, isLoadedUnit, targetCanAttackUnit, targetCanAttack, targetCanMove);
+    }
+
+    // openbw: int units_distance(const unit_t* a, const unit_t* b) const
+    //
+    // The distance between the two units' boxes.
+    private static int UnitsDistance(Unit a, Unit b) {
+        Xy aFrom = UnitGeometry.UnitSpriteBoundingBoxFrom(a);
+        Xy aTo = UnitGeometry.UnitSpriteBoundingBoxTo(a);
+        Xy bFrom = UnitGeometry.UnitSpriteBoundingBoxFrom(b);
+        Xy bTo = UnitGeometry.UnitSpriteBoundingBoxTo(b);
+        int dx = 0;
+        if (aTo.X < bFrom.X) dx = bFrom.X - aTo.X;
+        else if (bTo.X < aFrom.X) dx = aFrom.X - bTo.X;
+        int dy = 0;
+        if (aTo.Y < bFrom.Y) dy = bFrom.Y - aTo.Y;
+        else if (bTo.Y < aFrom.Y) dy = aFrom.Y - bTo.Y;
+        return XyMath.XyLength(new Xy(dx, dy));
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.Hp = Fp.Integer(50);
+        return u;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}
