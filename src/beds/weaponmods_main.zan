@@ -1,0 +1,149 @@
+using System;
+
+// The Zan side of the weapon modification bed.
+//
+// The bed drives the same queries over the same unit types, weapons,
+// upgrades and unit states as the C++ bed
+// (tools/cppbed/weaponmods_bed.cpp), so the two traces must match byte
+// for byte.
+
+public class WeaponModsBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            t.GroupFlags = (i % 3 == 0) ? 1 : ((i % 3 == 1) ? 2 : 4);
+            types.Add(t);
+        }
+
+        // The weapons.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 117; ++i) {
+            WeaponType w = new WeaponType();
+            w.Id = i;
+            w.Cooldown = 5 + (i % 40);
+            w.MaxRange = 2 + (i % 6);
+            w.MinRange = (i % 7 == 0) ? 1 : 0;
+            weapons.Add(w);
+        }
+
+        // The unit types with a range upgrade, plus a few others.
+        int[] unitTypes = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Protoss_Dragoon,
+            (int)UnitTypes.Hero_Fenix_Dragoon,
+            (int)UnitTypes.Terran_Goliath,
+            (int)UnitTypes.Terran_Goliath_Turret,
+            (int)UnitTypes.Hero_Alan_Schezar,
+            (int)UnitTypes.Hero_Alan_Schezar_Turret,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Protoss_Carrier,
+        };
+
+        // The weapons: the ones the rules name, plus a spread.
+        int[] weaponIds = new int[] {
+            (int)WeaponTypes.Hellfire_Missile_Pack,
+            (int)WeaponTypes.Hellfire_Missile_Pack_Alan_Schezar,
+            (int)WeaponTypes.Gauss_Rifle,
+            (int)WeaponTypes.C_10_Canister_Rifle,
+            (int)WeaponTypes.Psi_Assault,
+            (int)WeaponTypes.Needle_Spines,
+        };
+
+        // The range upgrades.
+        int[] rangeUpgrades = new int[] {
+            (int)UpgradeTypes.U_238_Shells,
+            (int)UpgradeTypes.Grooved_Spines,
+            (int)UpgradeTypes.Singularity_Charge,
+            (int)UpgradeTypes.Charon_Boosters,
+        };
+
+        Console.WriteLine("variant=" + variant);
+
+        int caseIndex = 0;
+        for (int ut = 0; ut < unitTypes.Length; ++ut) {
+            for (int wp = 0; wp < weaponIds.Length; ++wp) {
+                for (int up = 0; up <= rangeUpgrades.Length; ++up) {
+                    int owner = caseIndex % 12;
+                    int statusFlags = 0;
+                    // In a bunker now and then.
+                    if ((caseIndex + variant) % 3 == 0) statusFlags = statusFlags | (int)StatusFlag.InBunker;
+                    // The cooldown upgrade now and then.
+                    if ((caseIndex + variant) % 5 == 0) statusFlags = statusFlags | (int)StatusFlag.CooldownUpgrade;
+
+                    Unit u = MakeUnit(types[unitTypes[ut]], owner, statusFlags);
+
+                    // The player's upgrades: the range upgrades come and go.
+                    // Which range upgrades the player has: the set turns
+                    // over with the case, so the variants cover different
+                    // combinations.
+                    List<int> upgrades = new List<int>();
+                    for (int r = 0; r < rangeUpgrades.Length; ++r) {
+                        if ((caseIndex + variant + r) % 3 == 0) upgrades.Add(rangeUpgrades[r]);
+                    }
+
+                    // The unit's state.
+                    u.AcidSporeCount = (caseIndex + variant) % 4;
+                    u.StimTimer = ((caseIndex + variant) % 3 == 0) ? 1 : 0;
+                    u.EnsnareTimer = ((caseIndex + variant) % 7 == 0) ? 1 : 0;
+
+                    WeaponType w = weapons[weaponIds[wp]];
+                    int range = WeaponMods.WeaponMaxRange(u, w, upgrades);
+                    int cooldown = WeaponMods.ModifiedWeaponCooldown(u, w);
+                    Console.WriteLine("M " + caseIndex + " " + ut + " " + wp + " " + up + " "
+                        + w.MaxRange + " " + range + " " + w.Cooldown + " " + cooldown + " "
+                        + statusFlags);
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // ---- every weapon's cooldown, with every state ----------------------
+        for (int wp = 0; wp < 117; ++wp) {
+            for (int spore = 0; spore < 4; ++spore) {
+                for (int stim = 0; stim < 2; ++stim) {
+                    for (int ensnare = 0; ensnare < 2; ++ensnare) {
+                        for (int up = 0; up < 2; ++up) {
+                            int statusFlags = 0;
+                            if (up == 1) statusFlags = statusFlags | (int)StatusFlag.CooldownUpgrade;
+                            Unit u = MakeUnit(types[0], 0, statusFlags);
+                            u.AcidSporeCount = spore;
+                            u.StimTimer = stim;
+                            u.EnsnareTimer = ensnare;
+                            WeaponType w = weapons[wp];
+                            int cooldown = WeaponMods.ModifiedWeaponCooldown(u, w);
+                            Console.WriteLine("N " + wp + " " + spore + " " + stim + " " + ensnare + " "
+                                + up + " " + w.Cooldown + " " + cooldown);
+                        }
+                    }
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SecondaryOrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.Hp = Fp.Integer(50);
+        u.AcidSporeCount = 0;
+        u.StimTimer = 0;
+        u.EnsnareTimer = 0;
+        u.BuildingAddonId = -1;
+        return u;
+    }
+}

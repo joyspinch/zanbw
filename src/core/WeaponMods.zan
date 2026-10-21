@@ -1,0 +1,82 @@
+using System;
+
+// openbw: the weapon modification layer (bwgame.h)
+//
+// Two things change a weapon before it is used: the unit's upgrades
+// change its range, and the unit's state changes its cooldown. The
+// originals are weapon_max_range and get_modified_weapon_cooldown.
+//
+// The player's upgrades come in as a set, so the layer does not have to
+// reach into the game state.
+
+public class WeaponMods {
+    // openbw: the range upgrade bonus in weapon_max_range
+    //
+    // The C++ looks the upgrade up per unit type, and for the Goliath
+    // it also looks at which weapon it is.
+    public static int RangeUpgradeBonus(Unit u, WeaponType w, List<int> upgrades) {
+        int id = u.UnitType.Id;
+        if (id == (int)UnitTypes.Terran_Marine) {
+            return HasUpgrade(upgrades, (int)UpgradeTypes.U_238_Shells) ? 32 : 0;
+        }
+        if (id == (int)UnitTypes.Zerg_Hydralisk) {
+            return HasUpgrade(upgrades, (int)UpgradeTypes.Grooved_Spines) ? 32 : 0;
+        }
+        if (id == (int)UnitTypes.Protoss_Dragoon) {
+            return HasUpgrade(upgrades, (int)UpgradeTypes.Singularity_Charge) ? 64 : 0;
+        }
+        if (id == (int)UnitTypes.Hero_Fenix_Dragoon) {
+            return 64;
+        }
+        if (id == (int)UnitTypes.Terran_Goliath || id == (int)UnitTypes.Terran_Goliath_Turret) {
+            if (w.Id == (int)WeaponTypes.Hellfire_Missile_Pack && HasUpgrade(upgrades, (int)UpgradeTypes.Charon_Boosters)) return 96;
+            return 0;
+        }
+        if (id == (int)UnitTypes.Hero_Alan_Schezar || id == (int)UnitTypes.Hero_Alan_Schezar_Turret) {
+            if (w.Id == (int)WeaponTypes.Hellfire_Missile_Pack_Alan_Schezar) return 96;
+            return 0;
+        }
+        return 0;
+    }
+
+    // openbw: int weapon_max_range(const unit_t* u, const weapon_type_t* w) const
+    //
+    // The weapon's maximum range, plus the unit's bonuses.
+    public static int WeaponMaxRange(Unit u, WeaponType w, List<int> upgrades) {
+        int r = w.MaxRange;
+        // A unit in a bunker can reach 64 further.
+        if (UnitFlags.InBunker(u)) r = r + 64;
+        r = r + RangeUpgradeBonus(u, w, upgrades);
+        return r;
+    }
+
+    // openbw: int get_modified_weapon_cooldown(const unit_t* u, const weapon_type_t* weapon) const
+    //
+    // The weapon's cooldown, after the acid spores, the stim and the
+    // unit's upgrades.
+    public static int ModifiedWeaponCooldown(Unit u, WeaponType weapon) {
+        int cooldown = weapon.Cooldown;
+        // The acid spores slow the weapon down.
+        if (u.AcidSporeCount != 0) {
+            int perSpore = cooldown / 8;
+            if (perSpore < 3) perSpore = 3;
+            cooldown = cooldown + perSpore * u.AcidSporeCount;
+        }
+        int mod = 0;
+        // The stim speeds the weapon up.
+        if (u.StimTimer != 0) mod = mod + 1;
+        if (UnitFlags.CooldownUpgrade(u)) mod = mod + 1;
+        // The ensnare slows it down.
+        if (u.EnsnareTimer != 0) mod = mod - 1;
+        if (mod > 0) cooldown = cooldown / 2;
+        if (mod < 0) cooldown = cooldown + cooldown / 4;
+        if (cooldown > 250) cooldown = 250;
+        if (cooldown < 5) cooldown = 5;
+        return cooldown;
+    }
+
+    private static bool HasUpgrade(List<int> upgrades, int upgradeId) {
+        if (upgrades == null) return false;
+        return upgrades.Contains(upgradeId);
+    }
+}

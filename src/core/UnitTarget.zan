@@ -159,40 +159,17 @@ public class UnitTarget {
     // openbw: int weapon_max_range(const unit_t* u, const weapon_type_t* w) const
     //
     // The weapon's maximum range, plus the unit's bonuses.
-    public static int WeaponMaxRange(Unit u, WeaponType w, bool hasRangeUpgrade) {
-        int r = w.MaxRange;
-        if (UnitFlags.InBunker(u)) r = r + 64;
-        r = r + RangeUpgradeBonus(u, w, hasRangeUpgrade);
-        return r;
-    }
-
-    // openbw: the range upgrade bonus in weapon_max_range
     //
     // The C++ looks the range upgrade up per unit type, so the caller
     // passes whether the owner has that unit type's range upgrade.
-    private static int RangeUpgradeBonus(Unit u, WeaponType w, bool hasRangeUpgrade) {
-        int id = u.UnitType.Id;
-        if (id == (int)UnitTypes.Terran_Marine) {
-            return hasRangeUpgrade ? 32 : 0;
+    // The lookup itself lives in the weapon modification layer.
+    public static int WeaponMaxRange(Unit u, WeaponType w, bool hasRangeUpgrade) {
+        List<int> upgrades = new List<int>();
+        if (hasRangeUpgrade) {
+            int id = UnitRangeUpgradeOf(u.UnitType);
+            if (id != (int)UpgradeTypes.None) upgrades.Add(id);
         }
-        if (id == (int)UnitTypes.Zerg_Hydralisk) {
-            return hasRangeUpgrade ? 32 : 0;
-        }
-        if (id == (int)UnitTypes.Protoss_Dragoon) {
-            return hasRangeUpgrade ? 64 : 0;
-        }
-        if (id == (int)UnitTypes.Hero_Fenix_Dragoon) {
-            return 64;
-        }
-        if (id == (int)UnitTypes.Terran_Goliath || id == (int)UnitTypes.Terran_Goliath_Turret) {
-            if (w.Id == (int)WeaponTypes.Hellfire_Missile_Pack && hasRangeUpgrade) return 96;
-            return 0;
-        }
-        if (id == (int)UnitTypes.Hero_Alan_Schezar || id == (int)UnitTypes.Hero_Alan_Schezar_Turret) {
-            if (w.Id == (int)WeaponTypes.Hellfire_Missile_Pack_Alan_Schezar) return 96;
-            return 0;
-        }
-        return 0;
+        return WeaponMods.WeaponMaxRange(u, w, upgrades);
     }
 
     // openbw: the range upgrade of the unit type, in weapon_max_range's

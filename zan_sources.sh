@@ -57,6 +57,7 @@ ZAN_SOURCES_CORE=(
     src/core/UnitBoarding.zan
     src/core/BuildState.zan
     src/core/UnitBuildRules.zan
+    src/core/WeaponMods.zan
     src/core/WeaponEnums.zan
 )
 

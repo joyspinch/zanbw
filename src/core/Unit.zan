@@ -337,6 +337,11 @@ public class Unit {
     public int PlagueTimer;
     public int AcidSporeCount;
 
+    // openbw: unit_t::stim_timer
+    //
+    // How long the stim effect lasts.
+    public int StimTimer;
+
     // openbw: unit_t::parasite_flags
     //
     // The players that have a parasite on the unit.
@@ -483,6 +488,7 @@ public class Unit {
         IrradiateTimer = 0;
         PlagueTimer = 0;
         AcidSporeCount = 0;
+        StimTimer = 0;
         ParasiteFlags = 0;
         SpriteHidden = false;
         PathingFlags = 0;
