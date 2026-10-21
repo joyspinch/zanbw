@@ -1,0 +1,103 @@
+using System;
+
+// The Zan side of the unit tech / upgrade permission bed.
+//
+// The bed drives the same predicates over the same unit types, techs
+// and upgrades as the C++ bed (tools/cppbed/unittech_bed.cpp), so the
+// two traces must match byte for byte.
+
+public class UnitTechBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The unit types.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, (i % 7) + 1, new Xy(8, 8), new Xy(8, 8));
+            t.Flags = (i * 0x9 + variant * 0x37) & 0x7fffffff;
+            if ((i % 5) == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Hero;
+            t.RightClickAction = i % 6;
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The player state, varying per case.
+        for (int c = 0; c < 16; ++c) {
+            int flags = (c * 0x1041 + variant * 0x11) & 0x3fffffff;
+            bool techAvailable = (c % 3) != 0;
+            bool hasResearched = (c % 5) == 0;
+            bool isResearching = (c % 7) == 0;
+            bool isUpgrading = (c % 4) == 0;
+            int upgradeLevel = c % 3;
+            int maxUpgradeLevel = (c % 4) == 0 ? 1 : 3;
+            bool hasCompletedUnit = (c % 6) == 0;
+            bool hasUnit = (c % 8) == 0;
+
+            // The player state the predicates read.
+            PlayerTechState p = new PlayerTechState();
+            p.TechAvailable = techAvailable;
+            p.HasResearched = hasResearched;
+            p.IsResearching = isResearching;
+            p.IsUpgrading = isUpgrading;
+            p.UpgradeLevel = upgradeLevel;
+            p.MaxUpgradeLevel = maxUpgradeLevel;
+            for (int t = 0; t < 44; ++t) {
+                p.HasResearchedByTech.Add(hasResearched);
+                p.UpgradeLevelById.Add(upgradeLevel);
+            }
+            for (int u = 0; u < 228; ++u) {
+                p.HasCompletedUnit.Add(hasCompletedUnit);
+                p.HasUnit.Add(hasUnit);
+            }
+
+            for (int i = 0; i < types.Count; ++i) {
+                Unit u = new Unit();
+                u.UnitType = types[i];
+                u.StatusFlagBits = flags;
+                u.OrderState = c % 3;
+                u.Owner = 0;
+                u.Hp = Fp.Integer(50);
+                u.SpiderMineCount = c % 3;
+                u.OrderId = (int)Orders.Stop;
+                // The secondary order, which unit_is_building_addon reads.
+                u.SecondaryOrderId = (c % 2) == 1 ? (int)Orders.BuildAddon : (int)Orders.Stop;
+                // The build unit and the order target, which the addon and
+                // protoss-thing tests read.
+                u.CurrentBuildUnitId = (c % 3) == 0 ? -1 : 0;
+                u.OrderTarget.UnitId = (c % 4) == 0 ? -1 : 0;
+
+                // The completion states of the referenced units. The C++
+                // bed points the build unit and the order target at the
+                // unit itself, so the tests read the unit's own flag.
+                bool currentBuildCompleted = UnitStatus.IsCompleted(u);
+                bool orderTargetCompleted = UnitStatus.IsCompleted(u);
+
+                // The techs, for the research and use tests.
+                for (int t = 0; t < 44; ++t) {
+                    string line = "R " + c + " " + i + " " + t;
+                    line = line + " " + B(UnitTech.UnitCanResearch(u, t, currentBuildCompleted, orderTargetCompleted, p));
+                    line = line + " " + B(UnitTech.UnitCanUseTech(u, t, currentBuildCompleted, orderTargetCompleted, p));
+                    Console.WriteLine(line);
+                }
+
+                // The upgrades, for the upgrade test.
+                for (int up = 0; up < 61; ++up) {
+                    string line = "U " + c + " " + i + " " + up;
+                    line = line + " " + B(UnitTech.UnitCanUpgrade(u, up, currentBuildCompleted, orderTargetCompleted, p));
+                    Console.WriteLine(line);
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}

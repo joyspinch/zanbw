@@ -274,4 +274,12 @@ public class UnitStatus {
     public static bool UnitRequiresDetector(Unit u) {
         return u.HasStatusFlag(StatusFlag.RequiresDetector);
     }
+
+    // openbw: size_t unit_spider_mine_count(const unit_t* u) const
+    //
+    // How many spider mines the unit has left.
+    public static int UnitSpiderMineCount(Unit u) {
+        if (!UnitTypeIds.UnitIsVulture(u.UnitType)) return 0;
+        return u.SpiderMineCount;
+    }
 }

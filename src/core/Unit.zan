@@ -267,6 +267,11 @@ public class Unit {
     // Which owners have already detected this cloaked unit.
     public int DetectedFlags;
 
+    // openbw: unit_t::vulture.spider_mine_count
+    //
+    // How many spider mines the vulture has laid and not yet used.
+    public int SpiderMineCount;
+
     public int UserActionFlags;
     public MovementStates MovementState;
     public int StatusFlagBits;
@@ -350,6 +355,7 @@ public class Unit {
         SecondaryOrderId = (int)Orders.None;
         NydusExit = false;
         DetectedFlags = 0;
+        SpiderMineCount = 0;
         UserActionFlags = 0;
         MovementState = MovementStates.UM_Init;
         StatusFlagBits = 0;

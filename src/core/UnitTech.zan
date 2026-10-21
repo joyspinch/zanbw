@@ -1,0 +1,1205 @@
+using System;
+
+// openbw: the unit tech / upgrade permission layer (bwgame.h)
+//
+// Which building may research a tech, which unit may use a tech, and
+// which building may start an upgrade.
+//
+// The C++'s three functions are each a long switch on the tech or
+// upgrade id, with the same shape:
+//
+//   1. a few guards (completed, not a hallucination, not disabled)
+//   2. a player-state guard (tech available, not already researched,
+//      upgrade level below the maximum)
+//   3. a switch on the id, where each case names the building the
+//      tech or upgrade belongs to and rejects a few unit states
+//
+// The player state the C++ reads through the game state is passed in
+// explicitly as PlayerTechState, so this layer does not reach for the
+// game state. The state is keyed by tech / upgrade / unit type id, so
+// one table describes a whole player.
+public class PlayerTechState {
+    // openbw: player_tech_available(owner, tech->id)
+    public bool TechAvailable;
+
+    // openbw: player_has_researched(owner, tech->id)
+    public bool HasResearched;
+
+    // openbw: player_is_researching(owner, tech->id)
+    public bool IsResearching;
+
+    // openbw: player_is_upgrading(owner, upgrade->id)
+    public bool IsUpgrading;
+
+    // openbw: player_upgrade_level(owner, upgrade->id)
+    public int UpgradeLevel;
+
+    // openbw: player_max_upgrade_level(owner, upgrade->id)
+    public int MaxUpgradeLevel;
+
+    // openbw: player_has_completed_unit(owner, unit_type_id)
+    public List<bool> HasCompletedUnit;
+
+    // openbw: player_has_unit(owner, unit_type_id)
+    public List<bool> HasUnit;
+
+    // openbw: player_has_researched(owner, tech_id)
+    public List<bool> HasResearchedByTech;
+
+    // openbw: player_upgrade_level(owner, upgrade_id)
+    public List<int> UpgradeLevelById;
+
+    public PlayerTechState() {
+        HasCompletedUnit = new List<bool>();
+        HasUnit = new List<bool>();
+        HasResearchedByTech = new List<bool>();
+        UpgradeLevelById = new List<int>();
+    }
+}
+
+// The three predicates.
+public class UnitTech {
+    // openbw: bool unit_can_research(const unit_t* u, const tech_type_t* tech) const
+
+    public static bool UnitCanResearch(Unit u, int techId, bool currentBuildCompleted, bool orderTargetCompleted, PlayerTechState p) {
+
+        if (!UnitStatus.IsCompleted(u)) return false;
+
+        if (UnitStatus.IsHallucination(u)) return false;
+
+        if (UnitStatus.UnitIsDisabled(u)) return false;
+
+        int owner = u.Owner;
+
+        if (!p.TechAvailable) return false;
+
+        if (p.HasResearched) return false;
+
+        if (p.IsResearching) return false;
+
+        switch (techId) {
+
+        case TechTypes.Stim_Packs:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Academy)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Lockdown:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Covert_Ops)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Spider_Mines:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Machine_Shop)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Tank_Siege_Mode:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Machine_Shop)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.EMP_Shockwave:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Facility)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Irradiate:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Facility)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Yamato_Gun:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Physics_Lab)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Cloaking_Field:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Control_Tower)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Personnel_Cloaking:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Covert_Ops)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Restoration:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Academy)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Optical_Flare:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Academy)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            return true;
+
+        case TechTypes.Burrowing:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hatchery) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lair) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hive)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Spawn_Broodlings:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Queens_Nest)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Parasite:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Queens_Nest)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Plague:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Defiler_Mound)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Consume:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Defiler_Mound)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Ensnare:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Queens_Nest)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Lurker_Aspect:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hydralisk_Den)) return false;
+
+            if (!p.HasCompletedUnit[UnitTypes.Zerg_Lair] && !p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Psionic_Storm:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Hallucination:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Recall:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Arbiter_Tribunal)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Stasis_Field:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Arbiter_Tribunal)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Disruption_Web:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Fleet_Beacon)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Mind_Control:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Feedback:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case TechTypes.Maelstrom:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        default:
+
+            return false;
+
+        }
+
+    }
+
+    // openbw: bool unit_can_use_tech(const unit_t* u, const tech_type_t* tech) const
+
+    public static bool UnitCanUseTech(Unit u, int techId, bool currentBuildCompleted, bool orderTargetCompleted, PlayerTechState p) {
+
+        if (!UnitStatus.IsCompleted(u)) return false;
+
+        if (UnitStatus.IsHallucination(u)) return false;
+
+        if (UnitStatus.UnitIsDisabled(u)) return false;
+
+        int owner = u.Owner;
+
+        if (!p.TechAvailable) return false;
+
+        switch (techId) {
+
+        case TechTypes.Stim_Packs:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Stim_Packs]) return false;
+
+            if (!UnitTypeIds.UnitIsMarine(u.UnitType) && !UnitTypeIds.UnitIsFirebat(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Lockdown:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Lockdown]) return false;
+
+            if (!UnitTypeIds.UnitIsGhost(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Spider_Mines:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Spider_Mines]) return false;
+
+            if (UnitStatus.UnitSpiderMineCount(u) == 0) return false;
+
+            if (!UnitTypeIds.UnitIsVulture(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Scanner_Sweep:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Comsat_Station)) return false;
+
+            return true;
+
+        case TechTypes.Tank_Siege_Mode:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Tank_Siege_Mode]) return false;
+
+            if (!UnitTypeIds.UnitIsTank(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.EMP_Shockwave:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.EMP_Shockwave]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Vessel) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Magellan)) return false;
+
+            return true;
+
+        case TechTypes.Defensive_Matrix:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Vessel) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Magellan)) return false;
+
+            return true;
+
+        case TechTypes.Irradiate:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Irradiate]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Vessel) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Magellan)) return false;
+
+            return true;
+
+        case TechTypes.Yamato_Gun:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Yamato_Gun]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Battlecruiser) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Hyperion) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Norad_II) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Gerard_DuGalle)) return false;
+
+            return true;
+
+        case TechTypes.Cloaking_Field:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Cloaking_Field]) return false;
+
+            if (!UnitTypeIds.UnitIsWraith(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Personnel_Cloaking:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Personnel_Cloaking]) return false;
+
+            if (!UnitTypeIds.UnitIsGhost(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Restoration:
+
+            if (!p.HasResearchedByTech[TechTypes.Restoration]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+
+            return true;
+
+        case TechTypes.Healing:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+
+            return true;
+
+        case TechTypes.Burrowing:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lurker) && !p.HasResearchedByTech[TechTypes.Burrowing]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lurker) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Drone) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Infested_Terran) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Defiler) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Zergling) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hydralisk) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Unclean_One) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Devouring_One) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Hunter_Killer)) return false;
+
+            return true;
+
+        case TechTypes.Infestation:
+
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Spawn_Broodlings:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Spawn_Broodlings]) return false;
+
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Parasite:
+
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Dark_Swarm:
+
+            if (!UnitTypeIds.UnitIsDefiler(u.UnitType)) return false;
+
+            if (UnitStatus.IsBurrowed(u)) return false;
+
+            return true;
+
+        case TechTypes.Plague:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Plague]) return false;
+
+            if (!UnitTypeIds.UnitIsDefiler(u.UnitType)) return false;
+
+            if (UnitStatus.IsBurrowed(u)) return false;
+
+            return true;
+
+        case TechTypes.Consume:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Consume]) return false;
+
+            if (!UnitTypeIds.UnitIsDefiler(u.UnitType) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Infested_Duran) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Infested_Kerrigan)) return false;
+
+            if (UnitStatus.IsBurrowed(u)) return false;
+
+            return true;
+
+        case TechTypes.Ensnare:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Ensnare]) return false;
+
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Infested_Kerrigan)) return false;
+
+            if (UnitStatus.IsBurrowed(u)) return false;
+
+            return true;
+
+        case TechTypes.Psionic_Storm:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Psionic_Storm]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_High_Templar) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Tassadar) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Infested_Kerrigan)) return false;
+
+            return true;
+
+        case TechTypes.Hallucination:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Hallucination]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_High_Templar) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Tassadar)) return false;
+
+            return true;
+
+        case TechTypes.Archon_Warp:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_High_Templar)) return false;
+
+            return true;
+
+        case TechTypes.Recall:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Recall]) return false;
+
+            if (!UnitTypeIds.UnitIsArbiter(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Stasis_Field:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Stasis_Field]) return false;
+
+            if (!UnitTypeIds.UnitIsArbiter(u.UnitType)) return false;
+
+            return true;
+
+        case TechTypes.Disruption_Web:
+
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero) && !p.HasResearchedByTech[TechTypes.Disruption_Web]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Corsair) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Hero_Raszagal)) return false;
+
+            return true;
+
+        case TechTypes.Dark_Archon_Meld:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Dark_Templar)) return false;
+
+            return true;
+
+        case TechTypes.Mind_Control:
+
+            if (!p.HasResearchedByTech[TechTypes.Mind_Control]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Dark_Archon)) return false;
+
+            return true;
+
+        case TechTypes.Feedback:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Dark_Archon)) return false;
+
+            return true;
+
+        case TechTypes.Optical_Flare:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+
+            if (!p.HasResearchedByTech[TechTypes.Optical_Flare]) return false;
+
+            return true;
+
+        case TechTypes.Maelstrom:
+
+            if (!p.HasResearchedByTech[TechTypes.Maelstrom]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Dark_Archon)) return false;
+
+            return true;
+
+        case TechTypes.Lurker_Aspect:
+
+            if (!p.HasResearchedByTech[TechTypes.Lurker_Aspect]) return false;
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hydralisk)) return false;
+
+            return true;
+
+        default:
+
+            return false;
+
+        }
+
+    }
+
+    // openbw: bool unit_can_upgrade(const unit_t* u, const upgrade_type_t* upgrade) const
+
+    public static bool UnitCanUpgrade(Unit u, int upgradeId, bool currentBuildCompleted, bool orderTargetCompleted, PlayerTechState p) {
+
+        if (!UnitStatus.IsCompleted(u)) return false;
+
+        if (UnitStatus.IsHallucination(u)) return false;
+
+        if (UnitStatus.UnitIsDisabled(u)) return false;
+
+        int owner = u.Owner;
+
+        if (p.UpgradeLevel >= p.MaxUpgradeLevel) return false;
+
+        if (p.IsUpgrading) return false;
+
+        switch (upgradeId) {
+
+        case UpgradeTypes.Terran_Infantry_Armor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Engineering_Bay)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Terran_Infantry_Armor] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Terran_Science_Facility]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Terran_Vehicle_Plating:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Armory)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Terran_Vehicle_Plating] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Terran_Science_Facility]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Terran_Ship_Plating:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Armory)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Terran_Ship_Plating] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Terran_Science_Facility]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Zerg_Carapace:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Evolution_Chamber)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            switch (p.UpgradeLevelById[UpgradeTypes.Zerg_Carapace]) {
+
+                case 1:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Lair] && !p.HasUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+                case 2:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Zerg_Flyer_Carapace:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spire) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Greater_Spire)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            switch (p.UpgradeLevelById[UpgradeTypes.Zerg_Flyer_Carapace]) {
+
+                case 1:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Lair] && !p.HasUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+                case 2:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Protoss_Ground_Armor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Forge)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Protoss_Ground_Armor] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Protoss_Templar_Archives]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Protoss_Air_Armor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Cybernetics_Core)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Protoss_Air_Armor] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Protoss_Fleet_Beacon]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Terran_Infantry_Weapons:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Engineering_Bay)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Terran_Infantry_Weapons] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Terran_Science_Facility]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Terran_Vehicle_Weapons:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Armory)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Terran_Vehicle_Weapons] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Terran_Science_Facility]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Terran_Ship_Weapons:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Armory)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Terran_Ship_Weapons] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Terran_Science_Facility]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Zerg_Melee_Attacks:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Evolution_Chamber)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            switch (p.UpgradeLevelById[UpgradeTypes.Zerg_Melee_Attacks]) {
+
+                case 1:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Lair] && !p.HasUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+                case 2:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Zerg_Missile_Attacks:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Evolution_Chamber)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            switch (p.UpgradeLevelById[UpgradeTypes.Zerg_Missile_Attacks]) {
+
+                case 1:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Lair] && !p.HasUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+                case 2:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Zerg_Flyer_Attacks:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spire) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Greater_Spire)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            switch (p.UpgradeLevelById[UpgradeTypes.Zerg_Flyer_Attacks]) {
+
+                case 1:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Lair] && !p.HasUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+                case 2:
+
+                    if (!p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+                    break;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Protoss_Ground_Weapons:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Forge)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Protoss_Ground_Weapons] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Protoss_Templar_Archives]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Protoss_Air_Weapons:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Cybernetics_Core)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Protoss_Air_Weapons] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Protoss_Fleet_Beacon]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.Protoss_Plasma_Shields:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Forge)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (p.UpgradeLevelById[UpgradeTypes.Protoss_Plasma_Shields] != 0) {
+
+                if (!p.HasCompletedUnit[UnitTypes.Protoss_Cybernetics_Core]) return false;
+
+            }
+
+            return true;
+
+        case UpgradeTypes.U_238_Shells:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Academy)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Ion_Thrusters:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Machine_Shop)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Titan_Reactor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Facility)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Ocular_Implants:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Covert_Ops)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Moebius_Reactor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Covert_Ops)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Apollo_Reactor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Control_Tower)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Colossus_Reactor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Physics_Lab)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Ventral_Sacs:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lair) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hive)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Antennae:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lair) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hive)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Pneumatized_Carapace:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lair) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hive)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Metabolic_Boost:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spawning_Pool)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Adrenal_Glands:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spawning_Pool)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!p.HasCompletedUnit[UnitTypes.Zerg_Hive]) return false;
+
+            return true;
+
+        case UpgradeTypes.Muscular_Augments:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hydralisk_Den)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Grooved_Spines:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hydralisk_Den)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Gamete_Meiosis:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Queens_Nest)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Metasynaptic_Node:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Defiler_Mound)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Singularity_Charge:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Cybernetics_Core)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Leg_Enhancements:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Citadel_of_Adun)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Scarab_Damage:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Robotics_Support_Bay)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Reaver_Capacity:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Robotics_Support_Bay)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Gravitic_Drive:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Robotics_Support_Bay)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Sensor_Array:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Observatory)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Gravitic_Boosters:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Observatory)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Khaydarin_Amulet:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Apial_Sensors:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Fleet_Beacon)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Gravitic_Thrusters:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Fleet_Beacon)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Carrier_Capacity:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Fleet_Beacon)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Khaydarin_Core:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Arbiter_Tribunal)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Argus_Jewel:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Fleet_Beacon)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Caduceus_Reactor:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Academy)) return false;
+
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Argus_Talisman:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Templar_Archives)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Chitinous_Plating:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Ultralisk_Cavern)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Anabolic_Synthesis:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Ultralisk_Cavern)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            return true;
+
+        case UpgradeTypes.Charon_Boosters:
+
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Machine_Shop)) return false;
+
+            if (UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted) || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+
+            if (!p.HasCompletedUnit[UnitTypes.Terran_Armory]) return false;
+
+            return true;
+
+        default:
+
+            return false;
+
+        }
+
+    }
+}
