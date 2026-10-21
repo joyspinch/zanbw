@@ -1178,6 +1178,91 @@ C++ 侧对应 `(uint_fast32_t)1 << 31`，两边都要**显式无符号**，否�
 32 个 case 里都会置上 16 次。改完要回头统计每个标志的 `=1` 次数，
 确认没有恒为 0 的。
 
+## 触发器层（trigger_*）
+
+### 82. `error()` 抛的是 `bwgame::exception`，C++ 侧会 `terminate` 掉整个进程
+
+openbw 的 `error()` 走 `throw bwgame::exception(...)`。C++ 对拍床如果让它
+逃出去，进程直接 abort，trace 断在半路没法跟 Zan 侧逐字节比。
+
+**做法**：C++ 床把调用包在 `try { ... } catch (const exception&)` 里，catch
+分支打印**和 Zan 侧一样的**那��行再 `return 0`。Zan 侧也 catch 同一条路径
+并打印同样的行。两边都靠"最后一次调用的参数"来还原那一行——C++ 床用
+`static` 全局记住，Zan 床用循环变量。
+
+坑出处：触发器层的 `trigger_unit_pred` 对 powerup 单位类型会
+`error("trigger_unit_pred: powerup")`，这是原版的"不该发生"分支，但**必须
+复刻**：不接住的话 C++ 和 Zan 会在不同位置断掉，对拍无从谈起。
+
+### 83. `player_slot_active` 之外，**选择器 12~17 和 26** 各有各的语义
+
+`trigger_players_pred` 的选择器不是连续的一小段：12=无玩家、13=当前玩家、
+14=敌人、15=盟友、16=中立、17=所有玩家、18~21=1~4 号_force 的玩家（只对
+`n < 8` 有效）、26=非结盟胜利。漏掉任何一个，特定配置下的结果就不一致。
+
+## 单位几何/载货/能量层
+
+### 84. openbw 的 `10_fp8` 是**原始值**字面量，不是整数 10
+
+`operator ""_fp8` 的实现是 `fp8::from_raw((fp8::raw_type)value)`——它把
+字面量的数字直接当**原始位**用。所以 `10_fp8` 是 10/256 ≈ 0.039，不是 10。
+
+`unit_cloak_energy_cost` 返回的正是 `10_fp8` / `13_fp8`，于是原版这个
+函数的实际返回值是 0.039 和 0.05——**这是 upstream 的一个真 bug**，但迁移
+必须照抄，不能"按字面意思修正"成 10 和 13。
+
+**做法**：Zan 侧用 `Fp.FromRaw(10)` / `Fp.FromRaw(13)`，注释里写清"这是
+照抄原版的原始值字面量，不是整数"。对拍床要打印 **raw 值**（`raw_value`）
+而不是 `integer_part()`，否则 10/256 的整数部分是 0，两边都显示 0，测不出
+差异。
+
+坑出处：几何层对拍时 C++ 侧隐身能耗全是 0、Zan 侧是 10，差了一整个量级；
+一路查到 `util.h` 的字面量实现才发现是 raw 值。
+
+### 85. 升级表的查询是**按单位类型**分派的，不是一个通用的"有没有升级"
+
+`unit_max_energy` 先按 `u->unit_type->id` switch 出该单位类型对应的能量
+升级（Ghost→Moebius、Wraith→Apollo…），**再**去查 owner 的升级表。同一
+层里 `weapon_max_range` 也一样：Marine→U_238、Dragoon→Singularity、Goliath
+→Charon。
+
+**做法**：Zan 侧拆成两个东西——`UnitMaxEnergyUpgradeOf(ut)` 返回该类型的
+升级 id（和 C++ 的 switch 一一对应），上层再拿这个 id 去问"owner 有没有
+这个升级"。**不要**把"有没有升级"做成一个笼统的 bool 传进去，那样对拍时
+会在"单位类型和升级对不上"的行上分叉（表现为射程差 32 / 64）。
+
+## 目标可见/攻击/武器层
+
+### 86. 可见性有两套掩码，**方向相反**
+
+- `unit_target_is_visible` 看的是 **sprite** 的 `visibility_flags`，
+  **置位表示看得见**。
+- `unit_position_is_visible` / `_explored` 看的是 **地图 tile** 的
+  `visible` / `explored`，**置位表示看不见**（雾）。
+
+两处都写成"位为 1 就 true"或都写成"位为 1 就 false"都会全层错，且错得很
+安静——只有对拍能发现。
+
+### 87. 武器类型是**另一张表**，得单独建模
+
+`unit_type_t::ground_weapon` / `air_weapon` 是 `type_id<const
+weapon_type_t>`，指向 `game_st.weapon_types` 表里的一个武器；武器自己有
+`min_range` / `max_range` / `id`（`WeaponTypes` 枚举，116 个成员）。
+
+`unit_ground_weapon` 有一个特例：**Lurker 没埋地时没有地面武器**
+（`unit_is(u, Zerg_Lurker) && !u_burrowed(u)` → nullptr）。这个特例是
+`unit_can_attack_target` 判"打不了地"的关键路径，不能省。
+
+### 88. `unit_can_attack_target` 里有**三个提前返回**和一个 map 依赖
+
+顺序是：`target` 为空 → 己方被禁用 → 目标无敌 → 目标隐藏 → 目标未被侦测
+→ **Carrier 直接 true** → Reaver（目标不能是飞行单位，且要 `is_reachable`）
+→ Queen（`unit_can_be_infested`）→ 否则看有没有对应武器。
+
+`is_reachable` 是**地图事实**（两个位置所在 region 的 `group_index` 是否相同），
+不是单位属性。对拍床要**建一张真的 region 表**（单 region 就够），否则走到
+Reaver 分支就抛异常；Zan 侧则把"是否可达"当参数传进去。
+
 ## 已知 zanc 缺陷
 
 - **一元运算符重载**（`operator-`）在非整型上会触发 irgen bug
@@ -1198,6 +1283,14 @@ C++ 侧对应 `(uint_fast32_t)1 << 31`，两边都要**显式无符号**，否�
   `Object` 基类，跨类型持有"任意对象"要用下标或自己定基类。
 - **可空返回值的成员访问会被检查**：`Front()` 返回可空时，直接
   `front.Field` 是编译错误（运行期会崩）。要先存下来判空。
+- **多操作数字符串拼接里内联一个会抛异常的调用 → 段错误**（已修，
+  见 zan-lang 的 `fd4b1929a`）。根因：`emit_str_concat_n` 把 EH 槽位种类
+  按**源操作数的类型**判定，但压栈的值 `s` 永远是托管字符串的数据指针
+  （整数/字符操作数已由 `emit_to_cstr_of` 转成 itoa 缓冲）。整数操作数落到
+  `ZAN_EH_SLOT_OBJ`，异常展开时 `zan_rt_release_dyn` 会把字符串头字当成
+  site 下标去查析构表——读坏内存。修法：固定用 `ZAN_EH_SLOT_STR`。
+  症状是"拼接表达式里放一个抛异常的函数就崩"，看起来像 ARC 问题，其实是
+  释放路径选错了。
 
 ## 扩展方法
 
