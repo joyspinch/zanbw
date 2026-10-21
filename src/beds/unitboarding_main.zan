@@ -1,0 +1,155 @@
+using System;
+
+// The Zan side of the boarding layer bed.
+//
+// The bed drives the same predicates over the same carrier, target and
+// player configurations as the C++ bed
+// (tools/cppbed/unitboarding_bed.cpp), so the two traces must match
+// byte for byte.
+
+public class UnitBoardingBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types: the space, the race, the shield, the flags.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            if (i % 9 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+            if (i % 8 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Flyer;
+            if (i % 6 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Worker;
+            // The race, by the group flags.
+            t.GroupFlags = (i % 3 == 0) ? 1 : ((i % 3 == 1) ? 2 : 4);
+            t.SpaceProvided = (i % 4) * 2;
+            t.SpaceRequired = i % 3;
+            t.HasShield = (i % 5) == 0;
+            t.ShieldPoints = 30;
+            types.Add(t);
+        }
+
+        // The recharging unit's type: a Protoss unit with a shield.
+        UnitType shieldType = new UnitType(5, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+        shieldType.Hitpoints = Fp.Integer(50);
+        shieldType.GroupFlags = 4;
+        shieldType.HasShield = true;
+        shieldType.ShieldPoints = 30;
+
+        // The command centre's type, for the infested test.
+        UnitType ccType = new UnitType((int)UnitTypes.Terran_Command_Center, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+        ccType.Hitpoints = Fp.Integer(100);
+        ccType.GroupFlags = 2;
+
+        Console.WriteLine("variant=" + variant);
+
+        // ---- the cargo rules -------------------------------------------------
+        for (int i = 0; i < 229; ++i) {
+            int statusFlags = 0;
+            if ((i + variant) % 3 == 0) statusFlags = statusFlags | (int)StatusFlag.Completed;
+            Unit carrier = MakeUnit(types[i], i % 12, statusFlags);
+            if ((i + variant) % 4 == 0) carrier.StatusFlagBits = carrier.StatusFlagBits | (int)StatusFlag.Disabled;
+            if ((i + variant) % 5 == 0) carrier.StatusFlagBits = carrier.StatusFlagBits | (int)StatusFlag.Burrowed;
+
+            // The target.
+            int targetFlags = 0;
+            if ((i + variant) % 6 == 0) targetFlags = targetFlags | (int)StatusFlag.Completed;
+            // The owner: the same as the carrier's every other case.
+            int targetOwner = ((i + variant) % 2 == 0) ? (i % 12) : ((i + 1) % 12);
+            Unit target = MakeUnit(types[(i + 5) % 229], targetOwner, targetFlags);
+            bool targetBurrowed = false;
+            if ((i + variant) % 7 == 0) {
+                targetBurrowed = true;
+                target.StatusFlagBits = target.StatusFlagBits | (int)StatusFlag.Burrowed;
+            }
+
+            // The units the carrier already carries.
+            List<Unit> loaded = new List<Unit>();
+            if (carrier.UnitType.SpaceProvided > 0) loaded.Add(MakeUnit(types[(i + 9) % 229], i % 12, 0));
+            if (carrier.UnitType.SpaceProvided > 1) loaded.Add(MakeUnit(types[(i + 13) % 229], i % 12, 0));
+
+            bool completed = (statusFlags & (int)StatusFlag.Completed) != 0;
+            bool disabled = (carrier.StatusFlagBits & (int)StatusFlag.Disabled) != 0;
+
+            int spaceLeft = UnitBoarding.UnitSpaceLeft(carrier, loaded);
+            int spaceOccupied = UnitBoarding.UnitSpaceOccupied(loaded);
+
+            Console.WriteLine("C " + i + " "
+                + (UnitBoarding.SpaceLeftFits(carrier, loaded, target.UnitType.SpaceRequired) ? 1 : 0) + " "
+                + B(UnitBoarding.UnitCanLoadTarget(carrier, target, completed, disabled, targetBurrowed, loaded)) + " "
+                + spaceLeft + " "
+                + spaceOccupied + " "
+                + target.UnitType.SpaceRequired);
+        }
+
+        // ---- the nydus and the shield battery ---------------------------------
+        for (int i = 0; i < 229; ++i) {
+            int statusFlags = 0;
+            if ((i + variant) % 3 == 0) statusFlags = statusFlags | (int)StatusFlag.Completed;
+            Unit u = MakeUnit(types[i], i % 12, statusFlags);
+            if ((i + variant) % 4 == 0) u.StatusFlagBits = u.StatusFlagBits | (int)StatusFlag.Disabled;
+            if ((i + variant) % 5 == 0) u.StatusFlagBits = u.StatusFlagBits | (int)StatusFlag.Burrowed;
+
+            // The nydus and its exit.
+            Unit nydus = MakeUnit(types[(int)UnitTypes.Zerg_Nydus_Canal], i % 12, statusFlags);
+            Unit nydusExit = MakeUnit(types[(int)UnitTypes.Zerg_Nydus_Canal], i % 12, 0);
+            bool exitCompleted = false;
+            if ((i + variant) % 6 == 0) {
+                exitCompleted = true;
+                nydusExit.StatusFlagBits = nydusExit.StatusFlagBits | (int)StatusFlag.Completed;
+            }
+
+            // The shield battery.
+            Unit battery = MakeUnit(types[(int)UnitTypes.Protoss_Shield_Battery], i % 12, statusFlags);
+            // The energy: the battery is charged unless the case says
+            // otherwise.
+            battery.Energy = Fp.Integer((i % 7 == 0) ? 0 : 20);
+            if ((i + variant) % 7 == 0) battery.StatusFlagBits = battery.StatusFlagBits | (int)StatusFlag.Disabled;
+
+            // The recharging unit: a Protoss unit with a shield, so the
+            // battery has a chance of accepting it.
+            Unit recharger = MakeUnit(shieldType, i % 12, statusFlags);
+            recharger.ShieldPoints = Fp.Integer((i % 2 == 0) ? 10 : 30);
+            // It can move unless the case says otherwise.
+            if ((i + variant) % 8 != 0) recharger.StatusFlagBits = recharger.StatusFlagBits | (int)StatusFlag.CanMove;
+
+            // The command centre, for the infested test.
+            Unit cc = MakeUnit(ccType, i % 12, statusFlags);
+            cc.Hp = Fp.Integer((i % 3 == 0) ? 30 : 100);
+
+            bool completed = (statusFlags & (int)StatusFlag.Completed) != 0;
+            bool canMove = UnitFlags.CanMove(recharger);
+            // The unit's hit points, as a percentage of the maximum.
+            int maxHp = UnitDamage.MaxVisibleHp(cc);
+            int hpPercent = cc.Hp.Ceil().IntegerPart() * 100 / maxHp;
+
+            Console.WriteLine("B " + i + " "
+                + B(UnitBoarding.UnitCanEnterNydus(u, nydus, completed, true, exitCompleted)) + " "
+                + B(UnitBoarding.UnitCanUseShieldBattery(recharger, battery, completed, completed, canMove, battery.Energy)) + " "
+                + B(UnitBoarding.UnitCanBeInfested(cc, completed, hpPercent)) + " "
+                + hpPercent);
+        }
+
+        return 0;
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.Hp = Fp.Integer(50);
+        u.ShieldPoints = Fp.Integer(t.HasShield ? 30 : 0);
+        u.Energy = Fp.Zero();
+        return u;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}

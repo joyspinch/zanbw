@@ -1,0 +1,125 @@
+using System;
+
+// openbw: the boarding layer (bwgame.h)
+//
+// The queries that decide whether one unit may carry another: the
+// cargo rules, the nydus entrance, the shield battery and the
+// infested command centre.
+//
+// The target's state and the loaded units are passed in rather than
+// reached for, so this layer does not depend on the game state.
+
+public class UnitBoarding {
+    // openbw: size_t unit_space_left(const unit_t* u) const
+    //
+    // The cargo space the unit still has.
+    //
+    // The space the unit type provides, less what the units it
+    // carries need.
+    //
+    // The C++'s size_t is unsigned, so the result goes negative when
+    // the units it carries need more than it provides: it wraps
+    // around to a huge number, and the "is there room" check that
+    // follows passes. The unsigned comparison is kept here so the
+    // same cases come out the same.
+    public static int UnitSpaceLeft(Unit u, List<Unit> loaded) {
+        int r = u.UnitType.SpaceProvided;
+        for (int i = 0; i < loaded.Count; ++i) {
+            r = r - loaded[i].UnitType.SpaceRequired;
+        }
+        return r;
+    }
+
+    // openbw: the "is there room" check of unit_can_load_target
+    //
+    // The C++ compares two size_t values, so a negative space left
+    // wraps around to a huge number and the check passes.
+    public static bool SpaceLeftFits(Unit u, List<Unit> loaded, int spaceRequired) {
+        int spaceLeft = UnitSpaceLeft(u, loaded);
+        if (spaceLeft < 0) return true;
+        return spaceLeft >= spaceRequired;
+    }
+
+    // openbw: size_t unit_space_occupied(const unit_t* u) const
+    //
+    // The cargo space the units it carries need.
+    public static int UnitSpaceOccupied(List<Unit> loaded) {
+        int r = 0;
+        for (int i = 0; i < loaded.Count; ++i) {
+            r = r + loaded[i].UnitType.SpaceRequired;
+        }
+        return r;
+    }
+
+    // openbw: bool unit_can_load_target(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the unit may carry the target.
+    //
+    // A building only carries Terran units that take one space each.
+    public static bool UnitCanLoadTarget(Unit u, Unit target, bool completed, bool disabled,
+                                         bool targetBurrowed, List<Unit> loaded) {
+        if (!completed) return false;
+        if (disabled) return false;
+        if (targetBurrowed) return false;
+        if (u.Owner != target.Owner) return false;
+        if (UnitFlags.Building(u.UnitType)) {
+            if (UnitStatus.UnitTypeRace(target.UnitType) != Race.Terran) return false;
+            if (target.UnitType.SpaceRequired > 1) return false;
+        }
+        return SpaceLeftFits(u, loaded, target.UnitType.SpaceRequired);
+    }
+
+    // openbw: bool unit_can_enter_nydus(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the unit may enter the nydus.
+    //
+    // The nydus must be complete with a complete exit, the unit has to
+    // belong to the same player, and it has to be a ground unit of the
+    // Zerg race.
+    public static bool UnitCanEnterNydus(Unit u, Unit target, bool targetCompleted,
+                                          bool exitExists, bool exitCompleted) {
+        if (!UnitTypeIds.UnitIsNydus(target.UnitType)) return false;
+        if (!targetCompleted) return false;
+        if (!exitExists || !exitCompleted) return false;
+        if (u.Owner != target.Owner) return false;
+        if (UnitFlags.Flying(u)) return false;
+        if (UnitStatus.UnitTypeRace(u.UnitType) != Race.Zerg) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_use_shield_battery(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the unit may recharge at the shield battery.
+    //
+    // The battery must be complete, the unit must have a shield that
+    // is not full, and it must be a mobile Protoss unit of the same
+    // player.
+    public static bool UnitCanUseShieldBattery(Unit u, Unit target, bool targetCompleted,
+                                                bool completed, bool canMove, Fp targetEnergy) {
+        if (!UnitTypeIds.Is(target.UnitType, (int)UnitTypes.Protoss_Shield_Battery)) return false;
+        if (!targetCompleted) return false;
+        if (!u.UnitType.HasShield) return false;
+        if (!completed) return false;
+        if (!canMove) return false;
+        if (UnitFlags.GroundedBuilding(u)) return false;
+        if (u.Owner != target.Owner) return false;
+        if (UnitStatus.UnitTypeRace(u.UnitType) != Race.Protoss) return false;
+        if (u.ShieldPoints.RawValue() >= u.UnitType.ShieldPoints * 256) return false;
+        if (targetEnergy.RawValue() == 0) return false;
+        if (UnitTarget.UnitIsDisabled(target)) return false;
+        if (UnitTypeIds.Is(u.UnitType, (int)UnitTypes.Protoss_Interceptor)) return false;
+        if (UnitTypeIds.Is(u.UnitType, (int)UnitTypes.Protoss_Scarab)) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_be_infested(const unit_t* u) const
+    //
+    // Whether the unit may be infested.
+    //
+    // Only a Terran command centre below half its hit points.
+    public static bool UnitCanBeInfested(Unit u, bool completed, int hpPercent) {
+        if (!UnitTypeIds.Is(u.UnitType, (int)UnitTypes.Terran_Command_Center)) return false;
+        if (!completed) return false;
+        return hpPercent < 50;
+    }
+}

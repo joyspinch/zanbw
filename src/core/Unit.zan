@@ -312,6 +312,11 @@ public class Unit {
     // player can see it.
     public int VisibilityFlags;
 
+    // openbw: unit_t::energy
+    //
+    // The unit's energy.
+    public Fp Energy;
+
     // openbw: unit_t::shield_points
     //
     // The unit's remaining shield.
@@ -464,6 +469,7 @@ public class Unit {
         NydusExit = false;
         DetectedFlags = 0;
         VisibilityFlags = 0;
+        Energy = Fp.Zero();
         ShieldPoints = Fp.Zero();
         DarkSwarmTimer = 0;
         DefensiveMatrixHp = Fp.Zero();
