@@ -1,0 +1,113 @@
+using System;
+
+// openbw: the unit status functions that read the unit's own state
+// (bwgame.h)
+//
+// These sit next to UnitStatus.zan but are about a unit's *condition*
+// rather than its identity: is it dying, how much energy does it have,
+// how much sight does it have.
+//
+// The ones that need the player's upgrades take those upgrades as
+// parameters, so this file does not reach for the game state.
+public class UnitCondition {
+    // openbw: bool unit_dead(const unit_t* u) const
+    //
+    // A unit with no order type counts as dead. Otherwise it is dead
+    // once the die order has run its course.
+    public static bool UnitDead(Unit u, int orderTypeId) {
+        if (orderTypeId < 0) return true;
+        return orderTypeId == (int)Orders.Die && u.OrderState == 1;
+    }
+
+    // openbw: bool unit_dying(const unit_t* u) const
+    public static bool UnitDying(Unit u, int orderTypeId) {
+        if (orderTypeId < 0) return true;
+        return orderTypeId == (int)Orders.Die;
+    }
+
+    // openbw: bool unit_is_rescuable(const unit_t* u) const
+    //
+    // Whether the unit's owner is a rescue player.
+    public static bool UnitIsRescuable(Unit u, int ownerController) {
+        if (ownerController == PlayerController.RescuePassive) return true;
+        if (ownerController == PlayerController.UnusedRescueActive) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_undetected(const unit_t* u, int owner) const
+    //
+    // Whether the unit is hidden from that owner. A unit that is
+    // neither cloaked nor detector-requiring is never undetected.
+    public static bool UnitIsUndetected(Unit u, int owner, bool cloaked, bool requiresDetector, int detectedFlags) {
+        if (!cloaked && !requiresDetector) return false;
+        if ((detectedFlags & (1 << owner)) != 0) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_be_infested(const unit_t* u) const
+    //
+    // A completed command centre below half health can be infested.
+    public static bool UnitCanBeInfested(Unit u, bool completed, int hpPercent) {
+        if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Command_Center)) return false;
+        if (!completed) return false;
+        return hpPercent < 50;
+    }
+
+    // openbw: bool unit_is_at_elevation_flags(const unit_t* u, int elevation_flags) const
+    //
+    // Whether the unit is at an elevation the given flags allow. The
+    // flags are a pair of triples: the low, middle and high ground
+    // levels, one triple for flying units and one for ground units.
+    public static bool UnitIsAtElevationFlags(bool flying, int groundHeight, int elevationFlags) {
+        if (flying) {
+            if (groundHeight == 0) return (elevationFlags & 1) == 0;
+            if (groundHeight == 1) return (elevationFlags & 2) == 0;
+            if (groundHeight == 2) return (elevationFlags & 4) == 0;
+        } else {
+            if (groundHeight == 0) return (elevationFlags & 8) == 0;
+            if (groundHeight == 1) return (elevationFlags & 0x10) == 0;
+            if (groundHeight == 2) return (elevationFlags & 0x20) == 0;
+        }
+        return false;
+    }
+
+    // openbw: int unit_sight_range(const unit_t* u, bool ignore_blindness = false) const
+    //
+    // The unit's sight range in pixels. A building that is still being
+    // built sees very little; a blinded unit sees half.
+    public static int UnitSightRange(Unit u, bool ignoreBlindness, bool groundedBuilding, bool completed, bool morphingBuilding,
+                                     bool blinded, bool ocularImplants, bool antennae, bool sensorArray, bool apialSensors) {
+        if (groundedBuilding && !completed && !morphingBuilding) return 32 * 4;
+        if (!ignoreBlindness && blinded) return 32 * 2;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Ghost) && ocularImplants) return 32 * 11;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Overlord) && antennae) return 32 * 11;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Observer) && sensorArray) return 32 * 11;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Scout) && apialSensors) return 32 * 11;
+        return 32 * u.UnitType.SightRange;
+    }
+
+    // openbw: size_t unit_max_interceptor_count(const unit_t* u) const
+    //
+    // How many interceptors a carrier can hold. A hero carrier holds
+    // eight; a normal one holds four, or eight with the capacity
+    // upgrade.
+    public static int UnitMaxInterceptorCount(Unit u, bool hero, bool carrierCapacity) {
+        if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return 0;
+        if (hero) return 8;
+        if (carrierCapacity) return 8;
+        return 4;
+    }
+
+    // openbw: size_t unit_max_scarab_count(const unit_t* u) const
+    public static int UnitMaxScarabCount(Unit u, bool hero, bool reaverCapacity) {
+        if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return 0;
+        if (hero) return 10;
+        if (reaverCapacity) return 10;
+        return 5;
+    }
+
+    // openbw: int unit_hp_percent(const unit_t* u) const
+    public static int UnitHpPercent(Unit u, int hp, int maxHp) {
+        return hp * 100 / maxHp;
+    }
+}

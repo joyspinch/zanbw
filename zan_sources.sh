@@ -41,6 +41,8 @@ ZAN_SOURCES_CORE=(
     src/core/UnitTypeIds.zan
     src/core/UnitStatus.zan
     src/core/PlayerState.zan
+    src/core/UnitCondition.zan
+    src/core/UnitOrders.zan
 )
 
 # The regions layer: the tile map and the region decomposition.

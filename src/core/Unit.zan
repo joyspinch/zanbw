@@ -127,6 +127,16 @@ public class UnitType {
     // burrowed lurker), 4 and 5 are the spell casters.
     public int RightClickAction;
 
+    // openbw: unit_type_t::space_provided
+    //
+    // How much cargo space the unit provides.
+    public int SpaceProvided;
+
+    // openbw: unit_type_t::space_required
+    //
+    // How much cargo space the unit needs.
+    public int SpaceRequired;
+
     public UnitType(int id, FlingyType flingy, int elevationLevel, int flags, int sightRange,
                    Xy dimensionsFrom, Xy dimensionsTo) {
         Id = id;
@@ -141,6 +151,8 @@ public class UnitType {
         PlacementSize = new Xy(0, 0);
         SpreadsCreep = false;
         RightClickAction = 1;
+        SpaceProvided = 0;
+        SpaceRequired = 0;
     }
 }
 
@@ -245,6 +257,16 @@ public class Unit {
     // The unit's secondary order, as an order id.
     public int SecondaryOrderId;
 
+    // openbw: unit_t::building.nydus.exit
+    //
+    // Whether the nydus canal already has its exit built.
+    public bool NydusExit;
+
+    // openbw: unit_t::detected_flags
+    //
+    // Which owners have already detected this cloaked unit.
+    public int DetectedFlags;
+
     public int UserActionFlags;
     public MovementStates MovementState;
     public int StatusFlagBits;
@@ -326,6 +348,8 @@ public class Unit {
         CurrentBuildUnitId = -1;
         BlindedByUnitId = -1;
         SecondaryOrderId = (int)Orders.None;
+        NydusExit = false;
+        DetectedFlags = 0;
         UserActionFlags = 0;
         MovementState = MovementStates.UM_Init;
         StatusFlagBits = 0;

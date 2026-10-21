@@ -1,0 +1,114 @@
+using System;
+
+// The Zan side of the unit order / condition bed.
+//
+// The bed drives the same predicates over the same unit types as the
+// C++ bed (tools/cppbed/unitorder_bed.cpp), so the two traces must
+// match byte for byte.
+
+public class UnitOrderBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The unit types. One per id, with flags and cargo space that
+        // depend on the id.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, (i % 7) + 1, new Xy(8, 8), new Xy(8, 8));
+            t.Flags = (i * 0x9 + variant * 0x37) & 0x7fffffff;
+            if (i % 3 == 0) t.GroupFlags = 1;
+            else if (i % 3 == 1) t.GroupFlags = 2;
+            else t.GroupFlags = 4;
+            t.RightClickAction = i % 6;
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            // The hero flag, which the carrier and reaver capacity tests read.
+            if ((i % 5) == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Hero;
+            t.SpaceProvided = (i % 3) == 0 ? 8 : 0;
+            t.SpaceRequired = (i % 5) == 0 ? 2 : 0;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The order table, for the "which orders may be given" test.
+        for (int c = 0; c < 24; ++c) {
+            int flags = (c * 0x1041 + variant * 0x11) & 0x3fffffff;
+            bool ventralSacs = ((c + variant) % 3) == 0;
+
+            for (int i = 0; i < types.Count; ++i) {
+                Unit u = new Unit();
+                u.UnitType = types[i];
+                u.StatusFlagBits = flags;
+                u.OrderState = c % 3;
+                u.NydusExit = ((c + i) % 4) == 0;
+
+                Console.Write("O " + c + " " + i);
+                for (int o = 0; o < 190; ++o) {
+                    Console.Write(" " + B(UnitOrders.UnitOrderAllowed(u, o, ventralSacs)));
+                }
+                Console.WriteLine("");
+            }
+        }
+
+        // The unit condition predicates.
+        for (int c = 0; c < 24; ++c) {
+            int flags = (c * 0x1041 + variant * 0x11) & 0x3fffffff;
+            int detectedFlags = (c % 4) * 0x11;
+            int controller = c % 12;
+            bool hero = ((c + variant) % 5) == 0;
+            bool carrierCapacity = ((c + variant) % 4) == 0;
+            bool reaverCapacity = ((c + variant) % 6) == 0;
+            bool ocularImplants = ((c + variant) % 7) == 0;
+            bool antennae = ((c + variant) % 8) == 0;
+            bool sensorArray = ((c + variant) % 9) == 0;
+            bool apialSensors = ((c + variant) % 10) == 0;
+
+            for (int i = 0; i < types.Count; ++i) {
+                Unit u = new Unit();
+                u.UnitType = types[i];
+                u.StatusFlagBits = flags;
+                u.OrderState = c % 3;
+                u.DetectedFlags = detectedFlags;
+                u.Owner = 0;
+                u.Hp = Fp.Integer(50);
+
+                int orderId = c % 3 == 0 ? (int)Orders.Die : (c % 3 == 1 ? (int)Orders.Stop : -1);
+                bool groundedBuilding = UnitStatus.IsGroundedBuilding(u);
+                bool completed = UnitStatus.IsCompleted(u);
+                bool morphing = UnitStatus.UnitIsMorphingBuilding(u);
+                bool cloaked = UnitStatus.IsCloaked(u);
+                bool requiresDetector = UnitStatus.UnitRequiresDetector(u);
+                int hpPercent = UnitCondition.UnitHpPercent(u, 50, 100);
+                // The C++'s max_visible_hp() reads the unit type's
+                // hitpoints, and falls back to the unit's own hp.
+                int maxHp = u.UnitType.Hitpoints.IntegerPart();
+                if (maxHp == 0) maxHp = 50;
+                if (maxHp == 0) maxHp = 1;
+                hpPercent = UnitCondition.UnitHpPercent(u, 50, maxHp);
+
+                string line = "C " + c + " " + i;
+                line = line + " dead=" + B(UnitCondition.UnitDead(u, orderId));
+                line = line + " dying=" + B(UnitCondition.UnitDying(u, orderId));
+                line = line + " rescuable=" + B(UnitCondition.UnitIsRescuable(u, controller));
+                line = line + " undetected=" + B(UnitCondition.UnitIsUndetected(u, 0, cloaked, requiresDetector, detectedFlags));
+                line = line + " infested=" + B(UnitCondition.UnitCanBeInfested(u, completed, hpPercent));
+                line = line + " elev=" + B(UnitCondition.UnitIsAtElevationFlags(UnitStatus.IsFlying(u), 0, 0x3f));
+                line = line + " sight=" + B(UnitCondition.UnitSightRange(u, false, groundedBuilding, completed, morphing,
+                                                                          false, ocularImplants, antennae, sensorArray, apialSensors) != 0);
+                line = line + " max_int=" + UnitCondition.UnitMaxInterceptorCount(u, UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero), carrierCapacity);
+                line = line + " max_scarab=" + UnitCondition.UnitMaxScarabCount(u, UnitStatus.UnitTypeHasFlag(u.UnitType, (int)UnitTypeFlag.Hero), reaverCapacity);
+                line = line + " hp_pct=" + hpPercent;
+                Console.WriteLine(line);
+            }
+        }
+
+        return 0;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}

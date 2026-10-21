@@ -253,4 +253,25 @@ public class UnitStatus {
     public static bool UnitTypeHasFlag(UnitType ut, int flag) {
         return (ut.Flags & flag) != 0;
     }
+
+    // openbw: bool unit_provides_space(const unit_t* u) const
+    //
+    // Whether the unit can carry cargo. An overlord needs the ventral
+    // sacs upgrade, and a hallucination carries nothing.
+    public static bool UnitProvidesSpace(Unit u, bool ventralSacs) {
+        if (u.UnitType.SpaceProvided == 0) return false;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Overlord) && !ventralSacs) return false;
+        if (IsHallucination(u)) return false;
+        return true;
+    }
+
+    // openbw: bool u_cloaked(const unit_t* u) const
+    public static bool IsCloaked(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Cloaked);
+    }
+
+    // openbw: bool u_requires_detector(const unit_t* u) const
+    public static bool UnitRequiresDetector(Unit u) {
+        return u.HasStatusFlag(StatusFlag.RequiresDetector);
+    }
 }

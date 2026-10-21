@@ -1,0 +1,429 @@
+using System;
+
+// openbw: bool unit_order_allowed(const unit_t* u, const order_type_t* order) const
+//
+// Which orders a unit may be given. The C++ is a 113-case switch on the
+// order id; each case tests the unit's type, its status flags and
+// whether it is a hallucination.
+//
+// The unit's own fields the switch reads:
+//   - the type
+//   - the status flags (grounded building, hallucination)
+//   - the type's flags (turret, worker, powerup, flying building)
+//
+// The switch reads no other unit and no global state, so the whole
+// thing is a closed function of the unit and the order id.
+//
+// The C++'s ut_turret / ut_worker / ut_powerup / ut_flying_building read
+// the *unit type's* flags, not the unit's status flags.
+public class UnitOrders {
+    // openbw: bool unit_order_allowed(const unit_t* u, const order_type_t* order) const
+    //
+    // The switch reads the unit type's flags, so the caller passes the
+    // player's upgrade state for the cases that need it.
+    public static bool UnitOrderAllowed(Unit u, int orderId, bool ventralSacs) {
+        switch (orderId) {
+        case Orders.Die:
+            return true;
+        case Orders.Stop:
+            return true;
+        case Orders.Guard:
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            return true;
+        case Orders.PlayerGuard:
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            return true;
+        case Orders.TurretGuard:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Turret)) return false;
+            return true;
+        case Orders.BunkerGuard:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Bunker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Move:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.InterceptorAttack:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Interceptor)) return false;
+            return true;
+        case Orders.ScarabAttack:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Scarab)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.SpiderMine:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Vulture_Spider_Mine)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Carrier:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+            return true;
+        case Orders.Reaver:
+            if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.ReaverCarrierMove:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType) && !UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.CarrierStop:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+            return true;
+        case Orders.ReaverStop:
+            if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.CarrierHoldPosition:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+            return true;
+        case Orders.ReaverHoldPosition:
+            if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.CarrierAttack:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+            return true;
+        case Orders.ReaverAttack:
+            if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.CarrierMoveToAttack:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+            return true;
+        case Orders.ReaverMoveToAttack:
+            if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.CarrierIgnore2:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType) && !UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.CarrierFight:
+            if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+            return true;
+        case Orders.ReaverFight:
+            if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+            return true;
+        case Orders.AttackDefault:
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            return true;
+        case Orders.MoveToAttack:
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            return true;
+        case Orders.AttackUnit:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.AttackFixedRange:
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            return true;
+        case Orders.AttackTile:
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            return true;
+        case Orders.Hover:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.AttackMove:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.AtkMoveEP:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.StayInRange:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.TowerGuard:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Missile_Turret) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spore_Colony) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Sunken_Colony) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Photon_Cannon)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.TowerAttack:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Missile_Turret) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spore_Colony) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Sunken_Colony) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Photon_Cannon) && !UnitTypeIds.UnitIsTrap(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.TurretAttack:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Turret)) return false;
+            return true;
+        case Orders.Nothing:
+            return true;
+        case Orders.DroneStartBuild:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Drone)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.DroneBuild:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Drone)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.DroneLand:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Drone)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PlaceBuilding:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_SCV)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PlaceProtossBuilding:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Probe)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.CreateProtossBuilding:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Probe)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PlaceAddon:
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.RallyPointUnit:
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.RallyPointTile:
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.InfestedCommandCenter:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Command_Center)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.BuildNydusExit:
+            if (!UnitTypeIds.UnitIsNydus(u.UnitType)) return false;
+            if (u.NydusExit) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.QueenHoldPosition:
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.CastInfestation:
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MoveToInfest:
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.InfestingCommandCenter:
+            if (!UnitTypeIds.UnitIsQueen(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.ConstructingBuilding:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_SCV)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Repair:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_SCV)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MoveToRepair:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_SCV)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.ZergBirth:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Egg) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Cocoon)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Follow:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.InterceptorReturn:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.BuildingLand:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.FlyingBuilding)) return false;
+            if (UnitStatus.IsGroundedBuilding(u)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.BuildingLiftoff:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.FlyingBuilding)) return false;
+            if (!UnitStatus.IsGroundedBuilding(u)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.LiftingOff:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.FlyingBuilding)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.CTFCOP2:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Zerg_Flag_Beacon) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Terran_Flag_Beacon) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Protoss_Flag_Beacon)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Larva:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Larva)) return false;
+            return true;
+        case Orders.SpawningLarva:
+            if (UnitTypeIds.UnitIsHatchery(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Harvest1:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Harvest2:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MoveToGas:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.WaitForGas:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.ReturnGas:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MoveToMinerals:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.WaitForMinerals:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.ReturnMinerals:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.EnterTransport:
+            return true;
+        case Orders.Unload:
+            if (!UnitStatus.UnitProvidesSpace(u, ventralSacs)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MoveUnload:
+            if (!UnitStatus.UnitProvidesSpace(u, ventralSacs)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PickupTransport:
+            if (!UnitStatus.UnitProvidesSpace(u, ventralSacs)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PickupBunker:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Bunker)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PickupIdle:
+            if (!UnitStatus.UnitProvidesSpace(u, ventralSacs) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Overlord)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.PowerupIdle:
+            if (!UnitStatus.UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Powerup)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.WatchTarget:
+            return true;
+        case Orders.InitCreepGrowth:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Creep_Colony) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hatchery) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lair) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hive)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.StoppingCreepGrowth:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Spore_Colony) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Sunken_Colony)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.SpreadCreep:
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.GuardianAspect:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Mutalisk)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.HoldPosition:
+            if (!UnitStatus.UnitCanHoldPosition(u)) return false;
+            return true;
+        case Orders.Patrol:
+            if (!UnitStatus.UnitCanMove(u)) return false;
+            return true;
+        case Orders.RechargeShieldsBattery:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Shield_Battery)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Scanner:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Spell_Scanner_Sweep)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.NukeWait:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Nuclear_Missile)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.NukeLaunch:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Nuclear_Missile)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.NukePaint:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Ghost)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.NukeUnit:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Nuclear_Missile)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.CastNuclearStrike:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Nuclear_Missile)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.NukeTrack:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Nuclear_Missile)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.InitializeArbiter:
+            if (!UnitTypeIds.UnitIsArbiter(u.UnitType)) return false;
+            return true;
+        case Orders.CloakNearbyUnits:
+            if (!UnitTypeIds.UnitIsArbiter(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.RightClickAction:
+            return true;
+        case Orders.SuicideUnit:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Infested_Terran)) return false;
+            return true;
+        case Orders.SuicideLocation:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Infested_Terran)) return false;
+            return true;
+        case Orders.SuicideHoldPosition:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Infested_Terran) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Scourge)) return false;
+            return true;
+        case Orders.SelfDestructing:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Scarab)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.Critter:
+            if (!UnitTypeIds.UnitIsCritter(u.UnitType)) return false;
+            return true;
+        case Orders.HiddenGun:
+            if (!UnitTypeIds.UnitIsTrap(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.OpenDoor:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Upper_Level_Door) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Right_Upper_Level_Door) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Pit_Door) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Right_Pit_Door)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.CloseDoor:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Upper_Level_Door) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Right_Upper_Level_Door) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Pit_Door) && !UnitTypeIds.Is(u.UnitType, UnitTypes.Special_Right_Pit_Door)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.HideTrap:
+            if (!UnitTypeIds.UnitIsTrap(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.RevealTrap:
+            if (!UnitTypeIds.UnitIsTrap(u.UnitType)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MedicIdle:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MedicHeal:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.HealMove:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.MedicHoldPosition:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Medic)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        case Orders.CastMindControl:
+            if (!UnitTypeIds.Is(u.UnitType, UnitTypes.Protoss_Dark_Archon)) return false;
+            if (UnitStatus.IsHallucination(u)) return false;
+            return true;
+        default:
+            return false;
+        }
+    }
+}
