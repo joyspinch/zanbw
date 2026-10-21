@@ -1,0 +1,42 @@
+// openbw: data_types.h::weapon_type_t -- the weapon's enumerations.
+//
+// The weapon's hit type and damage type are enumerations inside the
+// weapon type in the original; here they are their own enumerations.
+
+// openbw: weapon_type_t::hit_type
+public enum WeaponHitType {
+    None,
+    Normal,
+    RadialSplash,
+    EnemySplash,
+    Lockdown,
+    NuclearMissile,
+    Parasite,
+    Broodlings,
+    EmpShockwave,
+    Irradiate,
+    Ensnare,
+    Plague,
+    StasisField,
+    DarkSwarm,
+    Consume,
+    YamatoGun,
+    Restoration,
+    DisruptionWeb,
+    CorrosiveAcid,
+    MindControl,
+    Feedback,
+    OpticalFlare,
+    Maelstrom,
+    HitType23,
+    AirSplash,
+}
+
+// openbw: weapon_type_t::damage_type
+public enum WeaponDamageType {
+    None,
+    Explosive,
+    Concussive,
+    Normal,
+    IgnoreArmor,
+}

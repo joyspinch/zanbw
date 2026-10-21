@@ -40,6 +40,16 @@ public class WeaponType {
     // openbw: weapon_type_t::damage_type
     public int DamageType;
 
+    // openbw: weapon_type_t::damage_bonus
+    //
+    // How much the damage upgrade adds per level.
+    public int DamageBonus;
+
+    // openbw: weapon_type_t::damage_upgrade
+    //
+    // The upgrade that raises the damage.
+    public int DamageUpgrade;
+
     public WeaponType() {
         Id = 0;
         Label = 0;
@@ -51,5 +61,7 @@ public class WeaponType {
         BulletType = 0;
         HitType = 0;
         DamageType = 0;
+        DamageBonus = 0;
+        DamageUpgrade = 0;
     }
 }

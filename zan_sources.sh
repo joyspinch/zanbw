@@ -53,6 +53,8 @@ ZAN_SOURCES_CORE=(
     src/core/UnitTarget.zan
     src/core/UnitTarget2.zan
     src/core/UnitDetection.zan
+    src/core/UnitDamage.zan
+    src/core/WeaponEnums.zan
 )
 
 # The regions layer: the tile map and the region decomposition.

@@ -1,0 +1,187 @@
+using System;
+
+// The Zan side of the damage computation layer bed.
+//
+// The bed drives the same predicates over the same weapon, target and
+// player configurations as the C++ bed
+// (tools/cppbed/unitdamage_bed.cpp), so the two traces must match byte
+// for byte.
+
+public class UnitDamageBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The weapons: the damage, the hit type, the damage type.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 116; ++i) {
+            WeaponType w = new WeaponType();
+            w.Id = i;
+            w.Label = i;
+            w.MinRange = (i % 3 == 0) ? (i % 8) : 0;
+            w.MaxRange = 32 + (i % 7) * 16;
+            w.DamageAmount = 5 + (i % 11);
+            w.DamageBonus = i % 4;
+            w.DamageUpgrade = i % 53;
+            w.DamageType = (int)(i % 5);
+            w.HitType = (int)(i % 24);
+            weapons.Add(w);
+        }
+
+        // The unit types: the hit points, the shield, the size.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            if (i % 8 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.HasEnergy;
+            t.HasShield = (i % 3) == 0;
+            t.ShieldPoints = 30;
+            t.UnitSize = i % 4;
+            t.Armor = i % 7;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The per player upgrade table. The C++'s table is written on
+        // every case and never cleared, so the last write for a
+        // (player, upgrade) pair is the one that counts. Several
+        // upgrades share a slot: the damage upgrade of weapon 15 is
+        // the plasma shields, for one.
+        int[] upgradeLevels = new int[12 * 56];
+
+        // ---- the damage amount, the hit points, the damage ------------------
+        for (int i = 0; i < 229; ++i) {
+            WeaponType w = weapons[i % 116];
+            Unit target = MakeUnit(types[i], i % 12, 0);
+            // The damage upgrade level: the table's current value.
+            int damageLevel = i % 4;
+            upgradeLevels[(i % 12) * 56 + w.DamageUpgrade] = damageLevel;
+            // The plasma shields and the armor upgrade write to the
+            // same table, and may share a slot with the damage
+            // upgrade.
+            int plasmaShields = (i % 3 == 0) ? 1 : 0;
+            upgradeLevels[(i % 12) * 56 + (int)UpgradeTypes.Protoss_Plasma_Shields] = plasmaShields;
+            int armorLevel = i % 3;
+            upgradeLevels[(i % 12) * 56 + (int)UpgradeTypes.Terran_Infantry_Armor] = armorLevel;
+            // The level the damage upgrade actually has, after the
+            // other writes.
+            int effectiveDamageLevel = upgradeLevels[(i % 12) * 56 + w.DamageUpgrade];
+
+            Fp damage = UnitDamage.WeaponDamageAmount(w, effectiveDamageLevel);
+
+            Console.WriteLine("D " + i + " "
+                + damage.RawValue() + " "
+                + UnitDamage.MaxVisibleHpPlusShields(target) + " "
+                + UnitDetection.UnitArmor(target, armorLevel, false).RawValue() + " "
+                + (int)w.HitType + " "
+                + (int)w.DamageType);
+        }
+
+        // ---- the damage computation ------------------------------------------
+        for (int i = 0; i < 229; ++i) {
+            WeaponType w = weapons[i % 116];
+            Unit target = MakeUnit(types[i], i % 12, 0);
+            target.Hp = Fp.Integer(200);
+
+            int damageLevel = i % 4;
+            int plasmaShields = (i % 3 == 0) ? 1 : 0;
+            int armorLevel = i % 3;
+            // The upgrades share the table with the D section, so the
+            // values carry over. The damage upgrade may share a slot
+            // with the plasma shields.
+            upgradeLevels[(i % 12) * 56 + w.DamageUpgrade] = damageLevel;
+            upgradeLevels[(i % 12) * 56 + (int)UpgradeTypes.Protoss_Plasma_Shields] = plasmaShields;
+            upgradeLevels[(i % 12) * 56 + (int)UpgradeTypes.Terran_Infantry_Armor] = armorLevel;
+            int effectiveDamageLevel = upgradeLevels[(i % 12) * 56 + w.DamageUpgrade];
+            int effectivePlasmaShields = upgradeLevels[(i % 12) * 56 + (int)UpgradeTypes.Protoss_Plasma_Shields];
+            int effectiveArmorLevel = upgradeLevels[(i % 12) * 56 + (int)UpgradeTypes.Terran_Infantry_Armor];
+
+            // The target's own state.
+            if ((i + variant) % 4 == 0) target.StatusFlagBits = target.StatusFlagBits | (int)StatusFlag.Hallucination;
+            if ((i + variant) % 5 == 0) target.AcidSporeCount = 3;
+            if ((i + variant) % 6 == 0) target.DefensiveMatrixHp = Fp.Integer(20);
+            if ((i + variant) % 7 == 0) target.ShieldPoints = Fp.Integer(50);
+            if ((i + variant) % 8 == 0) target.ShieldPoints = Fp.Integer(0);
+
+            Fp damage = UnitDamage.WeaponDamageAmount(w, effectiveDamageLevel);
+            int divisor = 1 + (i % 3);
+            Fp armor = UnitDetection.UnitArmor(target, effectiveArmorLevel, false);
+            bool hasDefensiveMatrix = target.DefensiveMatrixHp.RawValue() != 0;
+
+            DamageResult result = UnitDamage.WeaponDamage(w, damage, divisor, target,
+                effectivePlasmaShields, armor, hasDefensiveMatrix);
+
+            Console.WriteLine("H " + i + " "
+                + damage.RawValue() + " "
+                + result.Damage.RawValue() + " "
+                + (target.ShieldPoints - result.ShieldDamage).RawValue() + " "
+                + (target.DefensiveMatrixHp - result.DefensiveMatrixDamage).RawValue() + " "
+                + target.UnitType.UnitSize);
+        }
+
+        // ---- the dodge and the miss chance -----------------------------------
+        // The map: the ground heights come from it.
+        TileMap map = new TileMap(16, 16);
+        for (int i = 0; i < 16 * 16; ++i) {
+            MapTile t = new MapTile();
+            t.GfxTile = (i % 3) * 16;
+            map.Tiles.Add(t);
+        }
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 16; ++j) map.Cv5.Add(i % 3);
+        }
+        for (int m = 0; m < 3; ++m) {
+            for (int f = 0; f < 16; ++f) {
+                int v = 0;
+                if (m == 0 && f == 0) v = (int)Vf4Flag.Middle;
+                if (m == 1 && f == 0) v = (int)Vf4Flag.High;
+                map.Vf4.Add(v);
+            }
+        }
+        Vision vision = new Vision(map, new List<SightValues>());
+
+        for (int i = 0; i < 229; ++i) {
+            int statusFlags = 0;
+            if ((i + variant) % 3 == 0) statusFlags = statusFlags | (int)StatusFlag.Flying;
+            Unit shooter = MakeUnit(types[i], i % 12, statusFlags);
+            Unit target = MakeUnit(types[(i + 5) % 229], (i + 1) % 12, statusFlags);
+
+            // The position: the tile it stands on decides the cover.
+            int tx = (i % 5) * 32;
+            int ty = 32;
+            target.SpritePosition = new Xy(tx, ty);
+            shooter.SpritePosition = new Xy(0, 0);
+
+            // The dark swarm: a spell unit at the target's place.
+            bool underDarkSwarm = (i + variant) % 5 == 0;
+            // The tile's cover flag.
+            bool cover = ((tx / 32) + (ty / 32) * 16) % 5 == 0;
+
+            // The ground heights.
+            int targetHeight = vision.GetGroundHeightAt(tx, ty);
+            int shooterHeight = vision.GetGroundHeightAt(0, 0);
+
+            Console.WriteLine("G " + i + " "
+                + UnitDamage.UnitDodgeChance(target, cover, underDarkSwarm).RawValue() + " "
+                + UnitDamage.UnitTargetMissChance(shooter, target, cover, underDarkSwarm, targetHeight, shooterHeight).RawValue() + " "
+                + (cover ? 1 : 0));
+        }
+
+        return 0;
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.Hp = Fp.Integer(50);
+        u.ShieldPoints = Fp.Integer(t.HasShield ? 30 : 0);
+        return u;
+    }
+}

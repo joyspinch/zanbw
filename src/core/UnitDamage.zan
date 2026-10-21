@@ -1,0 +1,183 @@
+using System;
+
+// openbw: the damage computation layer (bwgame.h)
+//
+// The queries that turn a weapon and a target into a damage number:
+// the weapon's base damage, the damage after the armor and the shield
+// are taken off, and the dodge and miss chances.
+//
+// The player's upgrade levels and the target's own state are passed in
+// rather than reached for, so this layer does not depend on the game
+// state.
+
+// openbw: the result of weapon_deal_damage's damage computation.
+//
+// The C++ applies the damage to the target's state directly. The three
+// amounts it works out are kept here instead, so the caller can apply
+// them the same way.
+public class DamageResult {
+    // The damage that reaches the unit's hit points.
+    public Fp Damage;
+
+    // The damage the shields took.
+    public Fp ShieldDamage;
+
+    // The damage the defensive matrix took.
+    public Fp DefensiveMatrixDamage;
+
+    public DamageResult(Fp damage, Fp shieldDamage, Fp defensiveMatrixDamage) {
+        this.Damage = damage;
+        this.ShieldDamage = shieldDamage;
+        this.DefensiveMatrixDamage = defensiveMatrixDamage;
+    }
+}
+
+public class UnitDamage {
+    // openbw: fp8 weapon_damage_amount(const weapon_type_t* w, int owner) const
+    //
+    // The weapon's damage, plus the bonus the owner's damage upgrade
+    // gives.
+    public static Fp WeaponDamageAmount(WeaponType w, int damageUpgradeLevel) {
+        return Fp.Integer(w.DamageAmount + w.DamageBonus * damageUpgradeLevel);
+    }
+
+    // openbw: fp8 bullet_damage_amount(const bullet_t* b, const unit_t* target) const
+    //
+    // The damage a bullet does to a target.
+    //
+    // A nuclear missile ignores the weapon's damage and scales with the
+    // target's hit points instead, with a floor of 500.
+    public static Fp BulletDamageAmount(WeaponType w, int damageUpgradeLevel,
+                                         int maxVisibleHpPlusShields) {
+        if (w.HitType == WeaponHitType.NuclearMissile) {
+            int damage = maxVisibleHpPlusShields * 2 / 3;
+            if (damage < 500) damage = 500;
+            return Fp.Integer(damage);
+        }
+        return WeaponDamageAmount(w, damageUpgradeLevel);
+    }
+
+    // openbw: int max_visible_hp(const unit_t* u) const
+    //
+    // The target's maximum hit points.
+    public static int MaxVisibleHp(Unit u) {
+        int hp = u.UnitType.Hitpoints.IntegerPart();
+        if (hp == 0) hp = u.Hp.Ceil().IntegerPart();
+        if (hp == 0) hp = 1;
+        return hp;
+    }
+
+    // openbw: int max_visible_hp_plus_shields(const unit_t* u) const
+    //
+    // The target's maximum hit points plus its shields.
+    //
+    // The maximum is the unit type's hit points, not the unit's
+    // current ones, and the shields are the unit type's shield
+    // amount.
+    public static int MaxVisibleHpPlusShields(Unit u) {
+        int shields = 0;
+        if (u.UnitType.HasShield) shields = u.UnitType.ShieldPoints;
+        return MaxVisibleHp(u) + shields;
+    }
+
+    // openbw: the damage computation of weapon_deal_damage.
+    //
+    // The C++'s weapon_deal_damage works out the damage and then hands
+    // it to unit_deal_damage. This is that computation, without the
+    // side effects.
+    //
+    // The order matters: the defensive matrix takes the damage first,
+    // then the shields, and the armor comes off what is left.
+    //
+    // The plasma shields upgrade and the target's own armor upgrade are
+    // passed in.
+    public static DamageResult WeaponDamage(WeaponType w, Fp damage, int damageDivisor, Unit target,
+                                             int plasmaShieldsLevel, Fp armor, bool hasDefensiveMatrix) {
+        if (UnitFlags.Hallucination(target)) damage = damage * Fp.Integer(2);
+        damage = damage / Fp.Integer(damageDivisor);
+        damage = damage + Fp.Integer(target.AcidSporeCount);
+        if (damage < Fp.FromRaw(128)) damage = Fp.FromRaw(128);
+
+        Fp defensiveMatrixDamage = Fp.Zero();
+        if (hasDefensiveMatrix) {
+            defensiveMatrixDamage = damage;
+            if (damage > target.DefensiveMatrixHp) defensiveMatrixDamage = target.DefensiveMatrixHp;
+            damage = damage - defensiveMatrixDamage;
+        }
+
+        Fp shieldDamage = Fp.Zero();
+        if (target.UnitType.HasShield) {
+            if (target.ShieldPoints.RawValue() >= 256) {
+                if (w.DamageType != WeaponDamageType.IgnoreArmor) {
+                    Fp shieldArmor = Fp.Integer(plasmaShieldsLevel);
+                    if (damage > shieldArmor) damage = damage - shieldArmor;
+                    else damage = Fp.FromRaw(128);
+                }
+                shieldDamage = damage;
+                if (shieldDamage > target.ShieldPoints) shieldDamage = target.ShieldPoints;
+                damage = damage - shieldDamage;
+            }
+        }
+
+        if (w.DamageType != WeaponDamageType.IgnoreArmor) {
+            if (damage > armor) damage = damage - armor;
+            else damage = Fp.Zero();
+        }
+        if (w.DamageType == WeaponDamageType.None) {
+            damage = Fp.Zero();
+        } else if (w.DamageType == WeaponDamageType.Explosive) {
+            if (target.UnitType.UnitSize == 0) damage = Fp.Zero();
+            else if (target.UnitType.UnitSize == 1) damage = damage * Fp.FromRaw(128);
+            else if (target.UnitType.UnitSize == 2) damage = damage * Fp.FromRaw(192);
+        } else if (w.DamageType == WeaponDamageType.Concussive) {
+            if (target.UnitType.UnitSize == 0) damage = Fp.Zero();
+            else if (target.UnitType.UnitSize == 2) damage = damage * Fp.FromRaw(128);
+            else if (target.UnitType.UnitSize == 3) damage = damage * Fp.FromRaw(64);
+        }
+        if (shieldDamage.RawValue() == 0 && damage < Fp.FromRaw(128)) damage = Fp.FromRaw(128);
+        return new DamageResult(damage, shieldDamage, defensiveMatrixDamage);
+    }
+
+    // openbw: bool unit_is_under_dark_swarm(const unit_t* u) const
+    //
+    // Whether the unit is under a Dark Swarm.
+    //
+    // A building is never under one, and the player's Dark Swarm spell
+    // has to have been cast at all.
+    public static bool UnitIsUnderDarkSwarm(Unit u, bool darkSwarmCast) {
+        if (UnitFlags.Building(u.UnitType)) return false;
+        if (!darkSwarmCast) return false;
+        return u.DarkSwarmTimer != 0;
+    }
+
+    // openbw: fp8 unit_dodge_chance(const unit_t* u) const
+    //
+    // The target's chance to dodge.
+    //
+    // A flying unit never dodges. A unit under a Dark Swarm always
+    // dodges. A unit under cover dodges half the time.
+    public static Fp UnitDodgeChance(Unit u, bool tileProvidesCover, bool underDarkSwarm) {
+        if (UnitFlags.Flying(u)) return Fp.Zero();
+        if (underDarkSwarm) return Fp.FromRaw(255);
+        if (tileProvidesCover) return Fp.FromRaw(119);
+        return Fp.Zero();
+    }
+
+    // openbw: fp8 unit_target_miss_chance(const unit_t* u, const unit_t* target) const
+    //
+    // The chance the shot at the target misses.
+    //
+    // The target's own dodge chance, raised to the cover maximum when
+    // the target is on higher ground than the shooter.
+    public static Fp UnitTargetMissChance(Unit u, Unit target, bool tileProvidesCover,
+                                           bool underDarkSwarm,
+                                           int targetGroundHeight, int shooterGroundHeight) {
+        Fp r = UnitDodgeChance(target, tileProvidesCover, underDarkSwarm);
+        if (!UnitFlags.Flying(u) && !UnitFlags.Flying(target)) {
+            if (targetGroundHeight > shooterGroundHeight) {
+                if (r < Fp.FromRaw(119)) r = Fp.FromRaw(119);
+            }
+        }
+        return r;
+    }
+}

@@ -137,6 +137,21 @@ public class UnitType {
     // How much cargo space the unit needs.
     public int SpaceRequired;
 
+    // openbw: unit_type_t::has_shield
+    //
+    // Whether the unit type has shields.
+    public bool HasShield;
+
+    // openbw: unit_type_t::shield_points
+    //
+    // The unit type's shield amount.
+    public int ShieldPoints;
+
+    // openbw: unit_type_t::unit_size
+    //
+    // The unit's size class: 0 small, 1 medium, 2 large, 3 huge.
+    public int UnitSize;
+
     // openbw: unit_type_t::armor
     //
     // The unit type's base armor.
@@ -297,6 +312,16 @@ public class Unit {
     // player can see it.
     public int VisibilityFlags;
 
+    // openbw: unit_t::shield_points
+    //
+    // The unit's remaining shield.
+    public Fp ShieldPoints;
+
+    // openbw: unit_t::dark_swarm_timer
+    //
+    // How long the unit is under a Dark Swarm.
+    public int DarkSwarmTimer;
+
     // openbw: unit_t::defensive_matrix_hp / ensnare_timer / irradiate_timer
     // / plague_timer / acid_spore_count
     //
@@ -439,6 +464,8 @@ public class Unit {
         NydusExit = false;
         DetectedFlags = 0;
         VisibilityFlags = 0;
+        ShieldPoints = Fp.Zero();
+        DarkSwarmTimer = 0;
         DefensiveMatrixHp = Fp.Zero();
         EnsnareTimer = 0;
         IrradiateTimer = 0;
