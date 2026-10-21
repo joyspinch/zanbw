@@ -1,0 +1,166 @@
+using System;
+
+// The Zan side of the build queue bed.
+//
+// The bed drives the same queries over the same unit types and player
+// states as the C++ bed (tools/cppbed/buildqueue_bed.cpp), so the two
+// traces must match byte for byte.
+
+public class BuildQueueBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] unitTypeIds = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Ghost,
+            (int)UnitTypes.Terran_Wraith,
+            (int)UnitTypes.Terran_Firebat,
+            (int)UnitTypes.Terran_Vulture,
+            (int)UnitTypes.Terran_Command_Center,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Factory,
+            (int)UnitTypes.Terran_Engineering_Bay,
+            (int)UnitTypes.Terran_Siege_Tank_Tank_Mode,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Drone,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Ultralisk,
+            (int)UnitTypes.Zerg_Hatchery,
+            (int)UnitTypes.Zerg_Lair,
+            (int)UnitTypes.Zerg_Hydralisk_Den,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Protoss_Probe,
+            (int)UnitTypes.Protoss_Stargate,
+            (int)UnitTypes.Protoss_Carrier,
+        };
+        int unitTypeCount = unitTypeIds.Length;
+
+        int caseIndex = 0;
+        for (int ut = 0; ut < unitTypeCount; ++ut) {
+            for (int qn = 0; qn < 7; ++qn) {
+                for (int sv = 0; sv < 12; ++sv) {
+                    UnitType t = types[unitTypeIds[ut]];
+                    t.GroupFlags = (sv % 3 == 0) ? GroupFlag.Zerg : ((sv % 3 == 1) ? GroupFlag.Terran : GroupFlag.Protoss);
+                    t.Flags = 0;
+                    if (sv % 4 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+                    t.SupplyRequiredRaw = ((sv % 5) + 1) * Supply.SupplyScale;
+                    t.MineralCost = (sv * 11) % 90;
+                    t.GasCost = (sv * 7) % 50;
+
+                    // The builder's queue.
+                    BuildQueue.State s = new BuildQueue.State();
+                    for (int i = 0; i < qn && i < 3; ++i) {
+                        s.Queue.Add(unitTypeIds[(ut + i) % unitTypeCount]);
+                    }
+
+                    // The player's state.
+                    int owner = 0;
+                    int race = (sv % 3 == 0) ? 0 : ((sv % 3 == 1) ? 1 : 2);
+                    int supplyUsed = ((caseIndex + variant) % 200) * Supply.SupplyScale;
+                    int supplyAvailable = ((caseIndex * 3 + variant) % 210) * Supply.SupplyScale;
+                    s.CurrentMinerals = (caseIndex * 7 + variant) % 220;
+                    s.CurrentGas = (caseIndex * 5 + variant) % 180;
+                    types[(int)UnitTypes.Zerg_Hydralisk].SupplyRequiredRaw = 2 * Supply.SupplyScale;
+
+                    // The limbo queue.
+                    if (sv % 5 == 1) {
+                        for (int i = 0; i < 1 && s.Queue.Count + s.Limbo.Count < 3; ++i) {
+                            s.Limbo.Add(unitTypeIds[(ut + i + 3) % unitTypeCount]);
+                        }
+                    }
+
+                    int mineralsBefore = s.CurrentMinerals;
+                    int gasBefore = s.CurrentGas;
+                    int queueBefore = s.Queue.Count;
+                    int limboBefore = s.Limbo.Count;
+
+                    bool pushed = false;
+                    if (s.Queue.Count + s.Limbo.Count < 4) {
+                        if (BuildQueue.CanPush(s, t, supplyUsed, supplyAvailable,
+                                               types[(int)UnitTypes.Zerg_Hydralisk].SupplyRequiredRaw)) {
+                            BuildQueue.Push(s, t);
+                            pushed = true;
+                        }
+                    }
+
+                    Console.WriteLine("P " + caseIndex + " " + ut + " " + qn + " " + sv
+                        + " " + t.GroupFlags + " " + t.Flags
+                        + " " + t.SupplyRequiredRaw
+                        + " " + t.MineralCost + " " + t.GasCost
+                        + " " + supplyUsed + " " + supplyAvailable
+                        + " " + mineralsBefore + " " + gasBefore
+                        + " " + queueBefore + " " + limboBefore
+                        + " " + s.Queue.Count + " " + s.Limbo.Count
+                        + " " + s.CurrentMinerals + " " + s.CurrentGas
+                        + " " + (pushed ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The queue clearing and the refunds.
+        caseIndex = 0;
+        for (int ut = 0; ut < unitTypeCount; ++ut) {
+            for (int qn = 0; qn < 7; ++qn) {
+                for (int sv = 0; sv < 6; ++sv) {
+                    UnitType t = types[unitTypeIds[ut]];
+                    t.MineralCost = (sv * 13) % 100;
+                    t.GasCost = (sv * 9) % 60;
+
+                    BuildQueue.State s = new BuildQueue.State();
+                    for (int i = 0; i < qn && i < 3; ++i) {
+                        s.Queue.Add(unitTypeIds[(ut + i) % unitTypeCount]);
+                    }
+                    if (sv % 3 == 1) {
+                        for (int i = 0; i < 1 && s.Queue.Count + s.Limbo.Count < 3; ++i) {
+                            s.Limbo.Add(unitTypeIds[(ut + i + 2) % unitTypeCount]);
+                        }
+                    }
+
+                    s.CurrentMinerals = 100;
+                    s.CurrentGas = 50;
+
+                    BuildQueue.ClearSingle(s);
+
+                    // The refunds.
+                    BuildQueue.State r = new BuildQueue.State();
+                    r.CurrentMinerals = 100;
+                    r.CurrentGas = 50;
+                    BuildQueue.RefundUnitCosts(r, t);
+                    int refundMinerals = r.CurrentMinerals;
+                    int refundGas = r.CurrentGas;
+
+                    BuildQueue.State p = new BuildQueue.State();
+                    p.CurrentMinerals = 100;
+                    p.CurrentGas = 50;
+                    BuildQueue.PartiallyRefundUnitCosts(p, t);
+                    int partialMinerals = p.CurrentMinerals;
+                    int partialGas = p.CurrentGas;
+
+                    Console.WriteLine("C " + caseIndex + " " + ut + " " + qn + " " + sv
+                        + " " + s.Queue.Count + " " + s.Limbo.Count
+                        + " " + t.MineralCost + " " + t.GasCost
+                        + " " + refundMinerals + " " + refundGas
+                        + " " + partialMinerals + " " + partialGas);
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+}

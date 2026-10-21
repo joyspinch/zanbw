@@ -1,0 +1,105 @@
+using System;
+
+// openbw: the build queue layer (bwgame.h)
+//
+// The C++'s build_queue_push puts a unit type into a builder's queue.
+// The rules are:
+//
+//   1. the queue holds at most 5 entries
+//   2. the supply is only checked when the queue is empty, because
+//      only the first item needs a supply slot right now
+//   3. the resources are always checked
+//   4. the limbo queue is flushed into the queue afterwards
+//   5. the cost is only taken for units that are not buildings, so
+//      that a building's cost is taken when the building is placed
+//
+// The C++'s queue holds pointers to unit types, so the queue here
+// holds unit type ids.
+public class BuildQueue {
+    // openbw: the queue's capacity.
+    public const int MaxQueueSize = 5;
+
+    // The builder's queue and the limbo queue, and the player's
+    // resources.
+    public class State {
+        // openbw: unit_t::build_queue
+        public List<int> Queue;
+
+        // openbw: unit_t::build_queue_limbo
+        public List<int> Limbo;
+
+        // openbw: st.current_minerals and st.current_gas
+        public int CurrentMinerals;
+        public int CurrentGas;
+
+        public State() {
+            Queue = new List<int>();
+            Limbo = new List<int>();
+            CurrentMinerals = 0;
+            CurrentGas = 0;
+        }
+    }
+
+    // openbw: bool build_queue_push(unit_t* u, const unit_type_t* unit_type)
+    //
+    // Whether the unit type can be pushed onto the builder's queue.
+    // The queue and the limbo queue are left alone when it cannot.
+    public static bool CanPush(State s, UnitType unitType,
+                                int supplyUsedRaw, int supplyAvailableRaw,
+                                int hydraliskSupplyRequiredRaw) {
+        if (s.Queue.Count >= MaxQueueSize) return false;
+        if (s.Queue.Count == 0) {
+            if (!Supply.HasAvailableSupplyFor(unitType, supplyUsedRaw, supplyAvailableRaw,
+                                              hydraliskSupplyRequiredRaw)) return false;
+        }
+        if (!Supply.HasAvailableResourcesFor(unitType, s.CurrentMinerals, s.CurrentGas)) return false;
+        return true;
+    }
+
+    // openbw: bool build_queue_push(unit_t* u, const unit_type_t* unit_type)
+    //
+    // Pushes the unit type onto the queue. The limbo queue is flushed
+    // in afterwards and the cost is taken, unless the unit type is a
+    // building.
+    public static void Push(State s, UnitType unitType) {
+        s.Queue.Add(unitType.Id);
+        for (int i = 0; i < s.Limbo.Count; ++i) {
+            s.Queue.Add(s.Limbo[i]);
+        }
+        s.Limbo.Clear();
+        if (!UnitFlags.Building(unitType)) {
+            s.CurrentMinerals = s.CurrentMinerals - unitType.MineralCost;
+            s.CurrentGas = s.CurrentGas - unitType.GasCost;
+        }
+    }
+
+    // openbw: void build_queue_clear_single(unit_t* u)
+    //
+    // The first entry leaves the queue and the rest moves to the limbo
+    // queue.
+    public static void ClearSingle(State s) {
+        if (s.Queue.Count == 0) return;
+        s.Limbo.Clear();
+        for (int i = 1; i < s.Queue.Count; ++i) {
+            s.Limbo.Add(s.Queue[i]);
+        }
+        s.Queue.Clear();
+    }
+
+    // openbw: void refund_unit_costs(int owner, unit_type_autocast unit_type)
+    //
+    // The cost given back when a queued item is cancelled.
+    public static void RefundUnitCosts(State s, UnitType unitType) {
+        s.CurrentMinerals = s.CurrentMinerals + unitType.MineralCost;
+        s.CurrentGas = s.CurrentGas + unitType.GasCost;
+    }
+
+    // openbw: void partially_refund_unit_costs(int owner, unit_type_autocast unit_type)
+    //
+    // The cost given back when a building that is being built is
+    // cancelled. Three quarters of the cost comes back.
+    public static void PartiallyRefundUnitCosts(State s, UnitType unitType) {
+        s.CurrentMinerals = s.CurrentMinerals + unitType.MineralCost * 3 / 4;
+        s.CurrentGas = s.CurrentGas + unitType.GasCost * 3 / 4;
+    }
+}
