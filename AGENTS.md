@@ -1481,3 +1481,45 @@ Zan 侧用有符号 `int` 就变成 `空间不足`，行为对不上。
 C++ 侧表现为 `E`（我的 terminate handler）或者段错误。
 
 **做法**：槽位按 `i % N` 复用，N 取到能让总槽位数落在上限内。
+
+## 建造规则层
+
+### 103. `unit_addon` / `unit_has_addon` 先看**单位类型是不是建筑**
+
+```cpp
+unit_t* unit_addon(const unit_t* u) const {
+    return ut_building(u) ? u->building.addon : nullptr;
+}
+bool unit_has_addon(const unit_t* u, UnitTypes unit_type_id) const {
+    return ut_building(u) && u->building.addon && unit_is(u->building.addon, unit_type_id);
+}
+```
+
+两个都要先过 `ut_building(u)`。移植时只判"有没有附属建筑"，
+非建筑单位（兵、航母、掠夺者）也会被当成有附属建筑，
+于是"造电梯"这类规则在错的单位上放行了。
+
+**做法**：附属建筑挂在单位上，判定时先看类型标志。
+
+### 104. C++ 的 `unit_t` 里 carrier 和 reaver 是**联合体**
+
+```cpp
+unit_t* carrier;   // inside_count / outside_count
+unit_t* reaver;    // inside_count
+```
+
+`carrier.inside_count` 和 `reaver.inside_count` 是**同一块内存**。
+床里两个都写，后写的把先写的覆盖掉。
+
+**做法**：按类型只写对应的那一个。Zan 侧字段是分开的，
+但取值时也要按类型来，不能两个都填。
+
+### 105. 床里 `unit_types.vec` 循环内 `push_back` 会让指针**悬空**
+
+`u->unit_type = &game_st.unit_types.vec[i]` 存的是指针。
+循环里再 `push_back`，vector 扩容搬家，之前所有指针全部失效。
+
+**症状**：gdb 里跑得好好的，独立跑就段错误——
+gdb 的分配器行为和独立运行不同，悬空指针有时读得到旧值。
+
+**做法**：床里所有单位类型在循环外建好。
