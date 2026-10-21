@@ -66,4 +66,11 @@ public class TileMap {
     public int TileIndex(int posX, int posY) {
         return (posY / 32) * MapTileWidth + (posX / 32);
     }
+
+    // The tile at a pixel position. The C++'s tile_index() errors on
+    // an out-of-bounds position; here the caller is expected to have
+    // checked.
+    public Tile TileAt(Xy position) {
+        return Tiles[TileIndex(position.X, position.Y)].Tile;
+    }
 }

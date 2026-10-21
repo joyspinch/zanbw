@@ -1,0 +1,172 @@
+using System;
+
+// openbw: player_t (game_types.h)
+//
+// The controller kinds. The order matters: the C++'s enum lists them
+// by value and the values are stored in the player record.
+public class PlayerController {
+    public const int Inactive = 0;
+    public const int ComputerGame = 1;
+    public const int Occupied = 2;
+    public const int RescuePassive = 3;
+    public const int UnusedRescueActive = 4;
+    public const int Computer = 5;
+    public const int Open = 6;
+    public const int Neutral = 7;
+    public const int Closed = 8;
+    public const int UnusedObserver = 9;
+    public const int UserLeft = 10;
+    public const int ComputerDefeated = 11;
+}
+
+// The player record: openbw's player_t.
+public class Player {
+    // openbw: player_t::controller
+    public int Controller;
+
+    // openbw: player_t::race
+    public Race Race;
+
+    // openbw: player_t::force
+    public int Force;
+
+    // openbw: player_t::color
+    public int Color;
+
+    // openbw: player_t::initially_active
+    public bool InitiallyActive;
+
+    // openbw: player_t::victory_state
+    //
+    // 0 = still playing, 1 = dropped, 2 = left, 3 = won.
+    public int VictoryState;
+
+    public Player() {
+        Controller = PlayerController.Inactive;
+        Race = Race.None;
+        Force = 0;
+        Color = 0;
+        InitiallyActive = false;
+        VictoryState = 0;
+    }
+}
+
+// openbw: the player state predicates (bwgame.h)
+//
+// The tests over the player records and the per-player tables.
+//
+// The per-player tables (the unit counts, the upgrade levels, the
+// tech flags) live in the game state, so this class takes them as
+// arguments rather than reaching for a global. The layer that owns
+// the game state passes them in.
+public class PlayerState {
+    // openbw: bool player_slot_active(int n) const
+    //
+    // Whether the slot is in play. The slot must be one of the eight
+    // players, and its controller must be one of the kinds that count
+    // as active.
+    public static bool PlayerSlotActive(Player[] players, int n) {
+        if (n >= 8) return false;
+        Player p = players[n];
+        if (p.Controller == PlayerController.Occupied) return !PlayerDefeated(players, n);
+        if (p.Controller == PlayerController.ComputerGame) return !PlayerDefeated(players, n);
+        if (p.Controller == PlayerController.Neutral) return true;
+        if (p.Controller == PlayerController.RescuePassive) return true;
+        if (p.Controller == PlayerController.UnusedRescueActive) return true;
+        return false;
+    }
+
+    // openbw: auto active_players() const
+    //
+    // The slots that are in play, in slot order.
+    public static List<int> ActivePlayers(Player[] players) {
+        List<int> result = new List<int>();
+        for (int i = 0; i < 8; ++i) {
+            if (PlayerSlotActive(players, i)) result.Add(i);
+        }
+        return result;
+    }
+
+    // openbw: bool player_won(int owner) const
+    public static bool PlayerWon(Player[] players, int owner) {
+        return players[owner].VictoryState >= 3;
+    }
+
+    // openbw: bool player_defeated(int owner) const
+    //
+    // A player that has a victory state but has not won. The dropped
+    // and left states both count as defeated.
+    public static bool PlayerDefeated(Player[] players, int owner) {
+        int s = players[owner].VictoryState;
+        if (s != 0 && !PlayerWon(players, owner)) return true;
+        return false;
+    }
+
+    // openbw: bool player_has_unit(int owner, UnitTypes unit_type_id) const
+    public static bool PlayerHasUnit(int[][] unitCounts, int owner, int unitTypeId) {
+        return unitCounts[owner][unitTypeId] != 0;
+    }
+
+    // openbw: bool player_has_completed_unit(int owner, UnitTypes unit_type_id) const
+    public static bool PlayerHasCompletedUnit(int[][] completedUnitCounts, int owner, int unitTypeId) {
+        return completedUnitCounts[owner][unitTypeId] != 0;
+    }
+
+    // openbw: bool player_has_researched(int owner, TechTypes tech_id) const
+    public static bool PlayerHasResearched(bool[][] techResearched, int owner, int techId) {
+        return techResearched[owner][techId];
+    }
+
+    // openbw: bool player_is_researching(int owner, TechTypes tech_id) const
+    public static bool PlayerIsResearching(bool[][] techResearching, int owner, int techId) {
+        return techResearching[owner][techId];
+    }
+
+    // openbw: bool player_has_upgrade(int owner, UpgradeTypes upgrade_id) const
+    public static bool PlayerHasUpgrade(int[][] upgradeLevels, int owner, int upgradeId) {
+        return upgradeLevels[owner][upgradeId] != 0;
+    }
+
+    // openbw: bool player_is_upgrading(int owner, UpgradeTypes upgrade_id) const
+    public static bool PlayerIsUpgrading(bool[][] upgradeUpgrading, int owner, int upgradeId) {
+        return upgradeUpgrading[owner][upgradeId];
+    }
+
+    // openbw: bool player_tech_available(int owner, TechTypes tech_id) const
+    public static bool PlayerTechAvailable(bool[][] techAvailable, int owner, int techId) {
+        return techAvailable[owner][techId];
+    }
+
+    // openbw: int player_max_upgrade_level(int owner, UpgradeTypes upgrade_id) const
+    public static int PlayerMaxUpgradeLevel(int[][] maxUpgradeLevels, int owner, int upgradeId) {
+        return maxUpgradeLevels[owner][upgradeId];
+    }
+
+    // openbw: bool player_position_is_visible(int owner, xy position) const
+    //
+    // The C++'s tile_visibility() returns the *complement* of the
+    // tile's visible bits, so the check is against the inverted mask.
+    public static bool PlayerPositionIsVisible(TileMap tiles, int owner, Xy position) {
+        return (TileVisibility(tiles, position) & (1 << owner)) != 0;
+    }
+
+    // openbw: bool player_position_is_explored(int owner, xy position) const
+    public static bool PlayerPositionIsExplored(TileMap tiles, int owner, Xy position) {
+        return (TileExplored(tiles, position) & (1 << owner)) != 0;
+    }
+
+    // openbw: uint8_t tile_visibility(xy pos) const
+    //
+    // The C++ returns a uint8_t, so the mask is truncated to eight bits
+    // before the caller applies it. That matters for owner 8 and up:
+    // "1 << owner" is already zero there, so those players never see
+    // a tile.
+    public static int TileVisibility(TileMap tiles, Xy position) {
+        return ~tiles.TileAt(position).Visible & 0xff;
+    }
+
+    // openbw: uint8_t tile_explored(xy pos) const
+    public static int TileExplored(TileMap tiles, Xy position) {
+        return ~tiles.TileAt(position).Explored & 0xff;
+    }
+}
