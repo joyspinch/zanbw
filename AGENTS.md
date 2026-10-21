@@ -1944,3 +1944,30 @@ push 进去的），不是nexus。判定时**按塔的归属**过滤。
 
 **做法**：床里把塔**显式加进列表**——列表是 intrusive 的，
 要 `push_front` 进去，遍历才看得到。
+
+## 炮塔层
+
+### 136. `set_unit_heading` **不只改朝向**，还改**下一个速度方向**
+
+C++ 的 `set_unit_heading(u, heading)` 做四件事：改
+`next_velocity_direction`、改 `heading`、改 `current_velocity_direction`、
+重算速度向量。
+
+`turn_turret` 里调它，**只搬 `heading` 过去是不够的**——
+`next_velocity_direction` 也会跟着变，差这一个字段整条轨迹就偏。
+
+**做法**：移植"设置朝向"这类原版 setter 时，**把它的副作用一起搬**，
+别只搬看得到的那一个字段。
+
+### 137. 炮塔的**钳制量是原始方向单位**，不是角度
+
+`turn_turret` 里那个"每次最多转 32"是 `32_dir`，即
+`direction_t::from_raw(32)`——**256 分之 32**，是**八分之一圈**，
+不是 32 度也不是 45 度。
+
+判断用 `diff > 32_dir`，`diff` 是 `direction_t` 的差，
+**按 8 位有符号原始值比较**（`direction_t` 是
+`fixed_point<0, 8, true, true>`，有符号）。
+
+**做法**：这类"魔法数字"要**连同它的单位一起注释**，
+否则后来人一定会当成角度去改。

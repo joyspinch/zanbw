@@ -1,0 +1,48 @@
+using System;
+
+// openbw: the turret layer (bwgame.h)
+//
+// The C++'s turn_turret turns a turret's parent unit. A turret sits on
+// a building and has its own heading.
+//
+// The rules:
+//
+//   1. A turret with a target drives the parent's heading; without a
+//      target it only does so once the two headings agree.
+//   2. The Goliath turret and the hero turret can only turn 32 raw
+//      units (a quarter turn) per step toward the turret's heading.
+//
+// The 32 is raw direction units, not degrees: 32 raw of 256 is an
+// eighth of a full turn.
+public class Turret {
+    // openbw: void turn_turret(unit_t* u, direction_t turn) const
+    //
+    // Turns the turret u.
+    public static void TurnTurret(Unit u, Unit subunit, Dir turn) {
+        if (u.OrderTarget.UnitId != 0) {
+            u.UnsetStatus(StatusFlag.Flag2000000);
+        } else {
+            if (u.Heading == subunit.Heading) {
+                u.SetStatus(StatusFlag.Flag2000000);
+            }
+        }
+        if (u.HasStatusFlag(StatusFlag.Flag2000000)) {
+            // openbw: set_unit_heading(u, u->subunit->heading) -- the
+            // heading setter also moves the next velocity direction.
+            u.NextVelocityDirection = subunit.Heading;
+            u.Heading = subunit.Heading;
+        } else {
+            u.NextVelocityDirection = u.NextVelocityDirection + turn;
+            u.Heading = u.NextVelocityDirection;
+        }
+        if (u.UnitType.Id == (int)UnitTypes.Terran_Goliath_Turret
+            || u.UnitType.Id == (int)UnitTypes.Hero_Alan_Schezar_Turret) {
+            Dir diff = subunit.Heading - u.Heading;
+            if (diff > new Dir(32)) {
+                u.Heading = subunit.Heading - new Dir(32);
+            } else if (diff < new Dir(-32)) {
+                u.Heading = subunit.Heading + new Dir(32);
+            }
+        }
+    }
+}
