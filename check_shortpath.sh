@@ -8,6 +8,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 ZANC="${ZANC:-D:/project/zan-lang/build/zanc.exe}"
+ZAN_STDLIB_ARG=""
+if [ -n "$ZAN_STDLIB" ]; then ZAN_STDLIB_ARG="--stdlib-path $ZAN_STDLIB"; fi
 CXX="${CXX:-g++}"
 
 cd "$ROOT"
@@ -36,7 +38,7 @@ echo "== building Zan short path port =="
         "${ZAN_SOURCES_REGIONS[@]}" \
         "${ZAN_SOURCES_ASTAR[@]}" \
         "${ZAN_SOURCES_SHORTPATH[@]}" \
-        --auto-stdlib -o build/shortpath_zan.exe || exit 1
+        --auto-stdlib $ZAN_STDLIB_ARG -o build/shortpath_zan.exe || exit 1
 
 FAIL=0
 for v in $VARIANTS; do

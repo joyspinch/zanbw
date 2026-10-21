@@ -9,6 +9,8 @@
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 ZANC="${ZANC:-D:/project/zan-lang/build/zanc.exe}"
+ZAN_STDLIB_ARG=""
+if [ -n "$ZAN_STDLIB" ]; then ZAN_STDLIB_ARG="--stdlib-path $ZAN_STDLIB"; fi
 CXX="${CXX:-g++}"
 
 cd "$ROOT"
@@ -24,7 +26,7 @@ ZAN_SRC=(
 )
 
 echo "== building the Zan side =="
-"$ZANC" "${ZAN_SRC[@]}" --auto-stdlib -o build/unitorder_zan.exe || exit 1
+"$ZANC" "${ZAN_SRC[@]}" --auto-stdlib $ZAN_STDLIB_ARG -o build/unitorder_zan.exe || exit 1
 
 echo "== building the C++ side =="
 "$CXX" -std=c++17 -I../openbw -O0 -g tools/cppbed/unitorder_bed.cpp -o ./tools/cppbed/unitorder_bed.exe || exit 1

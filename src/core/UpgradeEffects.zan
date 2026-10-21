@@ -1,0 +1,91 @@
+using System;
+
+// openbw: the upgrade effects layer (bwgame.h)
+//
+// Two things in the C++ read the player's upgrades to change how a
+// unit behaves:
+//
+//   - unit_armor: the unit's armour, plus the armour upgrade's level
+//     and, for the ultralisk, the chitinous plating bonus
+//   - update_unit_speed_upgrades: which upgrade makes a unit faster,
+//     and which one makes it attack faster
+//
+// The speed upgrade is per unit type, with a few heroes that always
+// have it.
+public class UpgradeEffects {
+    // openbw: fp8 unit_armor(const unit_t* u) const
+    //
+    // The unit's armour.
+    public static Fp UnitArmor(Unit u, int[] upgradeLevels) {
+        Fp r = Fp.Integer(u.UnitType.Armor);
+        if (UnitTypeIds.UnitIsUltralisk(u.UnitType)
+            && PlayerHasUpgrade(u.Owner, (int)UpgradeTypes.Chitinous_Plating, upgradeLevels)) {
+            r = r + Fp.Integer(2);
+        }
+        r = r + Fp.Integer(UpgradeLevel(u.Owner, u.UnitType.ArmorUpgrade, upgradeLevels));
+        return r;
+    }
+
+    // openbw: bool player_has_upgrade(int owner, UpgradeTypes upgrade_id) const
+    //
+    // Whether the player has the upgrade at all.
+    public static bool PlayerHasUpgrade(int owner, int upgradeId, int[] upgradeLevels) {
+        return UpgradeLevel(owner, upgradeId, upgradeLevels) != 0;
+    }
+
+    // openbw: int player_upgrade_level(int owner, UpgradeTypes upgrade_id) const
+    //
+    // The level of the player's upgrade.
+    public static int UpgradeLevel(int owner, int upgradeId, int[] upgradeLevels) {
+        if (upgradeId < 0) return 0;
+        return upgradeLevels[owner * 64 + upgradeId];
+    }
+
+    // openbw: the speed upgrade for the unit type.
+    //
+    // The C++'s update_unit_speed_upgrades switches on the unit type
+    // and returns the upgrade that makes the unit faster, or None when
+    // the unit type has no such upgrade.
+    public static int SpeedUpgradeId(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Vulture) return (int)UpgradeTypes.Ion_Thrusters;
+        if (ut.Id == (int)UnitTypes.Hero_Jim_Raynor_Vulture) return (int)UpgradeTypes.Ion_Thrusters;
+        if (ut.Id == (int)UnitTypes.Zerg_Overlord) return (int)UpgradeTypes.Pneumatized_Carapace;
+        if (ut.Id == (int)UnitTypes.Zerg_Zergling) return (int)UpgradeTypes.Metabolic_Boost;
+        if (ut.Id == (int)UnitTypes.Zerg_Hydralisk) return (int)UpgradeTypes.Muscular_Augments;
+        if (ut.Id == (int)UnitTypes.Protoss_Zealot) return (int)UpgradeTypes.Leg_Enhancements;
+        if (ut.Id == (int)UnitTypes.Protoss_Scout) return (int)UpgradeTypes.Gravitic_Thrusters;
+        if (ut.Id == (int)UnitTypes.Protoss_Shuttle) return (int)UpgradeTypes.Gravitic_Drive;
+        if (ut.Id == (int)UnitTypes.Protoss_Observer) return (int)UpgradeTypes.Gravitic_Boosters;
+        if (ut.Id == (int)UnitTypes.Zerg_Ultralisk) return (int)UpgradeTypes.Anabolic_Synthesis;
+        return (int)UpgradeTypes.None;
+    }
+
+    // openbw: void update_unit_speed_upgrades(unit_t*u)
+    //
+    // Whether the unit is faster because of an upgrade, and whether it
+    // attacks faster because of an upgrade.
+    public static void UpdateUnitSpeedUpgrades(Unit u, int[] upgradeLevels) {
+        bool cooldown = false;
+        if (u.UnitType.Id == (int)UnitTypes.Hero_Devouring_One) cooldown = true;
+        if (u.UnitType.Id == (int)UnitTypes.Zerg_Zergling
+            && PlayerHasUpgrade(u.Owner, (int)UpgradeTypes.Adrenal_Glands, upgradeLevels)) {
+            cooldown = true;
+        }
+        bool speed = false;
+        int speedUpg = SpeedUpgradeId(u.UnitType);
+        if (speedUpg != (int)UpgradeTypes.None && PlayerHasUpgrade(u.Owner, speedUpg, upgradeLevels)) {
+            speed = true;
+        }
+        if (u.UnitType.Id == (int)UnitTypes.Hero_Hunter_Killer) speed = true;
+        if (u.UnitType.Id == (int)UnitTypes.Hero_Yggdrasill) speed = true;
+        if (u.UnitType.Id == (int)UnitTypes.Hero_Fenix_Zealot) speed = true;
+        if (u.UnitType.Id == (int)UnitTypes.Hero_Mojo) speed = true;
+        if (u.UnitType.Id == (int)UnitTypes.Hero_Artanis) speed = true;
+        if (u.UnitType.Id == (int)UnitTypes.Zerg_Lurker) speed = true;
+
+        if (cooldown != UnitFlags.CooldownUpgrade(u) || speed != UnitFlags.SpeedUpgrade(u)) {
+            if (cooldown) u.SetStatus(StatusFlag.CooldownUpgrade);
+            if (speed) u.SetStatus(StatusFlag.SpeedUpgrade);
+        }
+    }
+}

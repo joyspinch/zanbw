@@ -1,0 +1,133 @@
+using System;
+
+// The Zan side of the upgrade effects bed.
+//
+// The bed drives the same queries over the same unit types, armour
+// values and upgrade levels as the C++ bed
+// (tools/cppbed/upgradeeffects_bed.cpp), so the two traces must match
+// byte for byte.
+
+public class UpgradeEffectsBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+
+        // The upgrades that matter.
+        int[] upgrades = new int[] {
+            (int)UpgradeTypes.Terran_Vehicle_Plating,
+            (int)UpgradeTypes.Ion_Thrusters,
+            (int)UpgradeTypes.Pneumatized_Carapace,
+            (int)UpgradeTypes.Metabolic_Boost,
+            (int)UpgradeTypes.Adrenal_Glands,
+            (int)UpgradeTypes.Muscular_Augments,
+            (int)UpgradeTypes.Leg_Enhancements,
+            (int)UpgradeTypes.Gravitic_Thrusters,
+            (int)UpgradeTypes.Gravitic_Drive,
+            (int)UpgradeTypes.Gravitic_Boosters,
+            (int)UpgradeTypes.Anabolic_Synthesis,
+            (int)UpgradeTypes.Chitinous_Plating,
+            (int)UpgradeTypes.Terran_Infantry_Armor,
+            (int)UpgradeTypes.Zerg_Carapace,
+            (int)UpgradeTypes.Protoss_Ground_Armor,
+        };
+        int upgradeCount = upgrades.Length;
+
+        // The player's upgrade levels.
+        int[] upgradeLevels = new int[12 * 64];
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] unitTypeIds = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Vulture,
+            (int)UnitTypes.Hero_Jim_Raynor_Vulture,
+            (int)UnitTypes.Zerg_Overlord,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Ultralisk,
+            (int)UnitTypes.Zerg_Lurker,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Hero_Fenix_Zealot,
+            (int)UnitTypes.Protoss_Scout,
+            (int)UnitTypes.Protoss_Shuttle,
+            (int)UnitTypes.Protoss_Observer,
+            (int)UnitTypes.Hero_Artanis,
+            (int)UnitTypes.Hero_Mojo,
+            (int)UnitTypes.Hero_Yggdrasill,
+            (int)UnitTypes.Hero_Hunter_Killer,
+            (int)UnitTypes.Hero_Devouring_One,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Factory,
+            (int)UnitTypes.Protoss_Forge,
+            (int)UnitTypes.Zerg_Hatchery,
+        };
+        int unitTypeCount = unitTypeIds.Length;
+
+        int caseIndex = 0;
+        for (int ut = 0; ut < unitTypeCount; ++ut) {
+            for (int up = 0; up < upgradeCount; ++up) {
+                for (int sv = 0; sv < 6; ++sv) {
+                    UnitType t = types[unitTypeIds[ut]];
+                    t.Armor = ((sv + variant) * 3) % 8;
+                    t.ArmorUpgrade = upgrades[(up + sv) % upgradeCount];
+
+                    // The player's upgrades.
+                    for (int o = 0; o < 12; ++o) {
+                        for (int u2 = 0; u2 < 62; ++u2) {
+                            upgradeLevels[o * 64 + u2] = 0;
+                        }
+                    }
+                    upgradeLevels[0 * 64 + upgrades[up]] = 1 + ((sv + variant) % 3);
+                    if ((sv + variant) % 2 == 0) {
+                        upgradeLevels[0 * 64 + (int)UpgradeTypes.Chitinous_Plating] = 1;
+                    }
+                    if ((sv + variant) % 3 == 0) {
+                        upgradeLevels[0 * 64 + (int)UpgradeTypes.Adrenal_Glands] = 1;
+                    }
+
+                    Unit u = new Unit();
+                    u.UnitType = t;
+                    u.Owner = 0;
+                    u.StatusFlagBits = 0;
+                    u.Sprite = new Sprite();
+                    u.Hp = Fp.Integer(50);
+
+                    Fp armor = UpgradeEffects.UnitArmor(u, upgradeLevels);
+
+                    // The speed upgrades, with the status flags cleared
+                    // first so the update can set them.
+                    u.StatusFlagBits = 0;
+                    UpgradeEffects.UpdateUnitSpeedUpgrades(u, upgradeLevels);
+                    int speedFlag = UnitFlags.SpeedUpgrade(u) ? 1 : 0;
+                    int cooldownFlag = UnitFlags.CooldownUpgrade(u) ? 1 : 0;
+
+                    Console.WriteLine("U " + caseIndex + " " + ut + " " + up + " " + sv
+                        + " " + t.Armor
+                        + " " + t.ArmorUpgrade
+                        + " " + upgradeLevels[0 * 64 + upgrades[up]]
+                        + " " + upgradeLevels[0 * 64 + (int)UpgradeTypes.Chitinous_Plating]
+                        + " " + upgradeLevels[0 * 64 + (int)UpgradeTypes.Adrenal_Glands]
+                        + " " + armor.RawValue()
+                        + " " + speedFlag + " " + cooldownFlag
+                        + " " + u.StatusFlagBits
+                        + " " + unitTypeIds[ut]
+                        + " " + upgrades[up]);
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+}

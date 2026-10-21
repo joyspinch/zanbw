@@ -11,6 +11,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 ZANC="${ZANC:-D:/project/zan-lang/build/zanc.exe}"
+ZAN_STDLIB_ARG=""
+if [ -n "$ZAN_STDLIB" ]; then ZAN_STDLIB_ARG="--stdlib-path $ZAN_STDLIB"; fi
 CXX="${CXX:-g++}"
 
 cd "$ROOT"
@@ -30,7 +32,7 @@ echo "== building Zan regions port =="
 "$ZANC" src/beds/regions_main.zan \
         "${ZAN_SOURCES_BASE[@]}" \
         "${ZAN_SOURCES_REGIONS[@]}" \
-        --auto-stdlib -o build/regions_zan.exe || exit 1
+        --auto-stdlib $ZAN_STDLIB_ARG -o build/regions_zan.exe || exit 1
 
 FAIL=0
 for v in $VARIANTS; do

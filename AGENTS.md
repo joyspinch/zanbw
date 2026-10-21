@@ -1813,3 +1813,53 @@ C++ 的 `weapon_type_t::attack_angle` 是 `fp8`，床里打印时是
 
 **做法**：bed 里存原值（`角度 * 256`），移植层比较时用
 `Fp.Integer(角)`。两边都别自作主张换算。
+
+## 升级效果层
+
+### 128. 升级数组的**长度和 None 哨兵对不上**
+
+C++ 的 `st.upgrade_levels` 是 `type_indexed_array<int, UpgradeTypes>`，
+**只有 61 项**（id 0..60）。而 `UpgradeTypes::None = 61`——**越界**。
+
+所以 `player_upgrade_level(owner, None)` 会抛
+`array::at: 61 >= 61`。
+
+**为什么原版没事**：原版**从不**拿 `None` 去索引——
+`update_unit_speed_upgrades` 里是**先判 `!= None`，再取等级**。
+
+**做法**：
+- 移植层的取等级函数要**对越界的 id 返回 0**，别崩。
+- 床里**别把 `None` 当装甲升级**用（`armor_upgrade` 会直接去索引）。
+
+### 129. 原版函数**顺手调别的函数**时，床要把那条路走通
+
+`update_unit_speed_upgrades` 改完状态位会调 `update_unit_speed`，
+而后者在 `flingy_movement_type == 2` 时要读**动画脚本数据**
+（`sprite->main_image->iscript_state`），没有就 `error("null image")`。
+
+**做法**：床里把 `flingy_movement_type` 设成 0，只测**状态位判定**那部分。
+另外 `flingy_type` 指针也要给一个**非空的**（`global_st.flingy_types`），
+否则 `update_unit_speed` 照样崩。
+
+**推广**：移植一个"会顺手调别的"的函数时，先看那条路要什么数据，
+再决定床是**把它铺好**还是**把它绕开**——绕开要在床的注释里写清楚。
+
+## 跨仓库的测试链路
+
+### 130. 工具链工作区被别人弄坏时，用**独立副本**
+
+zan-lang 的工作区被另一个会话清空了（`stdlib/` 和 `packages/` 都没了），
+对照床全编译不了。
+
+**做法**：
+
+1. `git archive HEAD stdlib packages` 导出到临时目录
+2. 床的编译命令用 `--stdlib-path <临时目录>/stdlib`
+3. 把 `zanc.exe` 和运行库复制到 `<临时目录>/build/`，
+   并把 `packages/` 放在它的**上一级**——编译器按
+   **exe 旁边的 `../packages`** 找包
+
+这样既不动别人的工作区，自己的验证也不受影响。
+
+**做法**：所有 check 脚本都支持 `ZAN_STDLIB` 和 `ZANC` 两个环境变量
+覆盖，缺省还是原来那两个路径。
