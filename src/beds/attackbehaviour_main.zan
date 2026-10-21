@@ -1,0 +1,139 @@
+using System;
+
+// The Zan side of the attack behaviour bed.
+//
+// The bed drives the same queries over the same positions, headings,
+// weapons and targets as the C++ bed
+// (tools/cppbed/attackbehaviour_bed.cpp), so the two traces must match
+// byte for byte.
+
+public class AttackBehaviourBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+        // The weapons.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 117; ++i) {
+            weapons.Add(new WeaponType());
+        }
+
+        // The alliance table.
+        int[] alliances = new int[12 * 12];
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] positions = new int[] {
+            0, 1, 2, 3, 4, 8, 16, 32, 64, 128, 256, -1, -2, -8, -32, -128, -256,
+        };
+        int posCount = positions.Length;
+
+        int caseIndex = 0;
+        for (int px = 0; px < posCount; ++px) {
+            for (int py = 0; py < posCount; ++py) {
+                for (int h = 0; h < 16; ++h) {
+                    Unit u = new Unit();
+                    u.UnitType = types[(int)UnitTypes.Terran_Marine];
+                    u.Owner = 0;
+                    u.StatusFlagBits = 0;
+                    u.Sprite = new Sprite();
+                    u.Sprite.Position = new Xy(positions[px], positions[py]);
+                    u.Position = new Xy(positions[px], positions[py]);
+                    u.NextTargetWaypoint = new Xy(positions[(py + 1) % posCount], positions[(px + 2) % posCount]);
+                    u.Heading = Dir.FromRaw((h * 16 + variant) % 256 - 128);
+
+                    // The weapon's attack angle.
+                    WeaponType w = weapons[0];
+                    // The C++'s attack angle is an fp8, and the bed
+                    // prints its raw value.
+                    w.AttackAngle = ((h * 3) % 40) * 256;
+                    types[(int)UnitTypes.Terran_Marine].GroundWeapon = w;
+                    types[(int)UnitTypes.Terran_Marine].AirWeapon = w;
+
+                    bool facing = AttackBehaviour.IsFacingNextTargetWaypoint(u, Fp.Integer((h * 5) % 30));
+                    bool atWaypoint = AttackBehaviour.IsAtNextTargetWaypointOrWithinAttackAngle(u, w);
+
+                    Console.WriteLine("F " + caseIndex + " " + px + " " + py + " " + h
+                        + " " + positions[px] + " " + positions[py]
+                        + " " + u.NextTargetWaypoint.X + " " + u.NextTargetWaypoint.Y
+                        + " " + u.Heading.RawValue()
+                        + " " + w.AttackAngle
+                        + " " + (facing ? 1 : 0) + " " + (atWaypoint ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The target switching.
+        caseIndex = 0;
+        for (int sv = 0; sv < 16; ++sv) {
+            for (int ot = 0; ot < 4; ++ot) {
+                for (int nt = 0; nt < 4; ++nt) {
+                    Unit u = new Unit();
+                    u.UnitType = types[(int)UnitTypes.Terran_Marine];
+                    u.Owner = 0;
+                    u.StatusFlagBits = 0;
+                    u.Sprite = new Sprite();
+                    u.Sprite.Position = new Xy(0, 0);
+                    u.Position = new Xy(0, 0);
+
+                    WeaponType w = weapons[0];
+                    w.MinRange = 0;
+                    w.MaxRange = 5 + ((sv + variant) % 6) * 5;
+                    w.AttackAngle = 10 * 256;
+                    types[(int)UnitTypes.Terran_Marine].GroundWeapon = w;
+                    types[(int)UnitTypes.Terran_Marine].AirWeapon = w;
+
+                    // The old target.
+                    Unit oldTarget = new Unit();
+                    oldTarget.UnitType = types[(int)UnitTypes.Zerg_Zergling + ot];
+                    oldTarget.Owner = (ot == 3) ? 0 : 1;
+                    oldTarget.StatusFlagBits = 0;
+                    oldTarget.Sprite = new Sprite();
+                    oldTarget.Sprite.Position = new Xy((ot + variant) * 4, 0);
+                    oldTarget.Position = oldTarget.Sprite.Position;
+                    oldTarget.Hp = Fp.Integer(50);
+
+                    // The new target.
+                    Unit newTarget = new Unit();
+                    newTarget.UnitType = types[(int)UnitTypes.Zerg_Zergling + nt];
+                    newTarget.Owner = (nt == 3) ? 0 : 1;
+                    newTarget.StatusFlagBits = 0;
+                    newTarget.Sprite = new Sprite();
+                    newTarget.Sprite.Position = new Xy((nt + variant) * 4, 0);
+                    newTarget.Position = newTarget.Sprite.Position;
+                    newTarget.Hp = Fp.Integer(50);
+
+                    // The alliance table.
+                    for (int o = 0; o < 12; ++o) {
+                        for (int o2 = 0; o2 < 12; ++o2) {
+                            alliances[o * 12 + o2] = (o == o2) ? 1 : 0;
+                        }
+                    }
+
+                    bool changed = AttackBehaviour.OnHitShouldChangeTarget(u, oldTarget, newTarget, alliances);
+
+                    Console.WriteLine("S " + caseIndex + " " + sv + " " + ot + " " + nt
+                        + " " + u.Owner + " " + oldTarget.Owner + " " + newTarget.Owner
+                        + " " + oldTarget.Sprite.Position.X + " " + newTarget.Sprite.Position.X
+                        + " " + w.MaxRange
+                        + " " + alliances[0 * 12 + oldTarget.Owner]
+                        + " " + alliances[0 * 12 + newTarget.Owner]
+                        + " " + (changed ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+}

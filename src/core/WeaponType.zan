@@ -55,6 +55,11 @@ public class WeaponType {
     // How many bullets the weapon fires in one shot.
     public int BulletCount;
 
+    // openbw: weapon_type_t::attack_angle
+    //
+    // How far off the target the unit may be pointing and still fire.
+    public int AttackAngle;
+
     public WeaponType() {
         Id = 0;
         Label = 0;
@@ -64,6 +69,7 @@ public class WeaponType {
         DamageAmount = 0;
         Cooldown = 0;
         BulletCount = 0;
+        AttackAngle = 0;
         BulletType = 0;
         HitType = 0;
         DamageType = 0;

@@ -1,0 +1,96 @@
+using System;
+
+// openbw: the attack behaviour layer (bwgame.h)
+//
+// The C++'s is_facing_next_target_waypoint and
+// is_at_next_target_waypoint_or_within_attack_angle decide whether a
+// unit is pointing at its target waypoint. The second one also lets
+// the unit fire when it is within the weapon's attack angle.
+//
+// The angle comes from xy_direction, which reads the tangent table, so
+// the direction is an 8-bit value that wraps.
+//
+// on_hit_should_change_target decides whether a unit should switch to
+// a new target after a hit.
+public class AttackBehaviour {
+    // openbw: direction_t xy_direction(xy pos) const
+    //
+    // The direction of a point, in the 8-bit direction units.
+    public static Dir XyDirection(Xy pos) {
+        if (pos.X == 0) return (pos.Y <= 0) ? Dir.Zero() : Dir.FromRaw(-128);
+        Dir r = Kin.Atan(Fp.Integer(pos.Y) / Fp.Integer(pos.X));
+        if (pos.X > 0) return r + Dir.FromRaw(64);
+        return Dir.FromRaw(-64) + r;
+    }
+
+    // openbw: bool is_facing_next_target_waypoint(const unit_t* u, fp8 angle = 0_fp8) const
+    //
+    // Whether the unit is pointing at its next target waypoint.
+    public static bool IsFacingNextTargetWaypoint(Unit u, Fp angle) {
+        if (u.Position == u.NextTargetWaypoint) return true;
+        Fp headingError = HeadingError(u);
+        return headingError <= angle;
+    }
+
+    // openbw: fp8::extend(u->heading - xy_direction(...)).abs()
+    //
+    // How far off the target waypoint the unit is pointing.
+    //
+    // The direction is an 8-bit value, so the difference wraps at 8
+    // bits before it is widened to the weapon's angle units.
+    public static Fp HeadingError(Unit u) {
+        Xy rel = new Xy(u.NextTargetWaypoint.X - u.Sprite.Position.X,
+                        u.NextTargetWaypoint.Y - u.Sprite.Position.Y);
+        Dir diff = u.Heading - XyDirection(rel);
+        return Fp.ExtendFromDir(diff.RawValue()).Abs();
+    }
+
+    // openbw: bool is_at_next_target_waypoint_or_within_attack_angle(const unit_t* u) const
+    //
+    // Whether the unit is at its next target waypoint, or close enough
+    // in angle to fire.
+    public static bool IsAtNextTargetWaypointOrWithinAttackAngle(Unit u, WeaponType groundWeapon) {
+        if (u.Position == u.NextTargetWaypoint) return true;
+        if (groundWeapon != null) {
+            Fp headingError = HeadingError(u);
+            if (headingError <= Fp.Integer(groundWeapon.AttackAngle)) return true;
+        }
+        return false;
+    }
+
+    // openbw: bool on_hit_should_change_target(const unit_t* u, const unit_t* old_target, const unit_t* new_target) const
+    //
+    // Whether the unit should switch to the new target after a hit.
+    public static bool OnHitShouldChangeTarget(Unit u, Unit oldTarget, Unit newTarget, int[] alliances) {
+        if (oldTarget == newTarget) return false;
+        if (!Medic.UnitTargetIsEnemy(u, newTarget, alliances)) return false;
+
+        if (oldTarget == null) return true;
+        if (!UnitTarget.UnitCanAttackTarget(u, oldTarget, null, true)) return true;
+        if (!Medic.UnitTargetIsEnemy(u, oldTarget, alliances)) return true;
+        if (UnitTarget2.UnitTargetInWeaponMovementRange(u, newTarget, TargetWeapon(u, newTarget),
+                                                       UnitsDistance(u, newTarget), 0)
+            && !UnitTarget2.UnitTargetInWeaponMovementRange(u, oldTarget, TargetWeapon(u, oldTarget),
+                                                            UnitsDistance(u, oldTarget), 0)) {
+            return true;
+        }
+        return false;
+    }
+
+    // openbw: const weapon_type_t* unit_target_weapon(const unit_t* u, const unit_t* target) const
+    //
+    // The weapon the unit would use against the target: the air weapon
+    // for a flying target, the ground weapon otherwise.
+    public static WeaponType TargetWeapon(Unit u, Unit target) {
+        if (UnitFlags.Flying(target)) return u.UnitType.AirWeapon;
+        return u.UnitType.GroundWeapon;
+    }
+
+    // openbw: int units_distance(unit_t* u, unit_t* v) const
+    //
+    // The distance between the two units.
+    public static int UnitsDistance(Unit u, Unit target) {
+        Xy a = new Xy(u.Position.X - target.Position.X, u.Position.Y - target.Position.Y);
+        return XyMath.XyLength(a);
+    }
+}

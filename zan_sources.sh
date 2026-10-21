@@ -55,6 +55,7 @@ ZAN_SOURCES_CORE=(
     src/core/UnitDetection.zan
     src/core/Bounds.zan
     src/core/Medic.zan
+    src/core/AttackBehaviour.zan
     src/core/BuildQueue.zan
     src/core/UnitStrength.zan
     src/core/Supply.zan
