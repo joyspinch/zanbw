@@ -54,6 +54,7 @@ ZAN_SOURCES_CORE=(
     src/core/UnitTarget2.zan
     src/core/UnitDetection.zan
     src/core/UnitDamage.zan
+    src/core/UnitMovement.zan
     src/core/UnitBoarding.zan
     src/core/BuildState.zan
     src/core/UnitBuildRules.zan

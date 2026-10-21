@@ -1,0 +1,83 @@
+using System;
+
+// openbw: the movement modification layer (bwgame.h)
+//
+// The C++'s get_modified_unit_speed, get_modified_unit_acceleration and
+// get_modified_unit_turn_rate all read the same three things off the
+// unit:
+//
+//   - the stim timer
+//   - the speed upgrade status flag
+//   - the ensnare timer
+//
+// They add them up into a small modifier, and then:
+//
+//   - a negative modifier (ensnare alone) slows the unit down
+//   - a positive modifier (stim, or the speed upgrade, or both) speeds
+//     it up
+//
+// The speed has one extra rule: a scout gets a fixed speed instead of
+// the boosted one, and the boosted speed has a floor.
+//
+// The arithmetic is on the unsigned 8.8 fixed point view, so the
+// rounding is the C++'s rounding, not a floating point one.
+public class UnitMovement {
+    // openbw: bool u_speed_upgrade(const unit_t* u) const
+    private static bool SpeedUpgrade(Unit u) {
+        return UnitFlags.SpeedUpgrade(u);
+    }
+
+    // openbw: fp8 get_modified_unit_speed(const unit_t* u, fp8 base_speed) const
+    //
+    // The unit's speed, with the stim, the speed upgrade and the
+    // ensnare taken into account.
+    public static Fp GetModifiedUnitSpeed(Unit u, Fp baseSpeed) {
+        Ufp8 speed = Ufp8.FromRaw(baseSpeed.Raw);
+        int mod = 0;
+        if (u.StimTimer != 0) mod = mod + 1;
+        if (SpeedUpgrade(u)) mod = mod + 1;
+        if (u.EnsnareTimer != 0) mod = mod - 1;
+        if (mod < 0) speed = speed / 2u;
+        if (mod > 0) {
+            if (UnitTypeIds.UnitIsScout(u.UnitType)) {
+                // The C++'s scout speed: six plus one minus a third.
+                speed = Ufp8.Integer(6) + (Ufp8.Integer(1) - Ufp8.Integer(1) / 3u);
+            } else {
+                speed = speed + speed / 2u;
+                Ufp8 minSpeed = Ufp8.Integer(3) + Ufp8.Integer(1) / 3u;
+                if (speed < minSpeed) speed = minSpeed;
+            }
+        }
+        return Fp.FromRaw(speed.Raw);
+    }
+
+    // openbw: fp8 get_modified_unit_acceleration(const unit_t* u, fp8 base_acceleration) const
+    //
+    // The unit's acceleration, with the stim, the speed upgrade and the
+    // ensnare taken into account.
+    public static Fp GetModifiedUnitAcceleration(Unit u, Fp baseAcceleration) {
+        Ufp8 acceleration = Ufp8.FromRaw(baseAcceleration.Raw);
+        int mod = 0;
+        if (u.StimTimer != 0) mod = mod + 1;
+        if (SpeedUpgrade(u)) mod = mod + 1;
+        if (u.EnsnareTimer != 0) mod = mod - 1;
+        if (mod < 0) acceleration = acceleration - acceleration / 4u;
+        if (mod > 0) acceleration = acceleration * 2;
+        return Fp.FromRaw(acceleration.Raw);
+    }
+
+    // openbw: fp8 get_modified_unit_turn_rate(const unit_t* u, fp8 base_turn_rate) const
+    //
+    // The unit's turn rate, with the stim, the speed upgrade and the
+    // ensnare taken into account.
+    public static Fp GetModifiedUnitTurnRate(Unit u, Fp baseTurnRate) {
+        Ufp8 turnRate = Ufp8.FromRaw(baseTurnRate.Raw);
+        int mod = 0;
+        if (u.StimTimer != 0) mod = mod + 1;
+        if (SpeedUpgrade(u)) mod = mod + 1;
+        if (u.EnsnareTimer != 0) mod = mod - 1;
+        if (mod < 0) turnRate = turnRate - turnRate / 4u;
+        if (mod > 0) turnRate = turnRate * 2;
+        return Fp.FromRaw(turnRate.Raw);
+    }
+}
