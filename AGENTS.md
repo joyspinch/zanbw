@@ -1306,6 +1306,44 @@ C++ 床里单位类型的标志是逐个 OR 上去的（`flag_building` / `flag_
 `units_distance` 取值——不要自己编一个距离数喂给移植侧，那样测的是
 "移植侧跟我编的数比"，不是"移植侧跟原版比"。
 
+## 侦测/视野射程层
+
+### 93. sprite 的 `visibility_flags` 存的是**取反后**的地图可见位
+
+`set_sprite_visibility` 是 `visibility_flags |= ~tiles[..].visible`——
+**"看不见"才是置位**。于是：
+
+- `unit_target_is_visible`：`flags & bit != 0` → **看得见**（这一层是
+  正的，因为它读的是"被看见"的那份标志）。
+- `unit_calculate_detected_flags`：`~flags & bit == 0` → **看得见**。
+
+同一个字段，在两个地方是**相反**的方向。写反了不会编译报错，只会全层
+分叉。
+
+### 94. 对拍床的**升级表是按玩家持久**的
+
+C++ 床的 `st.upgrade_levels[player][upgrade]` 在整个循环里**不清零**。
+某个 case 给某玩家加了升级，后面该玩家的**每个** case 都带着它。
+
+Zan 侧如果每个 case 重新按公式算"这个 case 有没有升级"，就会和 C++ 差
+在那些"升级是之前别的 case 留下的"的行上。
+
+**做法**：Zan 侧也用**按玩家索引的状态数组**跟着循环推进，照抄这个
+"脏"语义——它就是原版的行为。
+
+### 95. `unit_sight_range` 的**忽略失明**是一个参数，不是另一个函数
+
+C++ 是 `unit_sight_range(u, bool ignore_blindness = false)`，
+`unit_sight_range_ignore_blindness(u)` 只是传 true 的包装。
+
+Zan 侧如果把两个函数各写一份（一份带失明检查一份不带），改的时候
+很容易只改一处。或者写成 `UnitSightRange(u, hasUpgrade)` 然后让
+`IgnoreBlindness` 调它——**失明检查还在里面**，于是"忽略失明"的那一列
+永远等于普通射程。
+
+**做法**：一个函数带 `ignoreBlindness` 参数，两个入口都调它。
+
+
 
 ## 已知 zanc 缺陷
 
