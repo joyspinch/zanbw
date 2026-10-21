@@ -1,0 +1,120 @@
+using System;
+
+// openbw: the supply and resource layer (bwgame.h)
+//
+// The C++'s has_available_supply_for and has_available_resources_for
+// decide whether a player can afford a unit, a tech or an upgrade.
+//
+// The supply test has a few rules that are easy to miss:
+//
+//   - the 0x1000000 flag means the unit type costs no supply at all
+//   - an egg holds two units, so it costs twice the supply
+//   - a lurker is a hydralisk that got burrowed, so it only costs what
+//     is left over after the hydralisk's supply
+//   - the supply is counted per race, and a unit type with no race
+//     never has supply
+//   - the total supply can never go over 200
+//
+// The resource test is simpler: the minerals and the gas have to be
+// there. For an upgrade the cost grows with the current level.
+public class Supply {
+    // The C++'s race_t. The order matters, because the supply is
+    // counted per race.
+    public const int RaceZerg = 0;
+    public const int RaceTerran = 1;
+    public const int RaceProtoss = 2;
+    public const int RaceNone = 3;
+
+    // The C++'s fp1 is a one-bit-fixpoint number, so the supply is
+    // kept in half units. The raw value of an integer n is n * 2.
+    public const int SupplyScale = 2;
+
+    // openbw: race_t unit_race(unit_type_autocast ut) const
+    //
+    // The unit type's race, from its group flags.
+    public static int UnitRace(UnitType ut) {
+        if ((ut.GroupFlags & GroupFlag.Zerg) != 0) return RaceZerg;
+        if ((ut.GroupFlags & GroupFlag.Terran) != 0) return RaceTerran;
+        if ((ut.GroupFlags & GroupFlag.Protoss) != 0) return RaceProtoss;
+        return RaceNone;
+    }
+
+    // openbw: bool has_available_supply_for(int owner, const unit_type_t* unit_type, bool show_error = false) const
+    //
+    // Whether the player has the supply for the unit type.
+    public static bool HasAvailableSupplyFor(UnitType unitType, int supplyUsedRaw, int supplyAvailableRaw,
+                                             int hydraliskSupplyRequiredRaw) {
+        if (UnitTypeHasFlag(unitType, (int)UnitTypeFlag.Flag1000000)) return true;
+        int supplyRequired = unitType.SupplyRequiredRaw;
+        if (UnitFlags.TwoUnitsInOneEgg(unitType)) supplyRequired = supplyRequired * 2;
+        if (supplyRequired == 0) return true;
+        if (unitType.Id == (int)UnitTypes.Zerg_Lurker) {
+            supplyRequired = supplyRequired - hydraliskSupplyRequiredRaw;
+        }
+        int race = UnitRace(unitType);
+        if (race == RaceNone) return false;
+        if (supplyUsedRaw + supplyRequired > 200 * SupplyScale) return false;
+        if (supplyUsedRaw + supplyRequired > supplyAvailableRaw) return false;
+        return true;
+    }
+
+    // openbw: bool has_available_resources_for(int owner, const unit_type_t* unit_type, bool show_error = false) const
+    //
+    // Whether the player has the minerals and the gas for the unit
+    // type.
+    public static bool HasAvailableResourcesFor(UnitType unitType, int currentMinerals, int currentGas) {
+        if (currentMinerals < unitType.MineralCost) return false;
+        if (currentGas < unitType.GasCost) return false;
+        return true;
+    }
+
+    // openbw: bool has_available_resources_for(int owner, const tech_type_t* tech_type, bool show_error = false) const
+    //
+    // Whether the player has the minerals and the gas for the tech.
+    public static bool HasAvailableResourcesForTech(int techMineralCost, int techGasCost,
+                                                    int currentMinerals, int currentGas) {
+        if (currentMinerals < techMineralCost) return false;
+        if (currentGas < techGasCost) return false;
+        return true;
+    }
+
+    // openbw: int upgrade_mineral_cost(int owner, const upgrade_type_t* upgrade_type) const
+    //
+    // What the upgrade costs in minerals. The cost grows with the
+    // current level.
+    public static int UpgradeMineralCost(int mineralCostBase, int mineralCostFactor, int upgradeLevel) {
+        return mineralCostBase + mineralCostFactor * upgradeLevel;
+    }
+
+    // openbw: int upgrade_gas_cost(int owner, const upgrade_type_t* upgrade_type) const
+    //
+    // What the upgrade costs in gas. The cost grows with the current
+    // level.
+    public static int UpgradeGasCost(int gasCostBase, int gasCostFactor, int upgradeLevel) {
+        return gasCostBase + gasCostFactor * upgradeLevel;
+    }
+
+    // openbw: int upgrade_time_cost(int owner, const upgrade_type_t* upgrade_type) const
+    //
+    // How long the upgrade takes. The time grows with the current
+    // level.
+    public static int UpgradeTimeCost(int timeCostBase, int timeCostFactor, int upgradeLevel) {
+        return timeCostBase + timeCostFactor * upgradeLevel;
+    }
+
+    // openbw: bool has_available_resources_for(int owner, const upgrade_type_t* upgrade_type, bool show_error = false) const
+    //
+    // Whether the player has the minerals and the gas for the upgrade.
+    public static bool HasAvailableResourcesForUpgrade(int mineralCostBase, int mineralCostFactor,
+                                                        int gasCostBase, int gasCostFactor,
+                                                        int upgradeLevel, int currentMinerals, int currentGas) {
+        if (currentMinerals < UpgradeMineralCost(mineralCostBase, mineralCostFactor, upgradeLevel)) return false;
+        if (currentGas < UpgradeGasCost(gasCostBase, gasCostFactor, upgradeLevel)) return false;
+        return true;
+    }
+
+    // openbw: bool ut_flag(const unit_type_t* unit_type, unit_type_t::flags_t flag)
+    private static bool UnitTypeHasFlag(UnitType ut, int flag) {
+        return (ut.Flags & flag) != 0;
+    }
+}

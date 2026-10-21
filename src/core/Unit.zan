@@ -167,6 +167,18 @@ public class UnitType {
     // How far the unit type can acquire targets.
     public int TargetAcquisitionRange;
 
+    // openbw: unit_type_t::mineral_cost / unit_type_t::gas_cost
+    //
+    // What the unit type costs to build.
+    public int MineralCost;
+    public int GasCost;
+
+    // openbw: unit_type_t::supply_required
+    //
+    // How much supply the unit type takes. The C++'s fp1 is a
+    // one-bit-fixpoint number, so it is kept as a raw value here.
+    public int SupplyRequiredRaw;
+
     // openbw: unit_type_t::ground_weapon / unit_type_t::air_weapon
     //
     // The unit's weapons against ground and air targets. Null when the
@@ -190,6 +202,9 @@ public class UnitType {
         RightClickAction = 1;
         SpaceProvided = 0;
         SpaceRequired = 0;
+        MineralCost = 0;
+        GasCost = 0;
+        SupplyRequiredRaw = 0;
         GroundWeapon = null;
         AirWeapon = null;
     }

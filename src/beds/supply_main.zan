@@ -1,0 +1,154 @@
+using System;
+
+// The Zan side of the supply and resource bed.
+//
+// The bed drives the same queries over the same unit types, techs,
+// upgrades and player states as the C++ bed
+// (tools/cppbed/supply_bed.cpp), so the two traces must match byte for
+// byte.
+
+public class SupplyBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+
+        // The techs and the upgrades.
+        int[] techMineralCosts = new int[36];
+        int[] techGasCosts = new int[36];
+        for (int i = 0; i < 36; ++i) {
+            techMineralCosts[i] = 0;
+            techGasCosts[i] = 0;
+        }
+        int[] upMineralBase = new int[56];
+        int[] upMineralFactor = new int[56];
+        int[] upGasBase = new int[56];
+        int[] upGasFactor = new int[56];
+        int[] upTimeBase = new int[56];
+        int[] upTimeFactor = new int[56];
+        for (int i = 0; i < 56; ++i) {
+            upMineralBase[i] = 0;
+            upMineralFactor[i] = 0;
+            upGasBase[i] = 0;
+            upGasFactor[i] = 0;
+            upTimeBase[i] = 0;
+            upTimeFactor[i] = 0;
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] unitTypeIds = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Command_Center,
+            (int)UnitTypes.Terran_Bunker,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Larva,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Lurker,
+            (int)UnitTypes.Zerg_Hatchery,
+            (int)UnitTypes.Zerg_Egg,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Protoss_Shuttle,
+            (int)UnitTypes.Protoss_Nexus,
+            (int)UnitTypes.Protoss_Carrier,
+            (int)UnitTypes.Protoss_Arbiter,
+        };
+
+        int caseIndex = 0;
+        for (int ut = 0; ut < unitTypeIds.Length; ++ut) {
+            for (int supply = 0; supply < 10; ++supply) {
+                for (int sv = 0; sv < 12; ++sv) {
+                    UnitType t = types[unitTypeIds[ut]];
+                    t.GroupFlags = (sv % 3 == 0) ? GroupFlag.Zerg : ((sv % 3 == 1) ? GroupFlag.Terran : GroupFlag.Protoss);
+                    if (sv % 7 == 0) t.GroupFlags = 0;
+                    t.Flags = 0;
+                    if (sv % 5 == 1) t.Flags = t.Flags | (int)UnitTypeFlag.TwoUnitsInOneEgg;
+                    if (sv % 6 == 2) t.Flags = t.Flags | (int)UnitTypeFlag.Flag1000000;
+                    t.SupplyRequiredRaw = supply * Supply.SupplyScale;
+                    t.MineralCost = (sv * 7) % 60;
+                    t.GasCost = (sv * 5) % 40;
+
+                    int owner = caseIndex % 12;
+                    int race = (sv % 3 == 0) ? 0 : ((sv % 3 == 1) ? 1 : 2);
+                    int supplyUsed = ((caseIndex + variant) % 210) * Supply.SupplyScale;
+                    int supplyAvailable = ((caseIndex * 3 + variant) % 220) * Supply.SupplyScale;
+                    int currentMinerals = (caseIndex * 11 + variant) % 200;
+                    int currentGas = (caseIndex * 7 + variant) % 150;
+
+                    // The hydralisk's supply, which the lurker gives back.
+                    types[(int)UnitTypes.Zerg_Hydralisk].SupplyRequiredRaw = 2 * Supply.SupplyScale;
+
+                    bool hasSupply = Supply.HasAvailableSupplyFor(t, supplyUsed, supplyAvailable,
+                        types[(int)UnitTypes.Zerg_Hydralisk].SupplyRequiredRaw);
+                    bool hasResources = Supply.HasAvailableResourcesFor(t, currentMinerals, currentGas);
+
+                    Console.WriteLine("S " + caseIndex + " " + ut + " " + supply + " " + sv
+                        + " " + t.GroupFlags + " " + t.Flags
+                        + " " + t.SupplyRequiredRaw + " " + t.MineralCost + " " + t.GasCost
+                        + " " + supplyUsed + " " + supplyAvailable
+                        + " " + (hasSupply ? 1 : 0) + " " + (hasResources ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The tech resources.
+        caseIndex = 0;
+        for (int tech = 0; tech < 36; ++tech) {
+            for (int sv = 0; sv < 8; ++sv) {
+                techMineralCosts[tech] = (sv * 11) % 80;
+                techGasCosts[tech] = (sv * 13) % 60;
+                int owner = caseIndex % 12;
+                int currentMinerals = (caseIndex * 3 + variant) % 150;
+                int currentGas = (caseIndex * 5 + variant) % 120;
+                bool hasResources = Supply.HasAvailableResourcesForTech(techMineralCosts[tech], techGasCosts[tech],
+                    currentMinerals, currentGas);
+                Console.WriteLine("T " + caseIndex + " " + tech + " " + sv
+                    + " " + techMineralCosts[tech] + " " + techGasCosts[tech]
+                    + " " + currentMinerals + " " + currentGas
+                    + " " + (hasResources ? 1 : 0));
+                caseIndex = caseIndex + 1;
+            }
+        }
+
+        // The upgrade resources.
+        caseIndex = 0;
+        for (int up = 0; up < 56; ++up) {
+            for (int level = 0; level < 4; ++level) {
+                for (int sv = 0; sv < 4; ++sv) {
+                    upMineralBase[up] = (sv * 17) % 100;
+                    upMineralFactor[up] = (sv * 3) % 20;
+                    upGasBase[up] = (sv * 13) % 80;
+                    upGasFactor[up] = (sv * 2) % 15;
+                    upTimeBase[up] = (sv * 23) % 90;
+                    upTimeFactor[up] = (sv * 7) % 25;
+                    int owner = caseIndex % 12;
+                    int currentMinerals = (caseIndex * 3 + variant) % 250;
+                    int currentGas = (caseIndex * 5 + variant) % 200;
+                    int mineralCost = Supply.UpgradeMineralCost(upMineralBase[up], upMineralFactor[up], level);
+                    int gasCost = Supply.UpgradeGasCost(upGasBase[up], upGasFactor[up], level);
+                    int timeCost = Supply.UpgradeTimeCost(upTimeBase[up], upTimeFactor[up], level);
+                    bool hasResources = Supply.HasAvailableResourcesForUpgrade(upMineralBase[up], upMineralFactor[up],
+                        upGasBase[up], upGasFactor[up], level, currentMinerals, currentGas);
+                    Console.WriteLine("U " + caseIndex + " " + up + " " + level + " " + sv
+                        + " " + mineralCost + " " + gasCost + " " + timeCost
+                        + " " + currentMinerals + " " + currentGas
+                        + " " + (hasResources ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+}
