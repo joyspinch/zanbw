@@ -33,6 +33,7 @@ OpenBW（星际争霸：母巢之战引擎）的 **Zan 逐位一致重写**。
 | `src/creep/` | 菌毯：铺展、蔓延、消退，以及 `creep_life` 簿记结构 |
 | `src/core/` 里的订单部分 | 订单：命令队列、订单池、派发（`Order.zan` / `OrderQueue.zan` / `ObjectContainer.zan`） |
 | `src/core/` 里的单位类型部分 | 单位类型谓词：`UnitTypeIds.zan`（只看 id）/ `UnitStatus.zan`（看标志位） |
+| `src/core/PlayerState.zan` | 玩家状态：槽位活性、胜负状态、每玩家表格查询 |
 | `src/beds/` | 各层对拍入口与它们用的场景表 |
 | `zan_sources.sh` | 各层的源文件清单，对拍脚本共用 |
 | `tools/cppbed/` | **C++ 对照床**（不进仓库）：直接 `#include` 真实 `openbw/bwgame.h` |
@@ -59,6 +60,7 @@ bash check_vision.sh    # 视野层（视距表 + 迷雾揭开）
 bash check_creep.sh     # 菌毯层（铺展 + 蔓延 + 消退）
 bash check_order.sh     # 订单层（命令队列 + 派发 + 回收）
 bash check_unittype.sh  # 单位类型谓词层（整张单位类型表）
+bash check_player.sh    # 玩家状态层（槽位活性 + 胜负 + 每玩家表格）
 ```
 
 单场景 / 单变体：

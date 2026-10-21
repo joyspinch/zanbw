@@ -101,6 +101,9 @@ bash check_order.sh
 # 单位类型谓词层对拍（7 个变体 × 整张单位类型表 229 项）
 bash check_unittype.sh
 
+# 玩家状态层对拍（7 个变体 × 12 玩家 × 每玩家表格 + 256 格子可见性）
+bash check_player.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -114,6 +117,7 @@ bash check_vision.sh 3 5
 bash check_creep.sh 3 5
 bash check_order.sh 3 5
 bash check_unittype.sh 3
+bash check_player.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -1026,6 +1030,56 @@ public enum UnitTypeFlag {
 `unchecked(...)` 在枚举成员里不合法。`0x80000000` 本身也放不下 32 位
 有符号 enum，只能放在类里当 `const int`（`StatusFlagExtra.LifetimeExpired`
 就是这么做的）。
+
+## 玩家状态层（槽位活性 / 胜负 / 每玩家表格）
+
+### 72. 可见掩码在**到达 owner 之前**就截断到 8 位
+
+```cpp
+uint8_t tile_visibility(xy pos) const { return ~st.tiles[tile_index(pos)].visible; }
+bool player_position_is_visible(int owner, xy position) const {
+    return (tile_visibility(position) & (1 << owner)) != 0;
+}
+```
+
+`tile_visibility` 返回 **`uint8_t`**，所以掩码先被截到 8 位，`1 << owner`
+才轮到它。**8 号及以后的玩家永远看不到任何格子** —— 不是"没探索过"，
+是掩码在到达 owner 之前就被截没了。
+
+移植时用 32 位 int 算 `~visible` 再 `& (1 << owner)`，8 号玩家的可见性
+就全是 1（因为 `~visible` 的高位全是 1）。要么在取用时截断
+（`& 0xff`），要么在 owner >= 8 时直接返回 false。
+
+### 73. 引擎的表按枚举的 **None 哨兵**定长，不是按成员个数
+
+```cpp
+template<typename T, typename index_T, size_t N = (size_t)index_T::None>
+struct type_indexed_array { ... };
+```
+
+表的长度是 `index_T::None` 的**值**：
+
+| 枚举 | None | 表长 | 有效下标 |
+|------|------|------|----------|
+| `UnitTypes` | 228 | 228 | 0..227 |
+| `UpgradeTypes` | 61 | 61 | 0..60 |
+| `TechTypes` | 44 | 44 | 0..43 |
+
+注意 `UnitTypes` 有 229 个成员（含末尾的 `None`），但表只有 228 项 ——
+`None` 本身**不在表里**。
+
+床里循环到"成员个数"会越界（`array::at: __n (which is 44) >= _Nm
+(which is 44)`），循环到 `None` 的值才对。
+
+### 74. 每玩家表格要**当参数传进来**，不要去够全局状态
+
+`player_has_unit` 读 `st.unit_counts`，`player_max_upgrade_level` 读
+`game_st.max_upgrade_levels`（注意这个在 **game_state** 里，不在
+`state` 里）。移植时做成参数，由拥有游戏状态的那一层传进来。
+
+顺带一条判定依据：`max_upgrade_levels` 和 `tech_available` 在
+`game_st`，其余（`unit_counts` / `upgrade_levels` / `tech_researched` /
+`tech_researching` / `upgrade_upgrading`）在 `st`。放错边会编译不过。
 
 ## 已知 zanc 缺陷
 
