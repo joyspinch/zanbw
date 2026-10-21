@@ -1450,3 +1450,34 @@ Zan 侧如果把两个函数各写一份（一份带失明检查一份不带）�
 **对照床的初值要跟原版一致**：`load_map()` 把 tile 的 `visible` /
 `explored` 设成 `0xff`，不是 0。对照床若用 0，两边都在"全黑"上做
 `&=`，差异全被吃掉，测试等于没做。
+
+## 装运层
+
+### 101. `size_t` 的**回绕**是行为，不是 bug
+
+`unit_space_left` 返回 `size_t`：
+
+```cpp
+size_t unit_space_left(const unit_t* u) const {
+    size_t r = u->unit_type->space_provided;
+    for (const unit_t* nu : loaded_units(u)) r -= nu->unit_type->space_required;
+    return r;
+}
+```
+
+装的单位需要的空间**超过**提供的空间时，减法回绕成一个巨大的数。于是
+紧跟着的 `unit_space_left(u) >= target->unit_type->space_required`
+（两边都是 `size_t`）**成立**——明明装不下，却说装得下。
+
+Zan 侧用有符号 `int` 就变成 `空间不足`，行为对不上。
+
+**做法**：移植侧保留"无符号比较"的语义——空间为负时按"放得下"处理，
+或者用无符号类型。
+
+### 102. 床里造单位，**槽位要复用**
+
+`object_container<unit_t, 1700, 17> units_container`——单位容器上限 1700。
+床里每个用例新造 7 个单位、跑 229 个用例，就是 1600+ 个，容器直接爆，
+C++ 侧表现为 `E`（我的 terminate handler）或者段错误。
+
+**做法**：槽位按 `i % N` 复用，N 取到能让总槽位数落在上限内。
