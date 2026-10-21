@@ -1263,6 +1263,50 @@ weapon_type_t>`，指向 `game_st.weapon_types` 表里的一个武器；武器�
 不是单位属性。对拍床要**建一张真的 region 表**（单 region 就够），否则走到
 Reaver 分支就抛异常；Zan 侧则把"是否可达"当参数传进去。
 
+## 目标射程/优先级/技能目标层
+
+### 89. 谓词会**先改写参数再继续问**，问的却是改写后的那个
+
+`unit_target_attack_priority(u, target)` 里，C++ 遇到 Bunker 会先把
+`target` 换成它装载的单位（`target = loaded_unit`），**然后**才问
+"能不能打"（`unit_can_attack_target(target, u)`）、"有没有武器"
+（`unit_can_attack(target)`）、"能不能动"（`u_can_move(target)`）。
+
+这三问用的都是**替换后**的目标。Bunker 里的那个单位往往和 Bunker 自己
+完全不同——一个能打，一个不能动。移植时如果按字面把三问挂在原目标上，
+优先级会差 1~3，而且只在 Bunker 那几行上分叉，很容易被当成噪声。
+
+**做法**：Zan 侧把函数签名改成吃**已解析**的目标：
+`UnitTargetAttackPriority(target, isLoadedUnit, canAttackUnit, canAttack, canMove)`，
+由调用方先做替换（判断 Bunker → 换成装载单位）再调。
+
+### 90. C++ 侧的 `printf` 格式串少一个 `%d`，字段会**静默少一个**
+
+对拍床里 `printf("P %d %d %d", i, p1, p2, p3)` 少写一个占位符，第四个值
+直接被丢掉——**不报错，不崩**，只是少一列。Zan 侧照着写就多一列，diff
+看起来"全线不一样"，很容易误判成移植错了。
+
+**做法**：C++ 床每加一个字段，先 `awk '{print NF}'` 数一下字段数是不是
+预期值，再跑对拍。这条对所有 C++ 床都适用。
+
+### 91. 对拍床的**标志位要累加**，不能互相覆盖
+
+C++ 床里单位类型的标志是逐个 OR 上去的（`flag_building` / `flag_has_energy`
+/ `flag_worker` 可以同时成立）。Zan 床如果写成"后一条覆盖前一条"，
+同样的类型在两侧的标志就不同了——`ut_has_energy` 这类查询直接分叉。
+
+**做法**：标志一律用 `|=` 累加，不要用赋值。
+
+### 92. `units_distance` 量的是**两个包围盒之间的空隙**，不是中心距
+
+`units_distance(a, b)` = 两个 sprite 包围盒之间的最近距离。单位在
+(0,0) 且尺寸 4x4 时，两个单位重叠，距离是 **0**，不是 32。
+
+要测射程判定，就得**真的把目标挪开**（改 `sprite->position`），然后调
+`units_distance` 取值——不要自己编一个距离数喂给移植侧，那样测的是
+"移植侧跟我编的数比"，不是"移植侧跟原版比"。
+
+
 ## 已知 zanc 缺陷
 
 - **一元运算符重载**（`operator-`）在非整型上会触发 irgen bug
