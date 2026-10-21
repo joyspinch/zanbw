@@ -94,7 +94,22 @@ public enum UnitTypeFlag {
     Turret = 0x10,
     FlyingBuilding = 0x20,
     Hero = 0x40,
+    RegensHp = 0x80,
+    Flag100 = 0x100,
+    TwoUnitsInOneEgg = 0x400,
+    Powerup = 0x800,
+    ResourceDepot = 0x1000,
+    Resource = 0x2000,
+    Robotic = 0x4000,
+    Detector = 0x8000,
+    Organic = 0x10000,
+    RequiresCreep = 0x20000,
+    RequiresPsionicMatrix = 0x80000,
     CanBurrow = 0x100000,
+    HasEnergy = 0x200000,
+    InitiallyCloaked = 0x400000,
+    SpriteSizeMedium = 0x2000000,
+    SpriteSizeLarge = 0x4000000,
     CanMove = 0x8000000,
     CanTurn = 0x10000000,
     Invincible = 0x20000000,
@@ -137,18 +152,18 @@ public enum Vf4Flag {
     VeryHigh = 8
 }
 
-// The order ids now live in Orders.zan, which holds the whole enum
+// openbw: enum struct race_t (game_types.h)
+public enum Race {
+    Zerg,
+    Terran,
+    Protoss,
+    None
+}
+
+// The unit type ids now live in Orders.zan, which holds the whole enum
 // rather than just the members the movement code looks at.
 
 // The unit type ids the movement code looks at. The values are the indexes
 // in openbw's UnitTypes enum (bwenums.h), so they match the original.
-public enum UnitTypes {
-    // The indices are the ones of openbw's UnitTypes enum. Only the ones
-    // the collision code needs are listed.
-    ZergLarva = 35,
-    ProtossInterceptor = 73,
-    SpecialUpperLevelDoor = 205,
-    SpecialRightUpperLevelDoor = 206,
-    SpecialPitDoor = 207,
-    SpecialRightPitDoor = 208
-}
+// The unit type ids live in UnitTypes.zan, which holds the whole enum
+// rather than just the members the collision code needs.

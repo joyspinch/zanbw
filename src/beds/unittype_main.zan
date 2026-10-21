@@ -1,0 +1,139 @@
+using System;
+
+// The Zan side of the unit type predicate bed.
+//
+// The bed drives the same predicates over the same unit type table as
+// the C++ bed (tools/cppbed/unittype_bed.cpp) and dumps the same
+// lines, so the two traces must match byte for byte.
+
+public class UnitTypeBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The unit types. One per id, with a flag pattern that depends
+        // on the id and a race that cycles.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 7, new Xy(8, 8), new Xy(8, 8));
+            t.Flags = (i * 0x9 + variant * 0x37) & 0x7fffffff;
+            if (i % 3 == 0) t.GroupFlags = 1;
+            else if (i % 3 == 1) t.GroupFlags = 2;
+            else t.GroupFlags = 4;
+            t.RightClickAction = i % 6;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The unit type id predicates.
+        for (int i = 0; i < types.Count; ++i) {
+            UnitType ut = types[i];
+            string line = "ID " + i;
+            line = line + " mineral=" + B(UnitTypeIds.UnitIsMineralField(ut));
+            line = line + " carrier=" + B(UnitTypeIds.UnitIsCarrier(ut));
+            line = line + " reaver=" + B(UnitTypeIds.UnitIsReaver(ut));
+            line = line + " queen=" + B(UnitTypeIds.UnitIsQueen(ut));
+            line = line + " hatchery=" + B(UnitTypeIds.UnitIsHatchery(ut));
+            line = line + " marine=" + B(UnitTypeIds.UnitIsMarine(ut));
+            line = line + " firebat=" + B(UnitTypeIds.UnitIsFirebat(ut));
+            line = line + " ghost=" + B(UnitTypeIds.UnitIsGhost(ut));
+            line = line + " wraith=" + B(UnitTypeIds.UnitIsWraith(ut));
+            line = line + " map_revealer=" + B(UnitTypeIds.UnitIsMapRevealer(ut));
+            line = line + " refinery=" + B(UnitTypeIds.UnitIsRefinery(ut));
+            line = line + " non_flag_beacon=" + B(UnitTypeIds.UnitIsNonFlagBeacon(ut));
+            line = line + " special_beacon=" + B(UnitTypeIds.UnitIsSpecialBeacon(ut));
+            line = line + " scout=" + B(UnitTypeIds.UnitIsScout(ut));
+            line = line + " vulture=" + B(UnitTypeIds.UnitIsVulture(ut));
+            line = line + " nydus=" + B(UnitTypeIds.UnitIsNydus(ut));
+            line = line + " defiler=" + B(UnitTypeIds.UnitIsDefiler(ut));
+            line = line + " ultralisk=" + B(UnitTypeIds.UnitIsUltralisk(ut));
+            line = line + " arbiter=" + B(UnitTypeIds.UnitIsArbiter(ut));
+            line = line + " egg=" + B(UnitTypeIds.UnitIsEgg(ut));
+            line = line + " goliath=" + B(UnitTypeIds.UnitIsGoliath(ut));
+            line = line + " critter=" + B(UnitTypeIds.UnitIsCritter(ut));
+            line = line + " sieged_tank=" + B(UnitTypeIds.UnitIsSiegedTank(ut));
+            line = line + " unsieged_tank=" + B(UnitTypeIds.UnitIsUnsiegedTank(ut));
+            line = line + " tank=" + B(UnitTypeIds.UnitIsTank(ut));
+            line = line + " trap=" + B(UnitTypeIds.UnitIsTrap(ut));
+            line = line + " zerg_building=" + B(UnitTypeIds.UnitIsZergBuilding(ut));
+            line = line + " fighter=" + B(UnitTypeIds.UnitIsFighter(ut));
+            line = line + " morphing=" + B(UnitStatus.UnitTypeIsMorphingBuilding(ut.Id));
+            line = line + " race=" + (int)UnitStatus.UnitTypeRace(ut);
+            Console.WriteLine(line);
+        }
+
+        // The predicates that read the unit's status flags and the unit
+        // type's flags.
+        for (int c = 0; c < 32; ++c) {
+            int flags = (c * 0x1041 + variant * 0x11) & 0x3fffffff;
+            int lockdown = ((c + variant) % 5) == 0 ? 0 : 1;
+            int stasis = ((c + variant) % 7) == 0 ? 0 : 2;
+            int maelstrom = ((c + variant) % 3) == 0 ? 0 : 3;
+            int buildQueueCount = ((c + variant) % 4) == 0 ? 0 : 1;
+            int buildQueueFront = (c * 7 + variant * 11) % 229;
+            int researching = ((c + variant) % 6) == 0 ? -1 : c;
+            int upgrading = ((c + variant) % 8) == 0 ? -1 : c;
+            int currentBuild = ((c + variant) % 5) == 0 ? -1 : 1;
+            int blindedBy = ((c + variant) % 4) == 0 ? -1 : 1;
+            int secondaryOrder = ((c + variant) % 9) == 0 ? (int)Orders.BuildAddon : (int)Orders.Stop;
+
+            for (int i = 0; i < types.Count; ++i) {
+                UnitType ut = types[i];
+                Unit u = new Unit();
+                u.UnitType = ut;
+                u.StatusFlagBits = flags;
+                u.LockdownTimer = lockdown;
+                u.StasisTimer = stasis;
+                u.MaelstromTimer = maelstrom;
+                u.BuildQueueCount = buildQueueCount;
+                u.BuildQueueFrontTypeId = buildQueueFront;
+                u.ResearchingTypeId = researching;
+                u.UpgradingTypeId = upgrading;
+                u.CurrentBuildUnitId = currentBuild;
+                u.BlindedByUnitId = blindedBy;
+                u.SecondaryOrderId = secondaryOrder;
+
+                // The C++ reads the current build unit's completion state
+                // and the order target's. The bed keeps them fixed: the
+                // build unit is completed, and there is no order target.
+                bool currentBuildCompleted = true;
+                bool orderTargetCompleted = false;
+
+                string line = "ST " + c + " " + i;
+                line = line + " grounded=" + B(UnitStatus.IsGroundedBuilding(u));
+                line = line + " completed=" + B(UnitStatus.IsCompleted(u));
+                line = line + " flying=" + B(UnitStatus.IsFlying(u));
+                line = line + " burrowed=" + B(UnitStatus.IsBurrowed(u));
+                line = line + " hallucination=" + B(UnitStatus.IsHallucination(u));
+                line = line + " invincible=" + B(UnitStatus.IsInvincible(u));
+                line = line + " can_move=" + B(UnitStatus.UnitCanMove(u));
+                line = line + " hold_position=" + B(UnitStatus.UnitCanHoldPosition(u));
+                line = line + " immovable_attacker=" + B(UnitStatus.UnitIsImmovableAttacker(u));
+                line = line + " disabled=" + B(UnitStatus.UnitIsDisabled(u));
+                line = line + " constructing=" + B(UnitStatus.UnitIsConstructing(u, currentBuildCompleted, orderTargetCompleted));
+                line = line + " researching=" + B(UnitStatus.UnitIsResearching(u));
+                line = line + " upgrading=" + B(UnitStatus.UnitIsUpgrading(u));
+                line = line + " building_addon=" + B(UnitStatus.UnitIsBuildingAddon(u, currentBuildCompleted));
+                line = line + " building_protoss=" + B(UnitStatus.UnitIsBuildingProtossThing(u, orderTargetCompleted));
+                line = line + " morphing=" + B(UnitStatus.UnitIsMorphingBuilding(u));
+                line = line + " detect=" + B(UnitStatus.UnitCanDetect(u));
+                line = line + " building=" + B(UnitStatus.UnitIsBuilding(u));
+                line = line + " detector=" + B(UnitStatus.UnitIsDetector(u));
+                line = line + " worker=" + B(UnitStatus.UnitIsWorker(u));
+                line = line + " resource_depot=" + B(UnitStatus.UnitIsResourceDepot(u));
+                line = line + " factory=" + B(UnitTypeIds.UnitIsFactory(ut));
+                line = line + " race=" + (int)UnitStatus.UnitRace(u);
+                Console.WriteLine(line);
+            }
+        }
+
+        return 0;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}

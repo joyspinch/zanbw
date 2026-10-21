@@ -120,6 +120,13 @@ public class UnitType {
     // spreads creep around itself.
     public bool SpreadsCreep;
 
+    // openbw: unit_type_t::right_click_action
+    //
+    // What right-clicking the unit does. 0 means "nothing", 1 is a
+    // normal unit, 2 is a factory, 3 is a unit that cannot move (a
+    // burrowed lurker), 4 and 5 are the spell casters.
+    public int RightClickAction;
+
     public UnitType(int id, FlingyType flingy, int elevationLevel, int flags, int sightRange,
                    Xy dimensionsFrom, Xy dimensionsTo) {
         Id = id;
@@ -133,6 +140,7 @@ public class UnitType {
         GroupFlags = 0;
         PlacementSize = new Xy(0, 0);
         SpreadsCreep = false;
+        RightClickAction = 1;
     }
 }
 
@@ -190,6 +198,52 @@ public class Unit {
     // keeps the intrusive list inside the unit; here the queue lives in
     // the pool and the unit holds its index.
     public int OrderQueueIndex;
+
+    // ---- the fields the unit status predicates read -----------------------
+
+    // openbw: unit_t::lockdown_timer
+    public int LockdownTimer;
+
+    // openbw: unit_t::stasis_timer
+    public int StasisTimer;
+
+    // openbw: unit_t::maelstrom_timer
+    public int MaelstromTimer;
+
+    // openbw: unit_t::build_queue
+    //
+    // The C++ keeps the build queue as a list of order_t. Here the unit
+    // keeps the count and the type at the front, which is all the unit
+    // status predicates read.
+    public int BuildQueueCount;
+
+    // openbw: unit_t::build_queue.front()->id
+    public int BuildQueueFrontTypeId;
+
+    // openbw: unit_t::building.researching_type
+    //
+    // The tech type the unit is researching, or -1.
+    public int ResearchingTypeId;
+
+    // openbw: unit_t::building.upgrading_type
+    //
+    // The upgrade type the unit is upgrading, or -1.
+    public int UpgradingTypeId;
+
+    // openbw: unit_t::current_build_unit
+    //
+    // The unit the building is currently building, as a unit id, or -1.
+    public int CurrentBuildUnitId;
+
+    // openbw: unit_t::blinded_by
+    //
+    // The unit that blinded this one, as a unit id, or -1.
+    public int BlindedByUnitId;
+
+    // openbw: unit_t::secondary_order_type
+    //
+    // The unit's secondary order, as an order id.
+    public int SecondaryOrderId;
 
     public int UserActionFlags;
     public MovementStates MovementState;
@@ -262,6 +316,16 @@ public class Unit {
         OrderTarget = new OrderTarget();
         OrderProcessTimer = 0;
         OrderQueueIndex = -1;
+        LockdownTimer = 0;
+        StasisTimer = 0;
+        MaelstromTimer = 0;
+        BuildQueueCount = 0;
+        BuildQueueFrontTypeId = -1;
+        ResearchingTypeId = -1;
+        UpgradingTypeId = -1;
+        CurrentBuildUnitId = -1;
+        BlindedByUnitId = -1;
+        SecondaryOrderId = (int)Orders.None;
         UserActionFlags = 0;
         MovementState = MovementStates.UM_Init;
         StatusFlagBits = 0;

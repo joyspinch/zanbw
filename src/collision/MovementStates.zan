@@ -1050,7 +1050,7 @@ public class MovementStatesImpl {
             new Xy(0, 0), new Xy(Sim.MapWidth, Sim.MapHeight - 32));
         Sim.FinishUnitMovement(U, ems);
         if (U.UCanMove() && !U.UtBuilding()
-            && U.UnitType.Id != (int)UnitTypes.ProtossInterceptor) {
+            && U.UnitType.Id != (int)UnitTypes.Protoss_Interceptor) {
             int index = Sim.RepulseIndex(U.Position);
             if (index != U.RepulseIndex) {
                 Sim.DecrementRepulseField(U);

@@ -1,0 +1,256 @@
+using System;
+
+// openbw: the unit status predicates (bwgame.h)
+//
+// The tests that look at the unit's status flags and at the unit type's
+// flags, rather than only at the unit type's id.
+//
+// They take the unit and the unit type. The unit's own fields (the
+// timers, the build queue, the current build unit) are read off the
+// unit, so a caller that has only a unit type cannot use these.
+//
+// The predicates that need to look at *another* unit (the nydus exit,
+// the unit being built, the target's completion) are not here: they
+// need a unit lookup, which belongs to the layer that owns the units.
+public class UnitStatus {
+    // openbw: bool u_grounded_building(const unit_t* u)
+    public static bool IsGroundedBuilding(Unit u) {
+        return u.HasStatusFlag(StatusFlag.GroundedBuilding);
+    }
+
+    // openbw: bool u_completed(const unit_t* u)
+    public static bool IsCompleted(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Completed);
+    }
+
+    // openbw: bool u_flying(const unit_t* u)
+    public static bool IsFlying(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Flying);
+    }
+
+    // openbw: bool u_burrowed(const unit_t* u)
+    public static bool IsBurrowed(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Burrowed);
+    }
+
+    // openbw: bool u_hallucination(const unit_t* u)
+    public static bool IsHallucination(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Hallucination);
+    }
+
+    // openbw: bool u_invincible(const unit_t* u)
+    public static bool IsInvincible(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Invincible);
+    }
+
+    // openbw: bool u_disabled(const unit_t* u)
+    public static bool UDisabled(Unit u) {
+        return u.HasStatusFlag(StatusFlag.Disabled);
+    }
+
+    // openbw: bool u_can_move(const unit_t* u)
+    //
+    // The unit type's own can_move flag, plus the "the unit is not a
+    // building and the unit type can be right-clicked" test.
+    public static bool UnitCanMove(Unit u) {
+        if (IsGroundedBuilding(u)) return false;
+        if (u.UnitType.RightClickAction == 0) return false;
+        if (u.UnitType.RightClickAction == 3) return false;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lurker) && IsBurrowed(u)) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_hold_position(const unit_t* u)
+    public static bool UnitCanHoldPosition(Unit u) {
+        if (u.UnitType.RightClickAction != 0) return true;
+        if (IsGroundedBuilding(u) && UnitTypeIds.UnitIsFactory(u.UnitType)) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_immovable_attacker(const unit_t* u)
+    public static bool UnitIsImmovableAttacker(Unit u) {
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lurker) && IsBurrowed(u)) return true;
+        if (u.UnitType.RightClickAction == 3) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_disabled(const unit_t* u)
+    public static bool UnitIsDisabled(Unit u) {
+        if (UDisabled(u)) return true;
+        if (u.LockdownTimer != 0) return true;
+        if (u.StasisTimer != 0) return true;
+        if (u.MaelstromTimer != 0) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_constructing(const unit_t* u)
+    //
+    // The C++ reads the units the building is working on. Those are
+    // other units, so the caller passes their completion state.
+    public static bool UnitIsConstructing(Unit u, bool currentBuildCompleted, bool orderTargetCompleted) {
+        if (u.BuildQueueCount != 0) return true;
+        if (UnitIsBuildingAddon(u, currentBuildCompleted)) return true;
+        if (UnitIsBuildingProtossThing(u, orderTargetCompleted)) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_researching(const unit_t* u)
+    public static bool UnitIsResearching(Unit u) {
+        return u.ResearchingTypeId >= 0;
+    }
+
+    // openbw: bool unit_is_upgrading(const unit_t* u)
+    public static bool UnitIsUpgrading(Unit u) {
+        return u.UpgradingTypeId >= 0;
+    }
+
+    // openbw: bool unit_is_building_addon(const unit_t* u)
+    //
+    // The C++ reads the unit's secondary order and the unit it is
+    // building. The unit it is building is another unit, so the test
+    // takes that unit's completion state as an argument.
+    public static bool UnitIsBuildingAddon(Unit u, bool currentBuildCompleted) {
+        if (u.SecondaryOrderId == (int)Orders.BuildAddon) {
+            if (IsGroundedBuilding(u) && u.CurrentBuildUnitId >= 0 && !currentBuildCompleted) return true;
+        }
+        return false;
+    }
+
+    // openbw: bool unit_is_building_protoss_thing(const unit_t* u)
+    public static bool UnitIsBuildingProtossThing(Unit u, bool orderTargetCompleted) {
+        if (u.SecondaryOrderId == (int)Orders.PlaceProtossBuilding) {
+            if (IsGroundedBuilding(u) && u.OrderTarget.UnitId >= 0 && !orderTargetCompleted) return true;
+        }
+        return false;
+    }
+
+    // openbw: bool unit_is_morphing_building(const unit_t* u)
+    public static bool UnitIsMorphingBuilding(Unit u) {
+        if (IsCompleted(u)) return false;
+        if (u.BuildQueueCount == 0) return false;
+        return UnitTypeIsMorphingBuilding(u.BuildQueueFrontTypeId);
+    }
+
+    // openbw: bool unit_type_is_morphing_building(const unit_type_t* ut)
+    //
+    // A building that morphs into another one: the hive, the lair, the
+    // greater spire, the spore colony and the sunken colony.
+    public static bool UnitTypeIsMorphingBuilding(int id) {
+        if (id == (int)UnitTypes.Zerg_Hive) return true;
+        if (id == (int)UnitTypes.Zerg_Lair) return true;
+        if (id == (int)UnitTypes.Zerg_Greater_Spire) return true;
+        if (id == (int)UnitTypes.Zerg_Spore_Colony) return true;
+        if (id == (int)UnitTypes.Zerg_Sunken_Colony) return true;
+        return false;
+    }
+
+    // openbw: bool unit_can_attach_addon(const unit_t* u, const unit_t* addon)
+    public static bool UnitCanAttachAddon(Unit u, UnitType addon) {
+        if (UnitTypeIds.Is(addon, UnitTypes.Terran_Comsat_Station)) {
+            if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Command_Center)) return true;
+        } else if (UnitTypeIds.Is(addon, UnitTypes.Terran_Nuclear_Silo)) {
+            if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Command_Center)) return true;
+        } else if (UnitTypeIds.Is(addon, UnitTypes.Terran_Control_Tower)) {
+            if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Starport)) return true;
+        } else if (UnitTypeIds.Is(addon, UnitTypes.Terran_Covert_Ops)) {
+            if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Facility)) return true;
+        } else if (UnitTypeIds.Is(addon, UnitTypes.Terran_Physics_Lab)) {
+            if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Science_Facility)) return true;
+        } else if (UnitTypeIds.Is(addon, UnitTypes.Terran_Machine_Shop)) {
+            if (UnitTypeIds.Is(u.UnitType, UnitTypes.Terran_Factory)) return true;
+        }
+        return false;
+    }
+
+    // openbw: bool unit_can_detect(const unit_t* u)
+    public static bool UnitCanDetect(Unit u) {
+        if (!UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Detector)) return false;
+        if (!IsCompleted(u)) return false;
+        if (UnitIsDisabled(u)) return false;
+        if (u.BlindedByUnitId >= 0) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_gather_gas(const unit_t* u, const unit_t* target)
+    public static bool UnitCanGatherGas(Unit u, Unit target) {
+        if (!UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker)) return false;
+        if (!UnitTypeIds.UnitIsRefinery(target.UnitType)) return false;
+        if (!IsCompleted(target)) return false;
+        if (target.Owner != u.Owner) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_receive_order(const unit_t* u, const order_type_t* order, int owner)
+    public static bool UnitCanReceiveOrder(Unit u, Orders orderId, int owner) {
+        if (u.Owner != owner) return false;
+        if (orderId != Orders.RallyPointUnit && orderId != Orders.RallyPointTile) {
+            if (!IsCompleted(u)) return false;
+        }
+        return true;
+    }
+
+    // openbw: bool unit_order_can_target_self(const unit_t* u, const order_type_t* order)
+    public static bool UnitOrderCanTargetSelf(Unit u, Orders orderId) {
+        if (IsGroundedBuilding(u)) {
+            if (orderId == Orders.RallyPointUnit) return true;
+            if (orderId == Orders.RallyPointTile) return true;
+        }
+        return false;
+    }
+
+    // openbw: bool unit_is_at_move_target(const unit_t* u)
+    public static bool UnitIsAtMoveTarget(Unit u) {
+        return u.Position == u.MoveTargetPos;
+    }
+
+    // openbw: bool unit_is_active_resource_depot(const unit_t* u)
+    public static bool UnitIsActiveResourceDepot(Unit u) {
+        if (!IsGroundedBuilding(u)) return false;
+        if (!UnitTypeHasFlag(u.UnitType, UnitTypeFlag.ResourceDepot)) return false;
+        if (IsCompleted(u)) return true;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hive)) return true;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Lair)) return true;
+        if (UnitTypeIds.Is(u.UnitType, UnitTypes.Zerg_Hatchery) && UnitIsMorphingBuilding(u)) return true;
+        return false;
+    }
+
+    // openbw: bool unit_race(const unit_t* u)
+    //
+    // The race comes from the unit type's group flags.
+    public static Race UnitRace(Unit u) {
+        return UnitTypeRace(u.UnitType);
+    }
+
+    // openbw: race_t unit_type_race(const unit_type_t* ut)
+    public static Race UnitTypeRace(UnitType ut) {
+        if ((ut.GroupFlags & 1) != 0) return Race.Zerg;
+        if ((ut.GroupFlags & 2) != 0) return Race.Terran;
+        if ((ut.GroupFlags & 4) != 0) return Race.Protoss;
+        return Race.None;
+    }
+
+    // openbw: bool ut_building(const unit_t* u)
+    public static bool UnitIsBuilding(Unit u) {
+        return UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Building);
+    }
+
+    // openbw: bool ut_detector(const unit_t* u)
+    public static bool UnitIsDetector(Unit u) {
+        return UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Detector);
+    }
+
+    // openbw: bool ut_worker(const unit_t* u)
+    public static bool UnitIsWorker(Unit u) {
+        return UnitTypeHasFlag(u.UnitType, UnitTypeFlag.Worker);
+    }
+
+    // openbw: bool ut_resource_depot(const unit_t* u)
+    public static bool UnitIsResourceDepot(Unit u) {
+        return UnitTypeHasFlag(u.UnitType, UnitTypeFlag.ResourceDepot);
+    }
+
+    // openbw: bool unit_type_has_flag(const unit_type_t* ut, flag)
+    public static bool UnitTypeHasFlag(UnitType ut, int flag) {
+        return (ut.Flags & flag) != 0;
+    }
+}

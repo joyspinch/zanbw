@@ -37,6 +37,9 @@ ZAN_SOURCES_CORE=(
     src/core/Orders.zan
     src/core/Order.zan
     src/core/OrderQueue.zan
+    src/core/UnitTypes.zan
+    src/core/UnitTypeIds.zan
+    src/core/UnitStatus.zan
 )
 
 # The regions layer: the tile map and the region decomposition.

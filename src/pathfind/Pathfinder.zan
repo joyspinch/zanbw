@@ -69,10 +69,10 @@ public class Pathfinder {
     // is false.
     public static bool UnitCanCollideWithIgnoringMoveTarget(Sim sim, Unit u, Unit target) {
         // The doors are never in the way.
-        if (target.UnitType.Id == (int)UnitTypes.SpecialUpperLevelDoor) return false;
-        if (target.UnitType.Id == (int)UnitTypes.SpecialRightUpperLevelDoor) return false;
-        if (target.UnitType.Id == (int)UnitTypes.SpecialPitDoor) return false;
-        if (target.UnitType.Id == (int)UnitTypes.SpecialRightPitDoor) return false;
+        if (target.UnitType.Id == (int)UnitTypes.Special_Upper_Level_Door) return false;
+        if (target.UnitType.Id == (int)UnitTypes.Special_Right_Upper_Level_Door) return false;
+        if (target.UnitType.Id == (int)UnitTypes.Special_Pit_Door) return false;
+        if (target.UnitType.Id == (int)UnitTypes.Special_Right_Pit_Door) return false;
         return sim.UnitCanCollideWith(u, target);
     }
 

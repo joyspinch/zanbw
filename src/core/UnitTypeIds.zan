@@ -1,0 +1,229 @@
+using System;
+
+// openbw: the unit type predicates (bwgame.h)
+//
+// The engine has a long list of "is this unit type X" tests. Most of
+// them look only at the unit type's id; a few look at the unit type's
+// flags or at the unit's status.
+//
+// They are grouped here by what they read, because that is what decides
+// what a caller has to hand them:
+//
+//   - the id only: UnitTypeIs*
+//   - the unit type's flags: UnitTypeHas*
+//   - the unit's status: UnitIs* / UnitCan*
+//
+// The rules are pure functions of the unit type, so a bed can drive
+// them over the whole unit type table.
+
+// The unit type id tests.
+//
+// The C++ spells them `unit_is(ut, UnitTypes::X)`, which compares the
+// unit type's id. The `unit_is_*` variants below are the named ones.
+public class UnitTypeIds {
+    // openbw: bool unit_is(const unit_type_t* ut, UnitTypes id)
+    public static bool Is(UnitType ut, UnitTypes id) {
+        return ut.Id == (int)id;
+    }
+
+    public static bool UnitIsMineralField(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Resource_Mineral_Field) return true;
+        if (ut.Id == (int)UnitTypes.Resource_Mineral_Field_Type_2) return true;
+        if (ut.Id == (int)UnitTypes.Resource_Mineral_Field_Type_3) return true;
+        return false;
+    }
+
+    public static bool UnitIsCarrier(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Protoss_Carrier) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Gantrithor) return true;
+        return false;
+    }
+
+    public static bool UnitIsReaver(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Protoss_Reaver) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Warbringer) return true;
+        return false;
+    }
+
+    public static bool UnitIsQueen(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Zerg_Queen) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Matriarch) return true;
+        return false;
+    }
+
+    public static bool UnitIsHatchery(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Zerg_Hatchery) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Lair) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Hive) return true;
+        return false;
+    }
+
+    public static bool UnitIsMarine(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Marine) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Jim_Raynor_Marine) return true;
+        return false;
+    }
+
+    public static bool UnitIsFirebat(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Firebat) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Gui_Montag) return true;
+        return false;
+    }
+
+    public static bool UnitIsGhost(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Ghost) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Sarah_Kerrigan) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Alexei_Stukov) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Samir_Duran) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Infested_Duran) return true;
+        return false;
+    }
+
+    public static bool UnitIsWraith(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Wraith) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Tom_Kazansky) return true;
+        return false;
+    }
+
+    public static bool UnitIsMapRevealer(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Spell_Scanner_Sweep) return true;
+        if (ut.Id == (int)UnitTypes.Special_Map_Revealer) return true;
+        return false;
+    }
+
+    public static bool UnitIsRefinery(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Refinery) return true;
+        if (ut.Id == (int)UnitTypes.Protoss_Assimilator) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Extractor) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_non_flag_beacon(unit_type_autocast ut)
+    //
+    // A range test over the beacon ids.
+    public static bool UnitIsNonFlagBeacon(UnitType ut) {
+        return ut.Id >= (int)UnitTypes.Special_Zerg_Beacon &&
+               ut.Id <= (int)UnitTypes.Special_Protoss_Beacon;
+    }
+
+    // openbw: bool unit_is_special_beacon(unit_type_autocast ut)
+    public static bool UnitIsSpecialBeacon(UnitType ut) {
+        return ut.Id >= (int)UnitTypes.Special_Zerg_Beacon &&
+               ut.Id <= (int)UnitTypes.Special_Protoss_Flag_Beacon;
+    }
+
+    public static bool UnitIsScout(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Protoss_Scout) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Mojo) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Artanis) return true;
+        return false;
+    }
+
+    public static bool UnitIsVulture(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Vulture) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Jim_Raynor_Vulture) return true;
+        return false;
+    }
+
+    public static bool UnitIsNydus(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Zerg_Nydus_Canal) return true;
+        return false;
+    }
+
+    public static bool UnitIsDefiler(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Zerg_Defiler) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Unclean_One) return true;
+        return false;
+    }
+
+    public static bool UnitIsUltralisk(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Zerg_Ultralisk) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Torrasque) return true;
+        return false;
+    }
+
+    public static bool UnitIsArbiter(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Protoss_Arbiter) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Danimoth) return true;
+        return false;
+    }
+
+    public static bool UnitIsEgg(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Zerg_Egg) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Cocoon) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Lurker_Egg) return true;
+        return false;
+    }
+
+    public static bool UnitIsGoliath(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Goliath) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Alan_Schezar) return true;
+        return false;
+    }
+
+    public static bool UnitIsCritter(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Critter_Rhynadon) return true;
+        if (ut.Id == (int)UnitTypes.Critter_Bengalaas) return true;
+        if (ut.Id == (int)UnitTypes.Critter_Ragnasaur) return true;
+        if (ut.Id == (int)UnitTypes.Critter_Scantid) return true;
+        if (ut.Id == (int)UnitTypes.Critter_Kakaru) return true;
+        if (ut.Id == (int)UnitTypes.Critter_Ursadon) return true;
+        return false;
+    }
+
+    public static bool UnitIsSiegedTank(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Siege_Tank_Siege_Mode) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Edmund_Duke_Siege_Mode) return true;
+        return false;
+    }
+
+    public static bool UnitIsUnsiegedTank(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Siege_Tank_Tank_Mode) return true;
+        if (ut.Id == (int)UnitTypes.Hero_Edmund_Duke_Tank_Mode) return true;
+        return false;
+    }
+
+    public static bool UnitIsTank(UnitType ut) {
+        return UnitIsSiegedTank(ut) || UnitIsUnsiegedTank(ut);
+    }
+
+    // openbw: bool unit_is_trap(unit_type_autocast ut)
+    public static bool UnitIsTrap(UnitType ut) {
+        return ut.Id >= (int)UnitTypes.Special_Floor_Missile_Trap &&
+               ut.Id <= (int)UnitTypes.Special_Right_Wall_Flame_Trap;
+    }
+
+    // openbw: bool unit_is_zerg_building(unit_type_autocast ut)
+    public static bool UnitIsZergBuilding(UnitType ut) {
+        return ut.Id >= (int)UnitTypes.Zerg_Infested_Command_Center &&
+               ut.Id <= (int)UnitTypes.Special_Cerebrate_Daggoth;
+    }
+
+    public static bool UnitIsFighter(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Protoss_Interceptor) return true;
+        if (ut.Id == (int)UnitTypes.Protoss_Scarab) return true;
+        return false;
+    }
+
+    // openbw: bool unit_is_factory(const unit_t* u)
+    //
+    // The buildings that produce units: the command centre, the
+    // barracks, the factory, the starport, the infested command
+    // centre, the hatchery, the lair, the hive, the nexus, the
+    // gateway, the stargate and the robotics facility.
+    public static bool UnitIsFactory(UnitType ut) {
+        if (ut.Id == (int)UnitTypes.Terran_Command_Center) return true;
+        if (ut.Id == (int)UnitTypes.Terran_Barracks) return true;
+        if (ut.Id == (int)UnitTypes.Terran_Factory) return true;
+        if (ut.Id == (int)UnitTypes.Terran_Starport) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Infested_Command_Center) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Hatchery) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Lair) return true;
+        if (ut.Id == (int)UnitTypes.Zerg_Hive) return true;
+        if (ut.Id == (int)UnitTypes.Protoss_Nexus) return true;
+        if (ut.Id == (int)UnitTypes.Protoss_Gateway) return true;
+        if (ut.Id == (int)UnitTypes.Protoss_Stargate) return true;
+        if (ut.Id == (int)UnitTypes.Protoss_Robotics_Facility) return true;
+        return false;
+    }
+}
