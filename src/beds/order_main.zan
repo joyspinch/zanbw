@@ -1,0 +1,317 @@
+using System;
+
+// The Zan side of the order layer bed.
+//
+// The bed drives the same script of order operations as the C++ bed
+// (tools/cppbed/order_bed.cpp) and dumps the same state after every
+// step, so that the two traces can be compared byte for byte.
+//
+// The scripts are described by a table of steps; both sides read the
+// same table, so a difference in the table shows up as a difference in
+// the trace.
+
+public class OrderStep {
+    // The operation.
+    public int Op;
+
+    // Which unit the operation applies to.
+    public int Unit;
+
+    // The order type the operation uses.
+    public Orders Order;
+
+    // The operation's argument (the interrupt flag).
+    public int Arg;
+
+    public OrderStep(int op, int unit, Orders order, int arg) {
+        Op = op;
+        Unit = unit;
+        Order = order;
+        Arg = arg;
+    }
+}
+
+public class OrderActionKind {
+    public const int QueueBack = 0;
+    public const int QueueFront = 1;
+    public const int RemoveOne = 2;
+    public const int SetQueued = 3;
+    public const int IssueQueued = 4;
+    public const int IssueDirect = 5;
+    public const int SetUnitOrder = 6;
+    public const int Activate = 7;
+    public const int Done = 8;
+}
+
+// The synthetic order type table.
+//
+// The engine loads the order types from the MPQ files. The bed builds a
+// table with the same shape instead, so that both sides can be driven
+// with the same order ids and the same flags.
+//
+// The order types the scenarios use:
+//   id            highlight  interruptable  queueable
+public class OrderTypeTable {
+    // The order types, indexed by the order id.
+    public List<OrderType> Types = new List<OrderType>();
+
+    public OrderTypeTable() {
+        // One entry per order id, up to the "None" sentinel.
+        for (int i = 0; i < 190; ++i) {
+            OrderType t = new OrderType((Orders)i);
+            t.Highlight = -1;
+            Types.Add(t);
+        }
+        Set(Orders.Die, -1, false, false);
+        Set(Orders.Stop, 10, true, true);
+        Set(Orders.Guard, 11, true, true);
+        Set(Orders.PlayerGuard, 12, true, true);
+        Set(Orders.Move, 13, true, true);
+        Set(Orders.AttackUnit, 14, true, true);
+        Set(Orders.AttackMove, 15, true, true);
+        Set(Orders.Nothing, -1, true, true);
+        Set(Orders.NothingWait, 16, true, true);
+        Set(Orders.Patrol, 17, true, true);
+        Set(Orders.MedicIdle, 18, true, true);
+        Set(Orders.PickupIdle, 19, true, true);
+        Set(Orders.Cloak, 20, true, true);
+        Set(Orders.Repair, 21, true, true);
+        Set(Orders.HoldPosition, 22, false, true);
+        Set(Orders.ResetHarvestCollision, -1, true, true);
+        Set(Orders.CompletingArchonSummon, 23, false, false);
+    }
+
+    private void Set(Orders id, int highlight, bool canBeInterrupted, bool canBeQueued) {
+        OrderType t = Types[(int)id];
+        t.Highlight = highlight;
+        t.CanBeInterrupted = canBeInterrupted;
+        t.CanBeQueued = canBeQueued;
+    }
+
+    public OrderType Get(Orders id) {
+        return Types[(int)id];
+    }
+}
+
+public class OrderBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+        int scenario = -1;
+        if (args.Length >= 2) scenario = Convert.ToInt32(args[2 - 1]);
+
+        OrderTypeTable table = new OrderTypeTable();
+        OrderQueue queue = new OrderQueue();
+
+        // The units the bed drives.
+        List<Unit> units = new List<Unit>();
+        for (int i = 0; i < 4; ++i) {
+            Unit u = new Unit();
+            u.OrderId = (int)Orders.Nothing;
+            u.OrderState = 0;
+            u.UserActionFlags = 0;
+            u.OrderProcessTimer = 0;
+            u.OrderQueueIndex = queue.QueueFor(i);
+            units.Add(u);
+        }
+
+        List<List<OrderStep>> scenarios = BuildScenarios();
+
+        Console.WriteLine("variant=" + variant);
+        if (scenario >= 0 && scenario < scenarios.Count) {
+            List<OrderStep> steps = scenarios[scenario];
+            for (int i = 0; i < steps.Count; ++i) {
+                OrderStep st = steps[i];
+                Unit u = units[st.Unit];
+                OrderQueueList q = queue.QueueAt(u.OrderQueueIndex);
+                OrderType ot = table.Get(st.Order);
+
+                if (st.Op == OrderActionKind.QueueBack) {
+                    queue.QueueOrderBack(q, ot, new OrderTarget());
+                } else if (st.Op == OrderActionKind.QueueFront) {
+                    queue.QueueOrderFront(q, ot, new OrderTarget());
+                } else if (st.Op == OrderActionKind.RemoveOne) {
+                    queue.RemoveOneOrder(q, ot);
+                } else if (st.Op == OrderActionKind.SetQueued) {
+                    queue.SetQueuedOrder(q, u, st.Arg != 0, ot, new OrderTarget());
+                } else if (st.Op == OrderActionKind.IssueQueued) {
+                    queue.IssueOrder(q, u, true, ot, new OrderTarget());
+                } else if (st.Op == OrderActionKind.IssueDirect) {
+                    queue.IssueOrder(q, u, false, ot, new OrderTarget());
+                } else if (st.Op == OrderActionKind.SetUnitOrder) {
+                    queue.SetUnitOrder(q, u, ot, new OrderTarget());
+                } else if (st.Op == OrderActionKind.Activate) {
+                    queue.ActivateNextOrder(q, u);
+                } else if (st.Op == OrderActionKind.Done) {
+                    OrderDone(queue, q, u, table);
+                }
+
+                Console.WriteLine("STEP op=" + st.Op + " unit=" + st.Unit +
+                                  " order=" + (int)st.Order + " arg=" + st.Arg);
+                DumpUnit("u0", units[0], queue.QueueAt(units[0].OrderQueueIndex));
+                DumpUnit("u1", units[1], queue.QueueAt(units[1].OrderQueueIndex));
+                DumpPool(queue);
+            }
+        }
+        return 0;
+    }
+
+    // openbw: void order_done(unit_t* u, order_target_t target = {})
+    //
+    // The order finished: activate the next one, or fall back to the
+    // unit type's idle order.
+    private static void OrderDone(OrderQueue queue, OrderQueueList q, Unit u, OrderTypeTable table) {
+        if (!q.List.IsEmpty()) {
+            u.UserActionFlags = u.UserActionFlags | 1;
+            queue.ActivateNextOrder(q, u);
+        } else {
+            queue.SetUnitOrder(q, u, table.Get(Orders.Nothing), new OrderTarget());
+        }
+    }
+
+    private static void DumpUnit(string tag, Unit u, OrderQueueList q) {
+        Console.WriteLine("UNIT " + tag +
+                          " order=" + u.OrderId +
+                          " state=" + u.OrderState +
+                          " queue_count=" + q.Count +
+                          " uaf=" + u.UserActionFlags +
+                          " status=" + u.StatusFlagBits);
+        Console.Write("QUEUE " + tag + ":");
+        IntrusiveListNode n = q.List.Front();
+        int count = 0;
+        while (n != null) {
+            Order o = q.Orders[n.OwnerIndex];
+            Console.Write(" " + (int)o.OrderType.Id);
+            ++count;
+            n = q.List.NextOf(n);
+        }
+        Console.WriteLine(" (" + count + ")");
+    }
+
+    private static void DumpPool(OrderQueue queue) {
+        Console.WriteLine("POOL orders active=" + queue.ActiveOrdersSize() +
+                          " free=" + queue.PoolFreeCount());
+    }
+
+    // The scenarios. Each one is a list of steps.
+    private static List<List<OrderStep>> BuildScenarios() {
+        List<List<OrderStep>> s = new List<List<OrderStep>>();
+
+        // 0: queue a few orders at the back.
+                List<OrderStep> sc1 = new List<OrderStep>();
+        sc1.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc1.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc1.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Stop, 0));
+        s.Add(sc1);
+
+        // 1: queue at the front, so the order matters.
+                List<OrderStep> sc2 = new List<OrderStep>();
+        sc2.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc2.Add(new OrderStep(OrderActionKind.QueueFront, 0, Orders.Stop, 0));
+        sc2.Add(new OrderStep(OrderActionKind.QueueFront, 0, Orders.Guard, 0));
+        s.Add(sc2);
+
+        // 2: activate the next order.
+                List<OrderStep> sc3 = new List<OrderStep>();
+        sc3.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc3.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc3.Add(new OrderStep(OrderActionKind.Activate, 0, Orders.None, 0));
+        sc3.Add(new OrderStep(OrderActionKind.Activate, 0, Orders.None, 0));
+        s.Add(sc3);
+
+        // 3: set_queued_order interrupts the queue.
+                List<OrderStep> sc4 = new List<OrderStep>();
+        sc4.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc4.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc4.Add(new OrderStep(OrderActionKind.SetQueued, 0, Orders.Stop, 1));
+        s.Add(sc4);
+
+        // 4: set_queued_order without interrupt keeps the queue.
+                List<OrderStep> sc5 = new List<OrderStep>();
+        sc5.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc5.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc5.Add(new OrderStep(OrderActionKind.SetQueued, 0, Orders.Stop, 0));
+        s.Add(sc5);
+
+        // 5: remove one order of a type.
+                List<OrderStep> sc6 = new List<OrderStep>();
+        sc6.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc6.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc6.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc6.Add(new OrderStep(OrderActionKind.RemoveOne, 0, Orders.Move, 0));
+        s.Add(sc6);
+
+        // 6: two units, separate queues.
+                List<OrderStep> sc7 = new List<OrderStep>();
+        sc7.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc7.Add(new OrderStep(OrderActionKind.QueueBack, 1, Orders.Guard, 0));
+        sc7.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Stop, 0));
+        sc7.Add(new OrderStep(OrderActionKind.Activate, 1, Orders.None, 0));
+        s.Add(sc7);
+
+        // 7: issue_order queues behind the current order.
+                List<OrderStep> sc8 = new List<OrderStep>();
+        sc8.Add(new OrderStep(OrderActionKind.SetUnitOrder, 0, Orders.Move, 0));
+        sc8.Add(new OrderStep(OrderActionKind.IssueQueued, 0, Orders.AttackUnit, 0));
+        sc8.Add(new OrderStep(OrderActionKind.IssueQueued, 0, Orders.Stop, 0));
+        s.Add(sc8);
+
+        // 8: issue_order on an order that cannot be queued replaces the
+        // current one.
+                List<OrderStep> sc9 = new List<OrderStep>();
+        sc9.Add(new OrderStep(OrderActionKind.SetUnitOrder, 0, Orders.Move, 0));
+        sc9.Add(new OrderStep(OrderActionKind.IssueQueued, 0, Orders.HoldPosition, 0));
+        s.Add(sc9);
+
+        // 9: the current order is Guard, which cannot be queued behind.
+                List<OrderStep> sc10 = new List<OrderStep>();
+        sc10.Add(new OrderStep(OrderActionKind.SetUnitOrder, 0, Orders.Guard, 0));
+        sc10.Add(new OrderStep(OrderActionKind.IssueQueued, 0, Orders.Move, 0));
+        s.Add(sc10);
+
+        // 10: order_done activates the next order.
+                List<OrderStep> sc11 = new List<OrderStep>();
+        sc11.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc11.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc11.Add(new OrderStep(OrderActionKind.SetUnitOrder, 0, Orders.Stop, 0));
+        sc11.Add(new OrderStep(OrderActionKind.Done, 0, Orders.None, 0));
+        s.Add(sc11);
+
+        // 11: an order without a highlight does not count towards the
+        // queue count.
+                List<OrderStep> sc12 = new List<OrderStep>();
+        sc12.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Nothing, 0));
+        sc12.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc12.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.ResetHarvestCollision, 0));
+        s.Add(sc12);
+
+        // 12: a non-interruptible order in the queue stops the clearing.
+                List<OrderStep> sc13 = new List<OrderStep>();
+        sc13.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.HoldPosition, 0));
+        sc13.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc13.Add(new OrderStep(OrderActionKind.SetQueued, 0, Orders.Stop, 1));
+        s.Add(sc13);
+
+        // 13: a unit that cannot be interrupted keeps its order.
+                List<OrderStep> sc14 = new List<OrderStep>();
+        sc14.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc14.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.AttackUnit, 0));
+        sc14.Add(new OrderStep(OrderActionKind.Activate, 0, Orders.None, 0));
+        s.Add(sc14);
+
+        // 14: the pool runs out and orders are recycled.
+                List<OrderStep> sc15 = new List<OrderStep>();
+        sc15.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Move, 0));
+        sc15.Add(new OrderStep(OrderActionKind.RemoveOne, 0, Orders.Move, 0));
+        sc15.Add(new OrderStep(OrderActionKind.QueueBack, 0, Orders.Stop, 0));
+        s.Add(sc15);
+
+        // 15: order_done on an empty queue falls back to the idle order.
+                List<OrderStep> sc16 = new List<OrderStep>();
+        sc16.Add(new OrderStep(OrderActionKind.SetUnitOrder, 0, Orders.Stop, 0));
+        sc16.Add(new OrderStep(OrderActionKind.Done, 0, Orders.None, 0));
+        s.Add(sc16);
+
+        return s;
+    }
+}

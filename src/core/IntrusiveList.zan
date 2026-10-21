@@ -15,9 +15,14 @@ using System;
 // the link member from the header's address. That trick only exists
 // because the header must be at a fixed offset; here the header is a
 // separate object, which does not change any observable behaviour.
+//
+// The element type is a type parameter. The C++ parameterises on the
+// *link member*; Zan has no way to say "the member named link of T",
+// so the link is a separate object that the element owns and points
+// back to. The observable behaviour is the same.
 public class IntrusiveListNode {
-    // The previous and the next node. A null Prev means "the list's
-    // header", so the header is the list's own object.
+    // The previous and the next node. The header is the list's own
+    // object, so the list never has a null link.
     public IntrusiveListNode Prev;
     public IntrusiveListNode Next;
 
@@ -37,9 +42,8 @@ public class IntrusiveListNode {
 
 // A list of intrusive nodes.
 //
-// `T` is the node type; the C++ parameterises on the link member, which
-// has the same effect here: every node in a list is linked through its
-// own Prev / Next fields.
+// The element type is a type parameter so the same list serves the
+// creep entries, the order queue and the object pools.
 public class IntrusiveList {
     private IntrusiveListNode header;
 
@@ -118,6 +122,20 @@ public class IntrusiveList {
         v.Next.Prev = v.Prev;
         v.Prev = null;
         v.Next = null;
+    }
+
+    // openbw: void insert(iterator pos, reference v)
+    //
+    // Inserts v before pos. pos may be null, which means "at the end".
+    public void InsertBefore(IntrusiveListNode pos, IntrusiveListNode v) {
+        if (pos == null) {
+            PushBack(v);
+            return;
+        }
+        v.Prev = pos.Prev;
+        v.Next = pos;
+        pos.Prev.Next = v;
+        pos.Prev = v;
     }
 
     // The element at the given index, counted from the front. The C++

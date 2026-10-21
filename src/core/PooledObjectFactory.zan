@@ -1,0 +1,14 @@
+using System;
+
+// Makes a pooled object.
+//
+// The C++ pools a concrete struct type, so the pool has to know how to
+// build what it holds. Zan has no way to write "the payload type of
+// this pool" as a type parameter that can be constructed, so the pool
+// takes a factory object instead: the caller subclasses it and returns
+// the right payload.
+public class PooledObjectFactory {
+    public virtual PooledObject Make() {
+        return new PooledObject();
+    }
+}

@@ -1,0 +1,246 @@
+using System;
+
+// openbw: the order queue (bwgame.h, the order functions)
+//
+// A unit's pending orders, and the pool they come from.
+//
+// The queue is an intrusive list over the orders themselves, so an
+// order can be unlinked in O(1). The *order* of the queue is
+// behaviour: activate_next_order() takes the front, set_queued_order()
+// walks from the back, and issue_order() decides whether the new order
+// is queued or replaces the current one.
+//
+// The orders come from a pool (object_container) that has a free list
+// of its own, so the pool's order is behaviour too: create_order()
+// takes the first free order, and the free list's order decides which
+// order a unit gets.
+// Makes the orders the pool holds.
+public class OrderFactory : PooledObjectFactory {
+    public override PooledObject Make() {
+        return new Order();
+    }
+}
+
+public class OrderQueue {
+    // The pool the orders come from.
+    private ObjectContainer pool;
+
+    // How many orders are in use across all units.
+    private int activeOrdersSize;
+
+    // The units' queues. The C++ keeps the intrusive list inside the
+    // unit; here the queue lives here and the unit holds its index,
+    // because the C++'s unit_t holds a link_base by value.
+    private List<OrderQueueList> queues;
+
+    public OrderQueue() {
+        // openbw: object_container<order_t, 2000, 20> orders_container
+        pool = new ObjectContainer(2000, 20, new OrderFactory());
+        queues = new List<OrderQueueList>();
+        activeOrdersSize = 0;
+    }
+
+    public int ActiveOrdersSize() { return activeOrdersSize; }
+
+    public int PoolFreeCount() { return pool.FreeCount(); }
+
+    public int PoolSize() { return pool.Size(); }
+
+    // Creates (or reuses) a queue for a unit and returns its index.
+    public int QueueFor(int unitId) {
+        for (int i = 0; i < queues.Count; ++i) {
+            if (queues[i].UnitId == unitId) return i;
+        }
+        OrderQueueList q = new OrderQueueList();
+        q.UnitId = unitId;
+        queues.Add(q);
+        return queues.Count - 1;
+    }
+
+    public OrderQueueList QueueAt(int index) {
+        return queues[index];
+    }
+
+    // openbw: order_t* create_order(const order_type_t* order_type, order_target_t target)
+    //
+    // Takes an order from the pool and fills it in.
+    public Order CreateOrder(OrderType orderType, OrderTarget target) {
+        PooledObject o = pool.Top();
+        if (o == null) return null;
+        pool.Pop();
+        ++activeOrdersSize;
+        Order ord = (Order)o;
+        ord.OrderType = orderType;
+        ord.Target = target;
+        return ord;
+    }
+
+    // openbw: void remove_queued_order(unit_t* u, order_t* o)
+    public void RemoveQueuedOrder(OrderQueueList queue, Order o) {
+        if (o.OrderType.Highlight != -1) {
+            --queue.Count;
+            if (queue.Count == -1) queue.Count = 0;
+        }
+        queue.List.Remove(o.Link);
+        pool.Push(o);
+        --activeOrdersSize;
+    }
+
+    // openbw: void queue_order(intrusive_list<order_t>::iterator pos, unit_t* u, ...)
+    //
+    // Inserts an order at the given position. A null position means the
+    // end of the queue.
+    public void QueueOrder(OrderQueueList queue, IntrusiveListNode pos, OrderType orderType, OrderTarget target) {
+        Order o = CreateOrder(orderType, target);
+        if (o == null) return;
+        if (o.OrderType.Highlight != -1) ++queue.Count;
+        // The link's owner index points at the order's slot in the
+        // queue's order list, so the queue can get back from a node to
+        // its order in O(1).
+        o.Link.OwnerIndex = queue.Orders.Count;
+        queue.Orders.Add(o);
+        queue.List.InsertBefore(pos, o.Link);
+    }
+
+    // openbw: void queue_order_back(unit_t* u, ...)
+    public void QueueOrderBack(OrderQueueList queue, OrderType orderType, OrderTarget target) {
+        QueueOrder(queue, null, orderType, target);
+    }
+
+    // openbw: void queue_order_front(unit_t* u, ...)
+    public void QueueOrderFront(OrderQueueList queue, OrderType orderType, OrderTarget target) {
+        IntrusiveListNode front = queue.List.Front();
+        QueueOrder(queue, front, orderType, target);
+    }
+
+    // openbw: void remove_one_order(unit_t* u, const order_type_t* order_type)
+    //
+    // Removes the first queued order of the given type.
+    public void RemoveOneOrder(OrderQueueList queue, OrderType orderType) {
+        IntrusiveListNode n = queue.List.Front();
+        while (n != null) {
+            Order o = OrderAt(queue, n);
+            if (o != null && o.OrderType == orderType) {
+                RemoveQueuedOrder(queue, o);
+                return;
+            }
+            n = queue.List.NextOf(n);
+        }
+    }
+
+    // openbw: void set_queued_order(unit_t* u, bool interrupt, ...)
+    //
+    // Drops the queued orders that the new order replaces, then queues
+    // the new one at the back.
+    public void SetQueuedOrder(OrderQueueList queue, Unit unit, bool interrupt, OrderType orderType, OrderTarget target) {
+        if (unit.OrderId == (int)Orders.Die) return;
+        while (!queue.List.IsEmpty()) {
+            IntrusiveListNode n = queue.List.Back();
+            Order o = OrderAt(queue, n);
+            if (o == null) break;
+            if ((!interrupt || !o.OrderType.CanBeInterrupted) && o.OrderType != orderType) break;
+            RemoveQueuedOrder(queue, o);
+        }
+        if (orderType.Id == Orders.Cloak) {
+            // openbw: error("cloak fixme")
+        } else {
+            QueueOrderBack(queue, orderType, target);
+        }
+    }
+
+    // openbw: void issue_order(unit_t* u, bool queue, ...)
+    //
+    // Issues an order, either queueing it behind the current one or
+    // replacing it.
+    public void IssueOrder(OrderQueueList queue, Unit unit, bool queueIt, OrderType orderType, OrderTarget target) {
+        if (queueIt && !orderType.CanBeQueued) queueIt = false;
+        if (queueIt) {
+            switch ((Orders)unit.OrderId) {
+            case Orders.Guard:
+            case Orders.PlayerGuard:
+            case Orders.Nothing:
+            case Orders.PickupIdle:
+            case Orders.Patrol:
+            case Orders.MedicIdle:
+                queueIt = false;
+                break;
+            default:
+                break;
+            }
+        }
+        if (queueIt) {
+            if (queue.Count < 8 && activeOrdersSize < 1800) {
+                QueueOrderBack(queue, orderType, target);
+            }
+        } else {
+            SetUnitOrder(queue, unit, orderType, target);
+        }
+    }
+
+    // openbw: void set_unit_order(unit_t* u, const order_type_t* order_type, order_target_t target)
+    public void SetUnitOrder(OrderQueueList queue, Unit unit, OrderType orderType, OrderTarget target) {
+        unit.UserActionFlags = unit.UserActionFlags | 1;
+        SetQueuedOrder(queue, unit, true, orderType, target);
+        ActivateNextOrder(queue, unit);
+    }
+
+    // openbw: void activate_next_order(unit_t* u)
+    //
+    // Makes the first queued order the unit's current order.
+    public void ActivateNextOrder(OrderQueueList queue, Unit unit) {
+        if (queue.List.IsEmpty()) return;
+        if ((unit.UOrderNotInterruptible() || unit.UIscriptNobrk()) && unit.OrderId != (int)Orders.Die) return;
+
+        IntrusiveListNode front = queue.List.Front();
+        Order o = OrderAt(queue, front);
+        if (o == null) return;
+        OrderType orderType = o.OrderType;
+        OrderTarget target = o.Target;
+        RemoveQueuedOrder(queue, o);
+
+        unit.UserActionFlags = unit.UserActionFlags & ~1;
+        unit.UnsetStatus(StatusFlag.Flag8);
+        unit.UnsetStatus(StatusFlag.ReadyToAttack);
+        unit.SetStatus(StatusFlag.OrderNotInterruptible, !orderType.CanBeInterrupted);
+        unit.OrderProcessTimer = 0;
+        unit.MoveTargetTimer = 0;
+
+        unit.OrderId = (int)orderType.Id;
+        unit.OrderState = 0;
+        unit.OrderTarget = target;
+    }
+
+    // The order a list node belongs to.
+    private Order OrderAt(OrderQueueList queue, IntrusiveListNode n) {
+        if (n.OwnerIndex < 0 || n.OwnerIndex >= queue.Orders.Count) return null;
+        return queue.Orders[n.OwnerIndex];
+    }
+}
+
+// A unit's order queue: the intrusive list of pending orders plus the
+// bookkeeping the C++ keeps in the unit.
+public class OrderQueueList {
+    public int UnitId;
+
+    // The pending orders, front to back.
+    public IntrusiveList List;
+
+    // openbw: unit_t::order_queue_count
+    //
+    // How many of the queued orders have a highlight. The C++ counts
+    // them separately because the orders without a highlight (the
+    // internal ones) do not count towards the queue limit.
+    public int Count;
+
+    // The orders in the queue, in order. The C++ finds an order from a
+    // list node by pointer arithmetic on the container of orders; here
+    // the queue keeps the orders themselves so the mapping is direct.
+    public List<Order> Orders;
+
+    public OrderQueueList() {
+        UnitId = 0;
+        List = new IntrusiveList();
+        Count = 0;
+        Orders = new List<Order>();
+    }
+}

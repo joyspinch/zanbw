@@ -1,0 +1,97 @@
+using System;
+
+// openbw: order_type_t (data_types.h)
+//
+// One entry of the order type table. The engine loads these from the
+// MPQ files; the bed builds a synthetic table with the same shape.
+//
+// The fields the order queue cares about are the id, whether the order
+// is highlighted (an order with highlight == -1 does not count towards
+// the unit's order queue count) and whether it can be interrupted.
+public class OrderType {
+    public Orders Id;
+
+    // The order's label.
+    public int Label;
+
+    // Whether the order targets enemies.
+    public bool TargetsEnemies;
+
+    // Whether a turret can carry out the order.
+    public bool ValidForTurret;
+
+    // Whether the order can be interrupted by a new one.
+    public bool CanBeInterrupted;
+
+    // Whether the order can be queued behind another one.
+    public bool CanBeQueued;
+
+    // Whether the order can be obstructed.
+    public bool CanBeObstructed;
+
+    // The weapon the order uses, or -1.
+    public int Weapon;
+
+    // The animation the order plays, or -1.
+    public int Animation;
+
+    // The highlight image index, or -1 when the order has no
+    // highlight. An order with highlight == -1 does not count towards
+    // the unit's order_queue_count.
+    public int Highlight;
+
+    // The order this one is a variation of, or -1.
+    public Orders TargetOrder;
+
+    public OrderType(Orders id) {
+        Id = id;
+        Label = (int)id;
+        TargetsEnemies = false;
+        ValidForTurret = false;
+        CanBeInterrupted = true;
+        CanBeQueued = true;
+        CanBeObstructed = false;
+        Weapon = -1;
+        Animation = -1;
+        Highlight = -1;
+        TargetOrder = Orders.None;
+    }
+}
+
+// openbw: order_target_t (game_types.h)
+//
+// What an order points at: a position, a unit, and/or a unit type.
+public class OrderTarget {
+    public Xy Position;
+    public int UnitId;
+    public int UnitTypeId;
+
+    public OrderTarget() {
+        Position = new Xy(0, 0);
+        UnitId = 0;
+        UnitTypeId = 0;
+    }
+}
+
+// openbw: order_t (game_types.h)
+//
+// One queued order. The C++'s order_t is a link_base, so the queue is
+// an intrusive list over the orders themselves; here the link is a
+// member of the order.
+public class Order : PooledObject {
+    // The order type.
+    public OrderType OrderType;
+
+    // What the order points at.
+    public OrderTarget Target;
+
+    // The order's slot in its queue's order list. The queue uses it to
+    // get back from a list node to its order.
+    public int QueueSlot;
+
+    public Order() {
+        OrderType = null;
+        Target = new OrderTarget();
+        QueueSlot = -1;
+    }
+}

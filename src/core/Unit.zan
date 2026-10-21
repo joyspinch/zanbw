@@ -176,6 +176,21 @@ public class Unit {
     public int OrderState;
     public UnitType UnitType;
 
+    // openbw: unit_t::order_target
+    //
+    // What the unit's current order points at.
+    public OrderTarget OrderTarget;
+
+    // openbw: unit_t::order_process_timer
+    public int OrderProcessTimer;
+
+    // openbw: unit_t::order_queue
+    //
+    // The index of this unit's queue in the order queue pool. The C++
+    // keeps the intrusive list inside the unit; here the queue lives in
+    // the pool and the unit holds its index.
+    public int OrderQueueIndex;
+
     public int UserActionFlags;
     public MovementStates MovementState;
     public int StatusFlagBits;
@@ -244,6 +259,9 @@ public class Unit {
         OrderId = 0;
         OrderState = 0;
         UnitType = null;
+        OrderTarget = new OrderTarget();
+        OrderProcessTimer = 0;
+        OrderQueueIndex = -1;
         UserActionFlags = 0;
         MovementState = MovementStates.UM_Init;
         StatusFlagBits = 0;
@@ -274,6 +292,14 @@ public class Unit {
     public bool HasStatusFlag(StatusFlag flag) { return (StatusFlagBits & (int)flag) != 0; }
     public void SetStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits | (int)flag; }
     public void UnsetStatus(StatusFlag flag) { StatusFlagBits = StatusFlagBits & ~((int)flag); }
+
+    // openbw: u_set_status_flag(u, flag, value)
+    //
+    // Sets or clears a status flag depending on the value.
+    public void SetStatus(StatusFlag flag, bool value) {
+        if (value) SetStatus(flag);
+        else UnsetStatus(flag);
+    }
 
     // ---- geometry ----------------------------------------------------------
 

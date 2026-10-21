@@ -1,0 +1,152 @@
+using System;
+
+// openbw: object_container (game_types.h)
+//
+// A pool of fixed-size objects. The units, bullets, sprites, images and
+// orders all live in one of these.
+//
+// The C++ stores the objects in a deque of fixed-size arrays (the
+// allocation granularity) and hands out pointers into them. The
+// addresses stay stable, which matters because the objects are also
+// linked into intrusive lists.
+//
+// Here the objects live in a flat list instead. The pool's index
+// arithmetic is the same -- `get(index)` maps an index to a slot, and
+// index 0 is special: it means "the last slot" (max_size - index), so
+// that index 0 and index max_size are the same object.
+//
+// The free list is an intrusive list over the pooled objects, so
+// `top()` hands out the first free object and `push()` returns one.
+public class ObjectContainer {
+    // The pooled objects, in slot order.
+    private List<PooledObject> entries;
+
+    // The free list of the pool.
+    // (ObjectContainer keeps it; this class only reaches the pool.)
+    private IntrusiveList freeList;
+
+    // How many objects are in use across all units.
+    private int size;
+
+    // The maximum number of objects.
+    private int maxSize;
+
+    // How many objects are added per grow step.
+    private int allocationGranularity;
+
+    // Makes a new pooled object. The pool has to know how to build the
+    // type it pools, because the C++ pools a concrete struct type.
+    private PooledObjectFactory factory;
+
+    public ObjectContainer(int maxSize, int allocationGranularity, PooledObjectFactory factory) {
+        this.maxSize = maxSize;
+        this.allocationGranularity = allocationGranularity;
+        this.factory = factory;
+        entries = new List<PooledObject>();
+        freeList = new IntrusiveList();
+        size = 0;
+    }
+
+    // The slot for the given pool index. Index 0 means the last slot,
+    // so that the pool can use index 0 as "no object".
+    private int SlotOf(int index) {
+        if (index != 0) index = maxSize - index;
+        return index;
+    }
+
+    public int Size() { return size; }
+
+    public int FreeCount() { return freeList.Count(); }
+
+    // openbw: T* try_get(size_t index)
+    //
+    // The object at the given index, or null when the pool has not
+    // grown that far.
+    public PooledObject TryGet(int index) {
+        int slot = SlotOf(index);
+        if (size <= slot) return null;
+        return entries[slot];
+    }
+
+    // openbw: T* get(size_t index, bool add_new_to_free = true)
+    //
+    // The object at the given index, growing the pool if needed.
+    public PooledObject Get(int index, bool addNewToFree) {
+        int slot = SlotOf(index);
+        while (size <= slot) Grow(addNewToFree);
+        return entries[slot];
+    }
+
+    // openbw: void grow(bool add_new_to_free)
+    private void Grow(bool addNewToFree) {
+        if (size == maxSize) return;
+        int n = allocationGranularity;
+        if (n > maxSize - size) n = maxSize - size;
+        for (int i = 0; i != n; ++i) {
+            PooledObject obj = factory.Make();
+            // The C++ stores the pool index in the pooled object: `size
+            // == 0 ? 0 : max_size - size`. The index is the *logical*
+            // index, which is the mirror of the slot, so that index 0
+            // and index max_size are the same object.
+            obj.Index = size == 0 ? 0 : maxSize - size;
+            obj.PoolSlot = entries.Count;
+            obj.Link.OwnerIndex = entries.Count;
+            entries.Add(obj);
+            if (addNewToFree) freeList.PushFront(obj.Link);
+            ++size;
+        }
+    }
+
+    // openbw: T* top()
+    //
+    // The first free object, growing the pool when it runs out.
+    public PooledObject Top() {
+        if (freeList.IsEmpty()) {
+            if (size == maxSize) return null;
+            Grow(true);
+        } else if (size != maxSize && freeList.Count() == 1) {
+            // The C++ checks whether the free list holds exactly one
+            // element; when it does, it grows the pool first so that
+            // the pool keeps a steady size.
+            Grow(true);
+        }
+        IntrusiveListNode n = freeList.Front();
+        if (n == null) return null;
+        PooledObject obj = entries[n.OwnerIndex];
+        // The object leaves the free list, so the link's owner index
+        // belongs to the user again.
+        obj.Link.OwnerIndex = obj.PoolSlot;
+        return obj;
+    }
+
+    // openbw: void pop()
+    public void Pop() {
+        freeList.PopFront();
+    }
+
+    // openbw: void push(T* obj)
+    //
+    // Returns an object to the pool. The C++'s bw_insert_list() puts
+    // the object at the front of the free list, or as the second
+    // element when the list is not empty.
+    public void Push(PooledObject obj) {
+        IntrusiveListNode n = obj.Link;
+        // The link's owner index points at the pool slot while the
+        // object is on the free list. Whoever used the object in the
+        // meantime (the order queue, say) may have changed it.
+        n.OwnerIndex = obj.PoolSlot;
+        if (freeList.IsEmpty()) {
+            freeList.PushFront(n);
+        } else {
+            IntrusiveListNode second = freeList.NextOf(freeList.Front());
+            if (second == null) {
+                freeList.PushBack(n);
+            } else {
+                n.Prev = second.Prev;
+                n.Next = second;
+                second.Prev.Next = n;
+                second.Prev = n;
+            }
+        }
+    }
+}

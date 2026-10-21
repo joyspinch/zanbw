@@ -1,0 +1,34 @@
+using System;
+
+// The base of every object that lives in an object_container.
+//
+// The C++ pools raw structs (unit_t, bullet_t, order_t, ...) by type.
+// In Zan a class is the unit of pooling, so the pooled payload derives
+// from this base, which carries the two things the pool needs: the
+// pool index, and the intrusive list link the free list uses.
+//
+// The link is a member of the base rather than a separate wrapper
+// object, so the pool can hand out the payload itself.
+public class PooledObject {
+    // The pool index. The C++ stores this in the pooled object itself
+    // so that the free list can check that it hands out the object its
+    // index claims.
+    public int Index;
+
+    // The slot this object occupies in the pool's object list. The
+    // pool uses it to get back from a free list node to the object.
+    //
+    // This is separate from the link's owner index on purpose: the
+    // link's owner index belongs to whoever *uses* the object (the
+    // order queue, say), and the two would overwrite each other.
+    public int PoolSlot;
+
+    // The intrusive list link used by the free list.
+    public IntrusiveListNode Link;
+
+    public PooledObject() {
+        Index = 0;
+        PoolSlot = 0;
+        Link = new IntrusiveListNode();
+    }
+}

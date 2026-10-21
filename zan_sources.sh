@@ -31,6 +31,12 @@ ZAN_SOURCES_CORE=(
     src/core/Scenario.zan
     src/core/TileMap.zan
     src/core/IntrusiveList.zan
+    src/core/ObjectContainer.zan
+    src/core/PooledObject.zan
+    src/core/PooledObjectFactory.zan
+    src/core/Orders.zan
+    src/core/Order.zan
+    src/core/OrderQueue.zan
 )
 
 # The regions layer: the tile map and the region decomposition.
