@@ -116,4 +116,6 @@ public enum WeaponTypes {
     Dual_Photon_Blasters_Artanis,
     Anti_Matter_Missiles_Artanis,
     C_10_Canister_Rifle_Alexei_Stukov,
+    // openbw: WeaponTypes::None = 130
+    None = 130,
 }

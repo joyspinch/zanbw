@@ -1,0 +1,226 @@
+using System;
+
+// The Zan side of the spell order bed.
+//
+// The bed drives the same queries over the same orders, techs, weapons
+// and targets as the C++ bed (tools/cppbed/spellorder_bed.cpp), so the
+// two traces must match byte for byte.
+
+public class SpellOrderBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+        // The weapons.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 210; ++i) {
+            weapons.Add(new WeaponType());
+        }
+        // The order types.
+        List<OrderType> orderTypes = new List<OrderType>();
+        for (int i = 0; i < 190; ++i) {
+            OrderType t = new OrderType((Orders)i);
+            t.Highlight = -1;
+            t.Weapon = (int)WeaponTypes.None;
+            t.TechType = (int)TechTypes.None;
+            orderTypes.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] techs = new int[] {
+            (int)TechTypes.None,
+            (int)TechTypes.Spider_Mines,
+            (int)TechTypes.EMP_Shockwave,
+            (int)TechTypes.Scanner_Sweep,
+            (int)TechTypes.Dark_Swarm,
+            (int)TechTypes.Plague,
+            (int)TechTypes.Ensnare,
+            (int)TechTypes.Psionic_Storm,
+            (int)TechTypes.Recall,
+            (int)TechTypes.Stasis_Field,
+            (int)TechTypes.Disruption_Web,
+            (int)TechTypes.Maelstrom,
+            (int)TechTypes.Feedback,
+            (int)TechTypes.Mind_Control,
+            (int)TechTypes.Hallucination,
+            (int)TechTypes.Defensive_Matrix,
+            (int)TechTypes.Irradiate,
+            (int)TechTypes.Restoration,
+            (int)TechTypes.Optical_Flare,
+            (int)TechTypes.Consume,
+        };
+        int techCount = techs.Length;
+
+        int[] targetTypeIds = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Vulture_Spider_Mine,
+            (int)UnitTypes.Zerg_Larva,
+            (int)UnitTypes.Zerg_Egg,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Protoss_Interceptor,
+            (int)UnitTypes.Protoss_Scarab,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Protoss_Shuttle,
+        };
+        int targetTypeCount = targetTypeIds.Length;
+
+        int caseIndex = 0;
+        for (int ti = 0; ti < techCount; ++ti) {
+            for (int tt = 0; tt < targetTypeCount; ++tt) {
+                for (int sv = 0; sv < 4; ++sv) {
+                    // The casting unit's order carries the tech.
+                    OrderType order = orderTypes[0];
+                    order.TechType = techs[ti];
+                    order.TargetsEnemies = false;
+                    order.Weapon = (int)WeaponTypes.None;
+
+                    // The iscript unit's order carries the weapon.
+                    OrderType iscriptOrder = orderTypes[1];
+                    iscriptOrder.Weapon = (sv % 2 == 0) ? (int)WeaponTypes.Gauss_Rifle : (int)WeaponTypes.None;
+                    iscriptOrder.TargetsEnemies = false;
+                    iscriptOrder.TechType = (int)TechTypes.None;
+
+                    // The weapon.
+                    WeaponType w = weapons[0];
+                    w.TargetFlags = (sv % 3 == 0) ? 0x03 : 0x00;
+
+                    // The target.
+                    UnitType t = types[targetTypeIds[tt]];
+                    t.Flags = 0;
+                    t.GroupFlags = (tt % 3 == 0) ? 2 : ((tt % 3 == 1) ? 1 : 4);
+                    if (tt % 3 == 1) t.Flags = t.Flags | (int)UnitTypeFlag.Organic;
+                    if (tt % 3 == 2) t.Flags = t.Flags | (int)UnitTypeFlag.Mechanical;
+                    if (tt % 4 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+                    if (ti == (int)TechTypes.Feedback) {
+                        t.Flags = t.Flags | (int)UnitTypeFlag.HasEnergy;
+                    }
+
+                    Unit target = new Unit();
+                    target.UnitType = t;
+                    target.Owner = ((sv + variant) % 2);
+                    target.StatusFlagBits = 0;
+                    target.Sprite = new Sprite();
+                    target.Hp = Fp.Integer(50);
+                    // The state shifts with the variant so the variants
+                    // really differ.
+                    int kind = (sv + variant) % 4;
+                    if (kind == 2) {
+                        target.StatusFlagBits = target.StatusFlagBits | (int)StatusFlag.Invincible;
+                    }
+                    target.StasisTimer = (kind == 3) ? 10 : 0;
+
+                    // The caster.
+                    Unit caster = new Unit();
+                    caster.UnitType = types[(int)UnitTypes.Terran_Marine];
+                    caster.Owner = 0;
+                    caster.StatusFlagBits = 0;
+                    caster.Sprite = new Sprite();
+                    caster.Hp = Fp.Integer(50);
+
+                    // The iscript unit.
+                    Unit iscriptUnit = new Unit();
+                    iscriptUnit.UnitType = types[(int)UnitTypes.Terran_Marine];
+                    iscriptUnit.Owner = 0;
+                    iscriptUnit.StatusFlagBits = 0;
+                    iscriptUnit.Sprite = new Sprite();
+                    iscriptUnit.Hp = Fp.Integer(50);
+
+                    // The tile the order targets.
+                    int[] tileFlags = new int[1];
+                    tileFlags[0] = (kind % 2 == 0)
+                        ? ((int)TileFlag.Walkable | (int)TileFlag.HasCreep)
+                        : (int)TileFlag.Unwalkable;
+
+                    bool valid = SpellOrder.SpellOrderValid(
+                        caster, order, iscriptOrder, w, target, tileFlags);
+
+                    Console.WriteLine("S " + caseIndex + " " + ti + " " + tt + " " + sv
+                        + " " + order.TechType
+                        + " " + iscriptOrder.Weapon
+                        + " " + w.TargetFlags
+                        + " " + t.Flags
+                        + " " + target.StatusFlagBits
+                        + " " + target.StasisTimer
+                        + " " + target.Owner
+                        + " " + tileFlags[0]
+                        + " " + (valid ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The order that targets enemies.
+        caseIndex = 0;
+        for (int ti = 0; ti < techCount; ++ti) {
+            for (int sv = 0; sv < 4; ++sv) {
+                OrderType order = orderTypes[0];
+                order.TechType = techs[ti];
+                order.TargetsEnemies = true;
+                order.Weapon = (int)WeaponTypes.None;
+
+                OrderType iscriptOrder = orderTypes[1];
+                iscriptOrder.Weapon = (sv % 2 == 0) ? (int)WeaponTypes.Gauss_Rifle : (int)WeaponTypes.None;
+                iscriptOrder.TargetsEnemies = false;
+                iscriptOrder.TechType = (int)TechTypes.None;
+
+                WeaponType w = weapons[0];
+                w.TargetFlags = (sv % 3 == 0) ? 0x03 : 0x00;
+
+                Unit target = new Unit();
+                target.UnitType = types[(int)UnitTypes.Terran_Marine];
+                target.Owner = 0;
+                target.StatusFlagBits = 0;
+                target.Sprite = new Sprite();
+                target.Hp = Fp.Integer(50);
+                if (sv == 2) {
+                    target.StatusFlagBits = target.StatusFlagBits | (int)StatusFlag.Invincible;
+                }
+
+                Unit caster = new Unit();
+                caster.UnitType = types[(int)UnitTypes.Terran_Marine];
+                caster.Owner = 0;
+                caster.StatusFlagBits = 0;
+                caster.Sprite = new Sprite();
+                caster.Hp = Fp.Integer(50);
+
+                Unit iscriptUnit = new Unit();
+                iscriptUnit.UnitType = types[(int)UnitTypes.Terran_Marine];
+                iscriptUnit.Owner = 0;
+                iscriptUnit.StatusFlagBits = 0;
+                iscriptUnit.Sprite = new Sprite();
+                iscriptUnit.Hp = Fp.Integer(50);
+
+                int[] tileFlags = new int[1];
+                tileFlags[0] = (int)TileFlag.Walkable;
+
+                bool valid = SpellOrder.SpellOrderValid(
+                    caster, order, iscriptOrder, w, target, tileFlags);
+
+                Console.WriteLine("E " + caseIndex + " " + ti + " " + sv
+                    + " " + order.TechType
+                    + " " + iscriptOrder.Weapon
+                    + " " + w.TargetFlags
+                    + " " + target.StatusFlagBits
+                    + " " + target.Owner
+                    + " " + tileFlags[0]
+                    + " " + (valid ? 1 : 0));
+                caseIndex = caseIndex + 1;
+            }
+        }
+
+        return 0;
+    }
+}

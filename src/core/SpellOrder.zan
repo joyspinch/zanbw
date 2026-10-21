@@ -1,0 +1,57 @@
+using System;
+
+// openbw: the spell order layer (bwgame.h)
+//
+// The C++'s spell_order_valid decides whether a spell order may be
+// carried out. It has three parts:
+//
+//   1. An order that targets enemies needs a weapon, and the weapon
+//      must be able to target the unit.
+//   2. A set of techs always work (the area effects).
+//   3. Every other tech needs a target, the target must not be
+//      invincible, and the tech must accept that target.
+//
+// openbw's spell_order_valid reads the iscript unit's order for the
+// weapon and the casting unit's order for the tech, so both orders
+// matter.
+public class SpellOrder {
+    // openbw: bool spell_order_valid(const unit_t* u) const
+    //
+    // Whether the spell order may be carried out.
+    //
+    // The tile flags are the flags of the tile the order targets, used
+    // by the spider mine spell. Pass 0 when the order has no tile.
+    public static bool SpellOrderValid(
+        Unit u,
+        OrderType order,
+        OrderType iscriptOrder,
+        WeaponType iscriptWeapon,
+        Unit orderTargetUnit,
+        int[] tileFlags
+    ) {
+        if (order.TargetsEnemies) {
+            if (iscriptOrder.Weapon == (int)WeaponTypes.None) return false;
+            return WeaponTargeting.WeaponCanTargetUnitBy(iscriptWeapon, orderTargetUnit, u);
+        }
+        switch (order.TechType) {
+        case (int)TechTypes.None:
+            return true;
+        case (int)TechTypes.Spider_Mines:
+            return (tileFlags[0] & ((int)TileFlag.Walkable | (int)TileFlag.HasCreep)) != 0;
+        case (int)TechTypes.EMP_Shockwave:
+        case (int)TechTypes.Scanner_Sweep:
+        case (int)TechTypes.Dark_Swarm:
+        case (int)TechTypes.Plague:
+        case (int)TechTypes.Ensnare:
+        case (int)TechTypes.Psionic_Storm:
+        case (int)TechTypes.Recall:
+        case (int)TechTypes.Stasis_Field:
+        case (int)TechTypes.Disruption_Web:
+        case (int)TechTypes.Maelstrom:
+            return true;
+        default:
+            if (orderTargetUnit == null || UnitFlags.Invincible(orderTargetUnit)) return false;
+            return UnitTarget2.UnitTechTargetValid(u, order.TechType, orderTargetUnit);
+        }
+    }
+}

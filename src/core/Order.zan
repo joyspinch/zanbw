@@ -32,6 +32,9 @@ public class OrderType {
     // The weapon the order uses, or -1.
     public int Weapon;
 
+    // The tech the order uses, or -1.
+    public int TechType;
+
     // The animation the order plays, or -1.
     public int Animation;
 
@@ -52,6 +55,7 @@ public class OrderType {
         CanBeQueued = true;
         CanBeObstructed = false;
         Weapon = -1;
+        TechType = (int)TechTypes.None;
         Animation = -1;
         Highlight = -1;
         TargetOrder = Orders.None;
