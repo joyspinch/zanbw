@@ -67,6 +67,19 @@ public class UnitDamage {
         return hp;
     }
 
+    // openbw: int visible_hp_plus_shields(const unit_t* u) const
+    //
+    // The target's current hit points plus its current shields.
+    //
+    // The hit points are rounded up, so a unit with 0.5 hit points
+    // left still counts as one.
+    public static int VisibleHpPlusShields(Unit u) {
+        int r = 0;
+        if (u.UnitType.HasShield) r = r + u.ShieldPoints.IntegerPart();
+        r = r + u.Hp.Ceil().IntegerPart();
+        return r;
+    }
+
     // openbw: int max_visible_hp_plus_shields(const unit_t* u) const
     //
     // The target's maximum hit points plus its shields.

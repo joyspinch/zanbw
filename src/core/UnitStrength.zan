@@ -1,0 +1,122 @@
+using System;
+
+// openbw: the unit strength layer (bwgame.h)
+//
+// The C++'s get_unit_strength works out how strong a unit is, and
+// calculate_unit_strengths fills the whole table from it.
+//
+// The core is a score computed from the unit's hit points and the
+// weapon's damage, range and cooldown:
+//
+//   a = (range / cooldown) * bullet_count * damage
+//   b = (hp * ((bullet_count * damage << 11) / cooldown)) >> 8
+//   score = (int)(sqrt(a + b) * 7.58)
+//
+// The sqrt is not a plain square root. The C++ uses isqrt (a bit by
+// bit integer square root) and then refines the result with a small
+// Newton-style loop, so the answer is a hair above the exact
+// sqrt(x) * 7.58. Reproducing it exactly needs the same loop.
+//
+// After the score, the C++ scales it per unit type: workers get a
+// quarter, some units get double, the scourge gets a sixteenth.
+public class UnitStrength {
+    // openbw: T isqrt(T n) -- the bit by bit integer square root
+    // (util.h).
+    public static uint ISqrt(uint n) {
+        uint r = 0;
+        uint p = 1u << 30;
+        while (p > n) p = p / 4u;
+        while (p != 0) {
+            if (n >= r + p) {
+                n = n - (r + p);
+                r = r + 2u * p;
+            }
+            r = r / 2u;
+            p = p / 4u;
+        }
+        return r;
+    }
+
+    // openbw: the sqrt_x_times_7_58 lambda in get_unit_strength
+    //
+    // The integer square root of x, scaled by 7.58. The C++ starts
+    // from isqrt(x) * 758 / 100 and then walks the result up while the
+    // square is still below x.
+    public static uint SqrtTimes7_58(uint x) {
+        if (x == 0) return 0;
+        uint value = ISqrt(x) * 758 / 100;
+        uint n = 8;
+        while (n > 0) {
+            uint nv = value + n / 2 + 1;
+            uint r = (uint)(((ulong)nv * nv * 10000) / (758 * 758));
+            if (r < x) {
+                value = nv;
+                n = n - (n / 2 + 1);
+            } else {
+                n = n / 2;
+            }
+        }
+        return value;
+    }
+
+    // openbw: int get_unit_strength(const unit_type_t* unit_type, const weapon_type_t* weapon_type)
+    //
+    // The strength of a unit type with a given weapon.
+    public static int UnitTypeStrength(UnitType unitType, WeaponType weapon) {
+        if (unitType.Id == (int)UnitTypes.Terran_Vulture_Spider_Mine) return 0;
+        if (unitType.Id == (int)UnitTypes.Protoss_Interceptor) return 0;
+        if (unitType.Id == (int)UnitTypes.Protoss_Scarab) return 0;
+
+        int hp = unitType.Hitpoints.IntegerPart();
+        if (unitType.HasShield) hp = hp + unitType.ShieldPoints;
+        if (hp == 0) return 0;
+
+        int bulletCount = weapon.BulletCount;
+        int cd = weapon.Cooldown;
+        int dmg = weapon.DamageAmount;
+        int range = weapon.MaxRange;
+
+        uint a = (uint)(range / (uint)cd) * (uint)bulletCount * (uint)dmg;
+        uint b = (uint)((ulong)(hp * ((long)(bulletCount * dmg << 11) / cd)) >> 8);
+        int score = (int)SqrtTimes7_58(a + b);
+
+        if (unitType.Id == (int)UnitTypes.Terran_SCV) return score / 4;
+        if (unitType.Id == (int)UnitTypes.Zerg_Drone) return score / 4;
+        if (unitType.Id == (int)UnitTypes.Protoss_Probe) return score / 4;
+        if (unitType.Id == (int)UnitTypes.Terran_Firebat) return score * 2;
+        if (unitType.Id == (int)UnitTypes.Zerg_Mutalisk) return score * 2;
+        if (unitType.Id == (int)UnitTypes.Protoss_Zealot) return score * 2;
+        if (unitType.Id == (int)UnitTypes.Zerg_Scourge) return score / 16;
+        if (unitType.Id == (int)UnitTypes.Zerg_Infested_Terran) return score / 16;
+        if (unitType.Id == (int)UnitTypes.Protoss_Reaver) return score / 10;
+        return score;
+    }
+
+    // openbw: int get_unit_strength(unit_t* u, bool ground) const
+    //
+    // The strength of a unit in the game, scaled by how much of it is
+    // still alive.
+    //
+    // The bunker is special: it counts as a marine, so its strength is
+    // the marine's strength times how much cargo space it holds.
+    public static int UnitStrength(Unit u, bool ground, int groundStrength, int airStrength,
+                                    int marineGroundStrength, int marineAirStrength) {
+        if (u.UnitType.Id == (int)UnitTypes.Zerg_Larva) return 0;
+        if (UnitTypeIds.UnitIsEgg(u.UnitType)) return 0;
+        int visHpShields = UnitDamage.VisibleHpPlusShields(u);
+        int maxVisHpShields = UnitDamage.MaxVisibleHpPlusShields(u);
+        if (UnitFlags.Hallucination(u)) {
+            if (visHpShields < maxVisHpShields) return 0;
+        }
+
+        int r = ground ? groundStrength : airStrength;
+        if (u.UnitType.Id == (int)UnitTypes.Terran_Bunker) {
+            r = ground ? marineGroundStrength : marineAirStrength;
+            r = r * UnitGeometry.UnitSpaceOccupied(u, new List<Unit>());
+        }
+        if (UnitFlags.HasEnergy(u.UnitType) && !UnitFlags.Hallucination(u)) {
+            r = r + u.Energy.IntegerPart() / 2;
+        }
+        return r * visHpShields / maxVisHpShields;
+    }
+}

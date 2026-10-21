@@ -1,0 +1,154 @@
+using System;
+
+// The Zan side of the unit strength bed.
+//
+// The bed drives the same queries over the same unit types, weapons
+// and unit states as the C++ bed (tools/cppbed/unitstrength_bed.cpp),
+// so the two traces must match byte for byte.
+
+public class UnitStrengthBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+        // The weapons.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 117; ++i) {
+            weapons.Add(new WeaponType());
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] unitTypeIds = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Firebat,
+            (int)UnitTypes.Terran_Ghost,
+            (int)UnitTypes.Terran_Bunker,
+            (int)UnitTypes.Terran_Vulture,
+            (int)UnitTypes.Terran_Vulture_Spider_Mine,
+            (int)UnitTypes.Terran_Siege_Tank_Tank_Mode,
+            (int)UnitTypes.Terran_Siege_Tank_Siege_Mode,
+            (int)UnitTypes.Terran_Battlecruiser,
+            (int)UnitTypes.Zerg_Drone,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Mutalisk,
+            (int)UnitTypes.Zerg_Scourge,
+            (int)UnitTypes.Zerg_Infested_Terran,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Lurker,
+            (int)UnitTypes.Zerg_Ultralisk,
+            (int)UnitTypes.Zerg_Larva,
+            (int)UnitTypes.Zerg_Egg,
+            (int)UnitTypes.Protoss_Probe,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Protoss_Reaver,
+            (int)UnitTypes.Protoss_Interceptor,
+            (int)UnitTypes.Protoss_Scarab,
+            (int)UnitTypes.Protoss_Carrier,
+            (int)UnitTypes.Protoss_Arbiter,
+            (int)UnitTypes.Protoss_Shuttle,
+        };
+        int unitTypeCount = unitTypeIds.Length;
+
+        int caseIndex = 0;
+
+        // The unit type's strength, for a spread of weapons.
+        for (int ut = 0; ut < unitTypeCount; ++ut) {
+            for (int w = 0; w < 117; ++w) {
+                for (int sv = 0; sv < 6; ++sv) {
+                    UnitType t = types[unitTypeIds[ut]];
+                    WeaponType wt = weapons[w];
+                    t.Hitpoints = Fp.Integer(((sv + variant) * 7 + 1) % 80);
+                    t.HasShield = (sv % 3 == 0);
+                    t.ShieldPoints = ((sv + variant) * 5) % 20;
+                    wt.BulletCount = ((sv + variant) * 2 + 1) % 5;
+                    wt.Cooldown = 1 + (((sv + variant) * 3 + w) % 40);
+                    wt.DamageAmount = (((sv + variant) * 11 + w * 3) % 30);
+                    wt.MaxRange = (((sv + variant) * 13 + w * 5) % 300);
+
+                    int strength = UnitStrength.UnitTypeStrength(t, wt);
+
+                    Console.WriteLine("W " + caseIndex + " " + ut + " " + w + " " + sv
+                        + " " + t.Hitpoints.IntegerPart()
+                        + " " + t.ShieldPoints
+                        + " " + wt.BulletCount + " " + wt.Cooldown + " " + wt.DamageAmount + " " + wt.MaxRange
+                        + " " + (t.HasShield ? 1 : 0)
+                        + " " + (t.Flags & (int)UnitTypeFlag.TwoUnitsInOneEgg)
+                        + " " + strength);
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The unit's strength in the game.
+        caseIndex = 0;
+        for (int ut = 0; ut < unitTypeCount; ++ut) {
+            for (int sv = 0; sv < 12; ++sv) {
+                Unit u = new Unit();
+                u.UnitType = types[unitTypeIds[ut]];
+                // The unit type's own hit points and shield amount,
+                // which the strength computation reads.
+                u.UnitType.Hitpoints = Fp.Integer(40 + ((sv + variant) * 3) % 30);
+                u.UnitType.HasShield = (sv % 3 == 1);
+                u.UnitType.ShieldPoints = ((sv + variant) * 4) % 12;
+                u.Owner = 0;
+                u.StatusFlagBits = 0;
+                u.Sprite = new Sprite();
+                u.Hp = Fp.Integer(((sv + variant) * 5 + 1) % 60);
+                u.ShieldPoints = Fp.Integer(((sv + variant) * 3) % 15);
+                u.Energy = Fp.Integer(((sv + variant) * 4) % 25);
+                u.LockdownTimer = 0;
+                u.StasisTimer = 0;
+                u.MaelstromTimer = 0;
+                if (sv % 4 == 0) u.StatusFlagBits = u.StatusFlagBits | (int)StatusFlag.Hallucination;
+
+                int groundStrength = ((sv + variant) * 13 + 1) % 400;
+                int airStrength = ((sv + variant) * 7 + 2) % 400;
+                int marineGround = ((sv + variant) * 11 + 3) % 400;
+                int marineAir = ((sv + variant) * 17 + 5) % 400;
+
+                // The C++'s strength table: the marine's entries are
+                // written last, so they win for the marine itself.
+                int tableGround = groundStrength;
+                int tableAir = airStrength;
+                if (unitTypeIds[ut] == (int)UnitTypes.Terran_Marine) {
+                    tableGround = marineGround;
+                    tableAir = marineAir;
+                }
+
+                // The bunker's cargo. The bunker's space is what the
+                // cargo takes up, and the units' space requirements are
+                // fixed on the unit types.
+                for (int i = 0; i < unitTypeCount; ++i) {
+                    types[unitTypeIds[i]].SpaceRequired = (sv % 4) + 1;
+                }
+
+                int ground = UnitStrength.UnitStrength(u, true, tableGround, tableAir, marineGround, marineAir);
+                int air = UnitStrength.UnitStrength(u, false, tableGround, tableAir, marineGround, marineAir);
+
+                Console.WriteLine("U " + caseIndex + " " + ut + " " + sv
+                    + " " + u.Hp.IntegerPart()
+                    + " " + u.ShieldPoints.IntegerPart()
+                    + " " + u.Energy.IntegerPart()
+                    + " " + groundStrength + " " + airStrength + " " + marineGround + " " + marineAir
+                    + " " + u.StatusFlagBits
+                    + " " + u.UnitType.Hitpoints.IntegerPart()
+                    + " " + u.UnitType.ShieldPoints
+                    + " " + ground + " " + air);
+                caseIndex = caseIndex + 1;
+            }
+        }
+
+        return 0;
+    }
+}

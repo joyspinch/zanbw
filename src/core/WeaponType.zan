@@ -50,6 +50,11 @@ public class WeaponType {
     // The upgrade that raises the damage.
     public int DamageUpgrade;
 
+    // openbw: weapon_type_t::bullet_count
+    //
+    // How many bullets the weapon fires in one shot.
+    public int BulletCount;
+
     public WeaponType() {
         Id = 0;
         Label = 0;
@@ -58,6 +63,7 @@ public class WeaponType {
         TargetFlags = 0;
         DamageAmount = 0;
         Cooldown = 0;
+        BulletCount = 0;
         BulletType = 0;
         HitType = 0;
         DamageType = 0;
