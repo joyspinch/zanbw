@@ -1,0 +1,94 @@
+using System;
+
+// openbw: the state the build rules need.
+//
+// The original's unit_can_build reaches for the game state: the
+// player's finished units, the unit's own state and the build queue.
+// This entity carries that state, so the rules stay a pure function of
+// it.
+public class BuildState {
+    // The building is finished.
+    public bool Completed;
+
+    // The building is disabled.
+    public bool Disabled;
+
+    // The building is a hallucination.
+    public bool Hallucination;
+
+    // The player may build the unit type at all.
+    public bool UnitTypeAllowed;
+
+    // The build queue is full.
+    public bool BuildQueueFull;
+
+    // The unit type at the back of the build queue.
+    public int BuildQueueBackId;
+
+    // The unit types the player has finished, as a set of ids.
+    public List<int> CompletedUnits;
+
+    // The unit types the player has, as a set of ids.
+    public List<int> Units;
+
+    // The techs the player has researched, as a set of ids.
+    public List<int> Researched;
+
+    // The addons the building has, as a set of unit type ids.
+    public List<int> Addons;
+
+    // The number of interceptors the carrier holds.
+    public int Interceptors;
+
+    // The number of scarabs the reaver holds.
+    public int Scarabs;
+
+    // The number of fighter units the building has queued.
+    public int QueuedFighterUnits;
+
+    // The maximum number of interceptors the carrier may hold.
+    public int MaxInterceptors;
+
+    // The maximum number of scarabs the reaver may hold.
+    public int MaxScarabs;
+
+    // The nuclear silo has a nuke.
+    public bool BuildingSiloNuke;
+
+    // The building is constructing something.
+    public bool Constructing;
+
+    // The unit the building is constructing is finished.
+    public bool CurrentBuildCompleted;
+
+    // The unit the order targets is finished.
+    public bool OrderTargetCompleted;
+
+    public BuildState() {
+        CompletedUnits = new List<int>();
+        Units = new List<int>();
+        Researched = new List<int>();
+        Addons = new List<int>();
+    }
+
+    public bool HasCompletedUnit(int owner, int unitTypeId) {
+        return CompletedUnits.Contains(unitTypeId);
+    }
+
+    public bool HasUnit(int owner, int unitTypeId) {
+        return Units.Contains(unitTypeId);
+    }
+
+    public bool HasResearched(int owner, int techTypeId) {
+        return Researched.Contains(techTypeId);
+    }
+
+    // openbw: bool unit_has_addon(const unit_t* u, UnitTypes unit_type_id)
+    //
+    // The unit's type has to be a building, and the addon it holds has
+    // to be the type asked for.
+    public bool HasAddon(Unit u, int unitTypeId) {
+        if (!UnitFlags.Building(u.UnitType)) return false;
+        return u.BuildingAddonId == unitTypeId;
+    }
+}

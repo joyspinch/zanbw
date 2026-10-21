@@ -1,0 +1,362 @@
+using System;
+
+// The Zan side of the build rules bed.
+//
+// The bed drives the same queries over the same builders, targets and
+// player states as the C++ bed
+// (tools/cppbed/unitbuildrules_bed.cpp), so the two traces must match
+// byte for byte.
+
+public class UnitBuildRulesBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            t.GroupFlags = (i % 3 == 0) ? 1 : ((i % 3 == 1) ? 2 : 4);
+            // The hero units: they carry more fighters.
+            if (i >= 10 && i <= 28) t.Flags = t.Flags | (int)UnitTypeFlag.Hero;
+            // The buildings: the addon rules only apply to them.
+            if (i == (int)UnitTypes.Terran_Command_Center || i == (int)UnitTypes.Terran_Factory
+                || i == (int)UnitTypes.Terran_Starport || i == (int)UnitTypes.Terran_Barracks
+                || i == (int)UnitTypes.Zerg_Hatchery || i == (int)UnitTypes.Zerg_Lair
+                || i == (int)UnitTypes.Protoss_Nexus || i == (int)UnitTypes.Protoss_Gateway
+                || i == (int)UnitTypes.Protoss_Stargate || i == (int)UnitTypes.Protoss_Robotics_Facility
+                || i == (int)UnitTypes.Terran_Science_Facility || i == (int)UnitTypes.Protoss_Observatory) {
+                t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+            }
+            types.Add(t);
+        }
+        // The addon's type and the queued type.
+        UnitType addonType = new UnitType((int)UnitTypes.Terran_Machine_Shop, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+        addonType.Hitpoints = Fp.Integer(50);
+        // The five addon types the rules ask about.
+        int[] addonTypes = new int[] {
+            (int)UnitTypes.Terran_Machine_Shop,
+            (int)UnitTypes.Terran_Control_Tower,
+            (int)UnitTypes.Terran_Science_Facility,
+            (int)UnitTypes.Protoss_Arbiter_Tribunal,
+            (int)UnitTypes.Protoss_Robotics_Support_Bay,
+        };
+        UnitType queueType = new UnitType((int)UnitTypes.Terran_Marine, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+
+        // The builders: the unit types the rules ask about.
+        int[] builders = new int[] {
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Factory,
+            (int)UnitTypes.Terran_Starport,
+            (int)UnitTypes.Terran_Command_Center,
+            (int)UnitTypes.Terran_Science_Facility,
+            (int)UnitTypes.Terran_Nuclear_Silo,
+            (int)UnitTypes.Zerg_Larva,
+            (int)UnitTypes.Zerg_Drone,
+            (int)UnitTypes.Zerg_Hatchery,
+            (int)UnitTypes.Zerg_Lair,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Mutalisk,
+            (int)UnitTypes.Zerg_Spire,
+            (int)UnitTypes.Zerg_Creep_Colony,
+            (int)UnitTypes.Zerg_Infested_Command_Center,
+            (int)UnitTypes.Protoss_Probe,
+            (int)UnitTypes.Protoss_Nexus,
+            (int)UnitTypes.Protoss_Gateway,
+            (int)UnitTypes.Protoss_Robotics_Facility,
+            (int)UnitTypes.Protoss_Stargate,
+            (int)UnitTypes.Protoss_Carrier,
+            (int)UnitTypes.Protoss_Reaver,
+        };
+
+        // The unit types to build.
+        int[] targets = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_Ghost,
+            (int)UnitTypes.Terran_Vulture,
+            (int)UnitTypes.Terran_Goliath,
+            (int)UnitTypes.Terran_Siege_Tank_Tank_Mode,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Wraith,
+            (int)UnitTypes.Terran_Science_Vessel,
+            (int)UnitTypes.Terran_Dropship,
+            (int)UnitTypes.Terran_Battlecruiser,
+            (int)UnitTypes.Terran_Firebat,
+            (int)UnitTypes.Terran_Nuclear_Missile,
+            (int)UnitTypes.Terran_Medic,
+            (int)UnitTypes.Terran_Valkyrie,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Ultralisk,
+            (int)UnitTypes.Zerg_Drone,
+            (int)UnitTypes.Zerg_Overlord,
+            (int)UnitTypes.Zerg_Mutalisk,
+            (int)UnitTypes.Zerg_Guardian,
+            (int)UnitTypes.Zerg_Queen,
+            (int)UnitTypes.Zerg_Defiler,
+            (int)UnitTypes.Zerg_Scourge,
+            (int)UnitTypes.Zerg_Infested_Terran,
+            (int)UnitTypes.Zerg_Devourer,
+            (int)UnitTypes.Zerg_Lurker,
+            (int)UnitTypes.Protoss_Probe,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Protoss_Dragoon,
+            (int)UnitTypes.Protoss_High_Templar,
+            (int)UnitTypes.Protoss_Shuttle,
+            (int)UnitTypes.Protoss_Scout,
+            (int)UnitTypes.Protoss_Arbiter,
+            (int)UnitTypes.Protoss_Carrier,
+            (int)UnitTypes.Protoss_Interceptor,
+            (int)UnitTypes.Protoss_Reaver,
+            (int)UnitTypes.Protoss_Scarab,
+            (int)UnitTypes.Protoss_Observer,
+            (int)UnitTypes.Protoss_Corsair,
+            (int)UnitTypes.Protoss_Dark_Templar,
+            (int)UnitTypes.Terran_Command_Center,
+            (int)UnitTypes.Terran_Comsat_Station,
+            (int)UnitTypes.Terran_Nuclear_Silo,
+            (int)UnitTypes.Terran_Supply_Depot,
+            (int)UnitTypes.Terran_Refinery,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Academy,
+            (int)UnitTypes.Terran_Factory,
+            (int)UnitTypes.Terran_Starport,
+            (int)UnitTypes.Terran_Control_Tower,
+            (int)UnitTypes.Terran_Science_Facility,
+            (int)UnitTypes.Terran_Covert_Ops,
+            (int)UnitTypes.Terran_Physics_Lab,
+            (int)UnitTypes.Terran_Machine_Shop,
+            (int)UnitTypes.Terran_Engineering_Bay,
+            (int)UnitTypes.Terran_Armory,
+            (int)UnitTypes.Terran_Missile_Turret,
+            (int)UnitTypes.Terran_Bunker,
+            (int)UnitTypes.Zerg_Hatchery,
+            (int)UnitTypes.Zerg_Lair,
+            (int)UnitTypes.Zerg_Hive,
+            (int)UnitTypes.Zerg_Spawning_Pool,
+            (int)UnitTypes.Zerg_Hydralisk_Den,
+            (int)UnitTypes.Zerg_Defiler_Mound,
+            (int)UnitTypes.Zerg_Greater_Spire,
+            (int)UnitTypes.Zerg_Queens_Nest,
+            (int)UnitTypes.Zerg_Evolution_Chamber,
+            (int)UnitTypes.Zerg_Ultralisk_Cavern,
+            (int)UnitTypes.Zerg_Spire,
+            (int)UnitTypes.Zerg_Nydus_Canal,
+            (int)UnitTypes.Zerg_Creep_Colony,
+            (int)UnitTypes.Zerg_Spore_Colony,
+            (int)UnitTypes.Zerg_Sunken_Colony,
+            (int)UnitTypes.Zerg_Extractor,
+            (int)UnitTypes.Protoss_Nexus,
+            (int)UnitTypes.Protoss_Robotics_Facility,
+            (int)UnitTypes.Protoss_Pylon,
+            (int)UnitTypes.Protoss_Assimilator,
+            (int)UnitTypes.Protoss_Observatory,
+            (int)UnitTypes.Protoss_Gateway,
+            (int)UnitTypes.Protoss_Photon_Cannon,
+            (int)UnitTypes.Protoss_Citadel_of_Adun,
+            (int)UnitTypes.Protoss_Cybernetics_Core,
+            (int)UnitTypes.Protoss_Templar_Archives,
+            (int)UnitTypes.Protoss_Forge,
+            (int)UnitTypes.Protoss_Stargate,
+            (int)UnitTypes.Protoss_Fleet_Beacon,
+            (int)UnitTypes.Protoss_Arbiter_Tribunal,
+            (int)UnitTypes.Protoss_Robotics_Support_Bay,
+            (int)UnitTypes.Protoss_Shield_Battery,
+        };
+
+        // The player's common finished buildings.
+        int[] common = new int[] {
+            (int)UnitTypes.Terran_Command_Center,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Factory,
+            (int)UnitTypes.Terran_Starport,
+            (int)UnitTypes.Terran_Academy,
+            (int)UnitTypes.Terran_Armory,
+            (int)UnitTypes.Terran_Engineering_Bay,
+            (int)UnitTypes.Terran_Science_Facility,
+            (int)UnitTypes.Terran_Covert_Ops,
+            (int)UnitTypes.Zerg_Hatchery,
+            (int)UnitTypes.Zerg_Lair,
+            (int)UnitTypes.Zerg_Hive,
+            (int)UnitTypes.Zerg_Spawning_Pool,
+            (int)UnitTypes.Zerg_Hydralisk_Den,
+            (int)UnitTypes.Zerg_Defiler_Mound,
+            (int)UnitTypes.Zerg_Greater_Spire,
+            (int)UnitTypes.Zerg_Queens_Nest,
+            (int)UnitTypes.Zerg_Evolution_Chamber,
+            (int)UnitTypes.Zerg_Ultralisk_Cavern,
+            (int)UnitTypes.Zerg_Spire,
+            (int)UnitTypes.Protoss_Nexus,
+            (int)UnitTypes.Protoss_Robotics_Facility,
+            (int)UnitTypes.Protoss_Gateway,
+            (int)UnitTypes.Protoss_Cybernetics_Core,
+            (int)UnitTypes.Protoss_Templar_Archives,
+            (int)UnitTypes.Protoss_Forge,
+            (int)UnitTypes.Protoss_Stargate,
+            (int)UnitTypes.Protoss_Fleet_Beacon,
+            (int)UnitTypes.Protoss_Observatory,
+            (int)UnitTypes.Terran_Physics_Lab,
+            (int)UnitTypes.Protoss_Citadel_of_Adun,
+            (int)UnitTypes.Protoss_Arbiter_Tribunal,
+            (int)UnitTypes.Protoss_Robotics_Support_Bay,
+        };
+
+        Console.WriteLine("variant=" + variant);
+
+        int caseIndex = 0;
+        for (int b = 0; b < builders.Length; ++b) {
+            for (int t = 0; t < targets.Length; ++t) {
+                int owner = caseIndex % 12;
+
+                // The base state is good, so the misses come from the
+                // type rules and not from the state noise.
+                int statusFlags = (int)StatusFlag.Completed;
+                if ((caseIndex + variant) % 17 == 0) statusFlags = statusFlags & ~(int)StatusFlag.Completed;
+                if ((caseIndex + variant) % 19 == 0) statusFlags = statusFlags | (int)StatusFlag.Disabled;
+                if ((caseIndex + variant) % 23 == 0) statusFlags = statusFlags | (int)StatusFlag.Hallucination;
+                if ((caseIndex + variant) % 29 == 0) statusFlags = statusFlags | (int)StatusFlag.Burrowed;
+                statusFlags = statusFlags | (int)StatusFlag.GroundedBuilding;
+                statusFlags = statusFlags | (int)StatusFlag.CanMove;
+
+                Unit builder = MakeUnit(types[builders[b]], owner, statusFlags);
+                builder.CarrierInsideCount = caseIndex % 5;
+                builder.CarrierOutsideCount = caseIndex % 3;
+                builder.ReaverInsideCount = caseIndex % 4;
+
+                BuildState s = MakeState(owner, caseIndex, variant, common);
+                s.Completed = (statusFlags & (int)StatusFlag.Completed) != 0;
+                s.Disabled = (statusFlags & (int)StatusFlag.Disabled) != 0;
+                s.Hallucination = (statusFlags & (int)StatusFlag.Hallucination) != 0;
+
+                // The addons.
+                // The addon: one of the five the rules ask about, and
+                // the building has it only every third case.
+                int addonId = addonTypes[caseIndex % 5];
+                if ((caseIndex + variant) % 3 == 0) {
+                    builder.BuildingAddonId = addonId;
+                    s.Addons.Add(addonId);
+                }
+
+                // The order: constructing a building, sometimes.
+                if ((caseIndex + variant) % 7 == 0) builder.OrderId = (int)Orders.ConstructingBuilding;
+
+                // The build queue.
+                if ((caseIndex + variant) % 13 == 0) {
+                    s.BuildQueueFull = true;
+                    s.BuildQueueBackId = (int)UnitTypes.Terran_Marine;
+                    // The queue holds five Marines, and a Marine is a
+                    // fighter.
+                    s.QueuedFighterUnits = 5;
+                    // A non-empty queue means the unit is constructing.
+                    s.Constructing = true;
+                }
+
+                // The carrier and the reaver: how many fighters they hold.
+                // A unit that is not a carrier or a reaver holds none.
+                if (UnitTypeIds.UnitIsCarrier(builder.UnitType)) {
+                    s.Interceptors = builder.CarrierInsideCount + builder.CarrierOutsideCount;
+                }
+                if (UnitTypeIds.UnitIsReaver(builder.UnitType)) {
+                    s.Scarabs = builder.ReaverInsideCount;
+                }
+                // The C++ keeps these in a union, so only the one that
+                // applies is written.
+                if (!UnitTypeIds.UnitIsCarrier(builder.UnitType)) {
+                    builder.CarrierInsideCount = 0;
+                    builder.CarrierOutsideCount = 0;
+                }
+                if (!UnitTypeIds.UnitIsReaver(builder.UnitType)) {
+                    builder.ReaverInsideCount = 0;
+                }
+                // The capacities, without the upgrades. A hero carries
+                // more.
+                s.MaxInterceptors = UnitTypeIds.UnitIsHero(builder.UnitType) ? 8 : 4;
+                s.MaxScarabs = UnitTypeIds.UnitIsHero(builder.UnitType) ? 10 : 5;
+
+                // The nuclear silo has a nuke.
+                if ((caseIndex + variant) % 3 == 0) s.BuildingSiloNuke = true;
+
+                // The player may build this type.
+                s.UnitTypeAllowed = (caseIndex + variant) % 31 != 0;
+
+                bool can = UnitBuildRules.UnitCanBuild(builder, targets[t], owner, s);
+                Console.WriteLine("W " + caseIndex + " " + b + " " + t + " " + targets[t] + " " + (can ? 1 : 0));
+
+                caseIndex = caseIndex + 1;
+            }
+        }
+
+        // ---- every unit type as the builder ---------------------------------
+        for (int i = 0; i < 229; ++i) {
+            int statusFlags = (int)StatusFlag.Completed;
+            statusFlags = statusFlags | (int)StatusFlag.GroundedBuilding;
+            statusFlags = statusFlags | (int)StatusFlag.CanMove;
+            int owner = i % 12;
+
+            // The player's state: the common buildings are there, the
+            // player's units and techs are a spread.
+            BuildState s = MakeState(owner, i, variant, common);
+            s.CompletedUnits.Clear();
+            for (int c = 0; c < common.Length; ++c) s.CompletedUnits.Add(common[c]);
+            s.UnitTypeAllowed = true;
+            // The fighter counts and the capacities.
+            if (UnitTypeIds.UnitIsCarrier(types[i])) {
+                s.Interceptors = i % 5 + i % 3;
+            }
+            if (UnitTypeIds.UnitIsReaver(types[i])) {
+                s.Scarabs = i % 4;
+            }
+            s.MaxInterceptors = UnitTypeIds.UnitIsHero(types[i]) ? 8 : 4;
+            s.MaxScarabs = UnitTypeIds.UnitIsHero(types[i]) ? 10 : 5;
+
+            Unit builder = MakeUnit(types[i], owner, statusFlags);
+
+            for (int t = 0; t < targets.Length; ++t) {
+                bool can = UnitBuildRules.UnitCanBuild(builder, targets[t], owner, s);
+                Console.WriteLine("V " + i + " " + t + " " + targets[t] + " " + (can ? 1 : 0));
+            }
+        }
+
+        return 0;
+    }
+
+    private static BuildState MakeState(int owner, int caseIndex, int variant, int[] common) {
+        BuildState s = new BuildState();
+        s.Completed = true;
+        s.Disabled = false;
+        s.Hallucination = false;
+        s.Constructing = false;
+        s.CurrentBuildCompleted = true;
+        s.OrderTargetCompleted = true;
+        for (int i = 0; i < common.Length; ++i) {
+            if ((caseIndex + variant) % 17 != 0) s.CompletedUnits.Add(common[i]);
+        }
+        // The player's units.
+        for (int u = 0; u < 229; ++u) {
+            if ((u + caseIndex + variant) % 13 == 0) s.Units.Add(u);
+        }
+        // The researched techs.
+        for (int u = 0; u < 256; ++u) {
+            if ((u + caseIndex + variant) % 17 == 0) s.Researched.Add(u);
+        }
+        return s;
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.Hp = Fp.Integer(50);
+        u.ShieldPoints = Fp.Zero();
+        u.Energy = Fp.Zero();
+        u.BuildingAddonId = -1;
+        return u;
+    }
+}

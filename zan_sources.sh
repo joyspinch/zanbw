@@ -55,6 +55,8 @@ ZAN_SOURCES_CORE=(
     src/core/UnitDetection.zan
     src/core/UnitDamage.zan
     src/core/UnitBoarding.zan
+    src/core/BuildState.zan
+    src/core/UnitBuildRules.zan
     src/core/WeaponEnums.zan
 )
 

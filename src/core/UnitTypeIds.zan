@@ -33,6 +33,17 @@ public class UnitTypeIds {
         return false;
     }
 
+    // openbw: bool ut_hero(unit_type_autocast ut)
+    // The same test, taking the id as a plain int.
+    public static bool IsId(UnitType ut, int id) {
+        return ut.Id == id;
+    }
+
+    // openbw: bool ut_hero(unit_type_autocast ut)
+    public static bool UnitIsHero(UnitType ut) {
+        return (ut.Flags & (int)UnitTypeFlag.Hero) != 0;
+    }
+
     public static bool UnitIsCarrier(UnitType ut) {
         if (ut.Id == (int)UnitTypes.Protoss_Carrier) return true;
         if (ut.Id == (int)UnitTypes.Hero_Gantrithor) return true;

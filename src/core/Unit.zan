@@ -374,6 +374,9 @@ public class Unit {
     public int CarrierInsideCount;
     public int CarrierOutsideCount;
 
+    // The scarabs the reaver holds.
+    public int ReaverInsideCount;
+
     // openbw: unit_t::sprite
     //
     // The unit's sprite position. The C++ keeps the position in the
@@ -469,6 +472,9 @@ public class Unit {
         NydusExit = false;
         DetectedFlags = 0;
         VisibilityFlags = 0;
+        CarrierInsideCount = 0;
+        CarrierOutsideCount = 0;
+        ReaverInsideCount = 0;
         Energy = Fp.Zero();
         ShieldPoints = Fp.Zero();
         DarkSwarmTimer = 0;

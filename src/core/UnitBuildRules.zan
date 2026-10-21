@@ -1,0 +1,803 @@
+using System;
+
+// openbw: the build rules layer (bwgame.h)
+//
+// Whether a unit may start building another unit type. The original
+// is one big switch over the unit type; this is the same switch, case
+// by case, with the same order of the checks.
+//
+// The state the rules need is passed in rather than reached for: what
+// the player has built, what the building is doing, and how many
+// fighters it holds.
+
+public class UnitBuildRules {
+    // openbw: unit_can_build, the Terran_Marine case.
+    private static bool CanBuild_Terran_Marine(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Barracks)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Ghost case.
+    private static bool CanBuild_Terran_Ghost(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Barracks)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Covert_Ops)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Academy)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Vulture case.
+    private static bool CanBuild_Terran_Vulture(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Factory)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Goliath case.
+    private static bool CanBuild_Terran_Goliath(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Factory)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Armory)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Siege_Tank_Tank_Mode case.
+    private static bool CanBuild_Terran_Siege_Tank_Tank_Mode(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Factory)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!s.HasAddon(u, (int)UnitTypes.Terran_Machine_Shop)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_SCV case.
+    private static bool CanBuild_Terran_SCV(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Command_Center)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Wraith case.
+    private static bool CanBuild_Terran_Wraith(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Starport)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Science_Vessel case.
+    private static bool CanBuild_Terran_Science_Vessel(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Starport)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasAddon(u, (int)UnitTypes.Terran_Control_Tower)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Science_Facility)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Dropship case.
+    private static bool CanBuild_Terran_Dropship(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Starport)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasAddon(u, (int)UnitTypes.Terran_Control_Tower)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Battlecruiser case.
+    private static bool CanBuild_Terran_Battlecruiser(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Starport)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasAddon(u, (int)UnitTypes.Terran_Control_Tower)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Physics_Lab)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Firebat case.
+    private static bool CanBuild_Terran_Firebat(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Barracks)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Academy)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Nuclear_Missile case.
+    private static bool CanBuild_Terran_Nuclear_Missile(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Nuclear_Silo)) return false;
+        if (UnitFlags.Building(u.UnitType) && s.BuildingSiloNuke) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Medic case.
+    private static bool CanBuild_Terran_Medic(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Barracks)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Academy)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Valkyrie case.
+    private static bool CanBuild_Terran_Valkyrie(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Starport)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        if (!s.HasAddon(u, (int)UnitTypes.Terran_Control_Tower)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Armory)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Zergling case.
+    private static bool CanBuild_Zerg_Zergling(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Spawning_Pool)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Hydralisk case.
+    private static bool CanBuild_Zerg_Hydralisk(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hydralisk_Den)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Ultralisk case.
+    private static bool CanBuild_Zerg_Ultralisk(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Ultralisk_Cavern)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Drone case.
+    private static bool CanBuild_Zerg_Drone(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Overlord case.
+    private static bool CanBuild_Zerg_Overlord(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Mutalisk case.
+    private static bool CanBuild_Zerg_Mutalisk(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Spire) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Greater_Spire)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Guardian case.
+    private static bool CanBuild_Zerg_Guardian(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Mutalisk)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Greater_Spire)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Queen case.
+    private static bool CanBuild_Zerg_Queen(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Queens_Nest)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Defiler case.
+    private static bool CanBuild_Zerg_Defiler(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Defiler_Mound)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Scourge case.
+    private static bool CanBuild_Zerg_Scourge(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Larva)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Spire) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Greater_Spire)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Infested_Terran case.
+    private static bool CanBuild_Zerg_Infested_Terran(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Infested_Command_Center)) return false;
+        if (!UnitStatus.IsGroundedBuilding(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Devourer case.
+    private static bool CanBuild_Zerg_Devourer(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Mutalisk)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Greater_Spire)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Lurker case.
+    private static bool CanBuild_Zerg_Lurker(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Hydralisk)) return false;
+        if (!s.HasResearched(owner, (int)TechTypes.Lurker_Aspect)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Probe case.
+    private static bool CanBuild_Protoss_Probe(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Nexus)) return false;
+        if (UnitStatus.UnitIsBuildingAddon(u, s.CurrentBuildCompleted) || UnitStatus.UnitIsBuildingProtossThing(u, s.OrderTargetCompleted)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Zealot case.
+    private static bool CanBuild_Protoss_Zealot(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Gateway)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Dragoon case.
+    private static bool CanBuild_Protoss_Dragoon(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Gateway)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Cybernetics_Core)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_High_Templar case.
+    private static bool CanBuild_Protoss_High_Templar(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Gateway)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Templar_Archives)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Shuttle case.
+    private static bool CanBuild_Protoss_Shuttle(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Robotics_Facility)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Scout case.
+    private static bool CanBuild_Protoss_Scout(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Stargate)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Arbiter case.
+    private static bool CanBuild_Protoss_Arbiter(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Stargate)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Arbiter_Tribunal)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Carrier case.
+    private static bool CanBuild_Protoss_Carrier(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Stargate)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Fleet_Beacon)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Interceptor case.
+    private static bool CanBuild_Protoss_Interceptor(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return false;
+        if (s.Interceptors + s.QueuedFighterUnits >= s.MaxInterceptors) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Reaver case.
+    private static bool CanBuild_Protoss_Reaver(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Robotics_Facility)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Robotics_Support_Bay)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Scarab case.
+    private static bool CanBuild_Protoss_Scarab(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return false;
+        if (s.Scarabs + s.QueuedFighterUnits >= s.MaxScarabs) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Observer case.
+    private static bool CanBuild_Protoss_Observer(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Robotics_Facility)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Observatory)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Corsair case.
+    private static bool CanBuild_Protoss_Corsair(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Stargate)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Dark_Templar case.
+    private static bool CanBuild_Protoss_Dark_Templar(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Gateway)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Templar_Archives)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Command_Center case.
+    private static bool CanBuild_Terran_Command_Center(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Comsat_Station case.
+    private static bool CanBuild_Terran_Comsat_Station(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Command_Center)) return false;
+        if (UnitFlags.Building(u.UnitType) && u.BuildingAddonId >= 0) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Academy)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Nuclear_Silo case.
+    private static bool CanBuild_Terran_Nuclear_Silo(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Command_Center)) return false;
+        if (UnitFlags.Building(u.UnitType) && u.BuildingAddonId >= 0) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Covert_Ops)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Supply_Depot case.
+    private static bool CanBuild_Terran_Supply_Depot(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Refinery case.
+    private static bool CanBuild_Terran_Refinery(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Barracks case.
+    private static bool CanBuild_Terran_Barracks(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Command_Center)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Academy case.
+    private static bool CanBuild_Terran_Academy(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Barracks)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Factory case.
+    private static bool CanBuild_Terran_Factory(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Barracks)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Starport case.
+    private static bool CanBuild_Terran_Starport(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Factory)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Control_Tower case.
+    private static bool CanBuild_Terran_Control_Tower(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Starport)) return false;
+        if (UnitFlags.Building(u.UnitType) && u.BuildingAddonId >= 0) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Science_Facility case.
+    private static bool CanBuild_Terran_Science_Facility(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Starport)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Covert_Ops case.
+    private static bool CanBuild_Terran_Covert_Ops(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Science_Facility)) return false;
+        if (UnitFlags.Building(u.UnitType) && u.BuildingAddonId >= 0) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Physics_Lab case.
+    private static bool CanBuild_Terran_Physics_Lab(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Science_Facility)) return false;
+        if (UnitFlags.Building(u.UnitType) && u.BuildingAddonId >= 0) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Machine_Shop case.
+    private static bool CanBuild_Terran_Machine_Shop(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_Factory)) return false;
+        if (UnitFlags.Building(u.UnitType) && u.BuildingAddonId >= 0) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Engineering_Bay case.
+    private static bool CanBuild_Terran_Engineering_Bay(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Command_Center)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Armory case.
+    private static bool CanBuild_Terran_Armory(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Factory)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Missile_Turret case.
+    private static bool CanBuild_Terran_Missile_Turret(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Engineering_Bay)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Terran_Bunker case.
+    private static bool CanBuild_Terran_Bunker(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV)) return false;
+        if (UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Terran_SCV) && u.OrderId == (int)Orders.ConstructingBuilding) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Terran_Barracks)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Hatchery case.
+    private static bool CanBuild_Zerg_Hatchery(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Lair case.
+    private static bool CanBuild_Zerg_Lair(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Hatchery)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Spawning_Pool)) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Hive case.
+    private static bool CanBuild_Zerg_Hive(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Lair)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Queens_Nest)) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Spawning_Pool case.
+    private static bool CanBuild_Zerg_Spawning_Pool(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hatchery) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Lair) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Hydralisk_Den case.
+    private static bool CanBuild_Zerg_Hydralisk_Den(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Spawning_Pool)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Defiler_Mound case.
+    private static bool CanBuild_Zerg_Defiler_Mound(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Greater_Spire case.
+    private static bool CanBuild_Zerg_Greater_Spire(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Spire)) return false;
+        if (s.Constructing || UnitStatus.UnitIsResearching(u) || UnitStatus.UnitIsUpgrading(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Queens_Nest case.
+    private static bool CanBuild_Zerg_Queens_Nest(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Lair) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Evolution_Chamber case.
+    private static bool CanBuild_Zerg_Evolution_Chamber(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hatchery) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Lair) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Ultralisk_Cavern case.
+    private static bool CanBuild_Zerg_Ultralisk_Cavern(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Spire case.
+    private static bool CanBuild_Zerg_Spire(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Lair) && !s.HasUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Nydus_Canal case.
+    private static bool CanBuild_Zerg_Nydus_Canal(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Hive)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Creep_Colony case.
+    private static bool CanBuild_Zerg_Creep_Colony(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        if (UnitFlags.Burrowed(u)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Spore_Colony case.
+    private static bool CanBuild_Zerg_Spore_Colony(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Creep_Colony)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Evolution_Chamber)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Sunken_Colony case.
+    private static bool CanBuild_Zerg_Sunken_Colony(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Creep_Colony)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Zerg_Spawning_Pool)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Zerg_Extractor case.
+    private static bool CanBuild_Zerg_Extractor(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Zerg_Drone)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Nexus case.
+    private static bool CanBuild_Protoss_Nexus(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Robotics_Facility case.
+    private static bool CanBuild_Protoss_Robotics_Facility(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Cybernetics_Core)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Pylon case.
+    private static bool CanBuild_Protoss_Pylon(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Assimilator case.
+    private static bool CanBuild_Protoss_Assimilator(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Observatory case.
+    private static bool CanBuild_Protoss_Observatory(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Robotics_Facility)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Gateway case.
+    private static bool CanBuild_Protoss_Gateway(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Nexus)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Photon_Cannon case.
+    private static bool CanBuild_Protoss_Photon_Cannon(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Forge)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Citadel_of_Adun case.
+    private static bool CanBuild_Protoss_Citadel_of_Adun(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Cybernetics_Core)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Cybernetics_Core case.
+    private static bool CanBuild_Protoss_Cybernetics_Core(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Gateway)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Templar_Archives case.
+    private static bool CanBuild_Protoss_Templar_Archives(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Citadel_of_Adun)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Forge case.
+    private static bool CanBuild_Protoss_Forge(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Nexus)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Stargate case.
+    private static bool CanBuild_Protoss_Stargate(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Cybernetics_Core)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Fleet_Beacon case.
+    private static bool CanBuild_Protoss_Fleet_Beacon(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Stargate)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Arbiter_Tribunal case.
+    private static bool CanBuild_Protoss_Arbiter_Tribunal(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Stargate)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Templar_Archives)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Robotics_Support_Bay case.
+    private static bool CanBuild_Protoss_Robotics_Support_Bay(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Robotics_Facility)) return false;
+        return true;
+    }
+
+    // openbw: unit_can_build, the Protoss_Shield_Battery case.
+    private static bool CanBuild_Protoss_Shield_Battery(Unit u, int owner, BuildState s) {
+        if (!UnitTypeIds.IsId(u.UnitType, (int)UnitTypes.Protoss_Probe)) return false;
+        if (!s.HasCompletedUnit(owner, (int)UnitTypes.Protoss_Gateway)) return false;
+        return true;
+    }
+
+    // openbw: bool unit_can_build(const unit_t* u, const unit_type_t* unit_type) const
+    //
+    // Whether the unit may start building the unit type.
+    public static bool UnitCanBuild(Unit u, int unitTypeId, int owner, BuildState s) {
+        if (!s.Completed) return false;
+        if (s.Disabled) return false;
+        if (s.Hallucination) return false;
+        if (!s.UnitTypeAllowed) return false;
+        if (s.BuildQueueFull) {
+            if (s.BuildQueueBackId <= (int)UnitTypes.Spell_Disruption_Web) return false;
+        }
+        switch (unitTypeId) {
+        case (int)UnitTypes.Terran_Marine: return CanBuild_Terran_Marine(u, owner, s);
+        case (int)UnitTypes.Terran_Ghost: return CanBuild_Terran_Ghost(u, owner, s);
+        case (int)UnitTypes.Terran_Vulture: return CanBuild_Terran_Vulture(u, owner, s);
+        case (int)UnitTypes.Terran_Goliath: return CanBuild_Terran_Goliath(u, owner, s);
+        case (int)UnitTypes.Terran_Siege_Tank_Tank_Mode: return CanBuild_Terran_Siege_Tank_Tank_Mode(u, owner, s);
+        case (int)UnitTypes.Terran_SCV: return CanBuild_Terran_SCV(u, owner, s);
+        case (int)UnitTypes.Terran_Wraith: return CanBuild_Terran_Wraith(u, owner, s);
+        case (int)UnitTypes.Terran_Science_Vessel: return CanBuild_Terran_Science_Vessel(u, owner, s);
+        case (int)UnitTypes.Terran_Dropship: return CanBuild_Terran_Dropship(u, owner, s);
+        case (int)UnitTypes.Terran_Battlecruiser: return CanBuild_Terran_Battlecruiser(u, owner, s);
+        case (int)UnitTypes.Terran_Firebat: return CanBuild_Terran_Firebat(u, owner, s);
+        case (int)UnitTypes.Terran_Nuclear_Missile: return CanBuild_Terran_Nuclear_Missile(u, owner, s);
+        case (int)UnitTypes.Terran_Medic: return CanBuild_Terran_Medic(u, owner, s);
+        case (int)UnitTypes.Terran_Valkyrie: return CanBuild_Terran_Valkyrie(u, owner, s);
+        case (int)UnitTypes.Zerg_Zergling: return CanBuild_Zerg_Zergling(u, owner, s);
+        case (int)UnitTypes.Zerg_Hydralisk: return CanBuild_Zerg_Hydralisk(u, owner, s);
+        case (int)UnitTypes.Zerg_Ultralisk: return CanBuild_Zerg_Ultralisk(u, owner, s);
+        case (int)UnitTypes.Zerg_Drone: return CanBuild_Zerg_Drone(u, owner, s);
+        case (int)UnitTypes.Zerg_Overlord: return CanBuild_Zerg_Overlord(u, owner, s);
+        case (int)UnitTypes.Zerg_Mutalisk: return CanBuild_Zerg_Mutalisk(u, owner, s);
+        case (int)UnitTypes.Zerg_Guardian: return CanBuild_Zerg_Guardian(u, owner, s);
+        case (int)UnitTypes.Zerg_Queen: return CanBuild_Zerg_Queen(u, owner, s);
+        case (int)UnitTypes.Zerg_Defiler: return CanBuild_Zerg_Defiler(u, owner, s);
+        case (int)UnitTypes.Zerg_Scourge: return CanBuild_Zerg_Scourge(u, owner, s);
+        case (int)UnitTypes.Zerg_Infested_Terran: return CanBuild_Zerg_Infested_Terran(u, owner, s);
+        case (int)UnitTypes.Zerg_Devourer: return CanBuild_Zerg_Devourer(u, owner, s);
+        case (int)UnitTypes.Zerg_Lurker: return CanBuild_Zerg_Lurker(u, owner, s);
+        case (int)UnitTypes.Protoss_Probe: return CanBuild_Protoss_Probe(u, owner, s);
+        case (int)UnitTypes.Protoss_Zealot: return CanBuild_Protoss_Zealot(u, owner, s);
+        case (int)UnitTypes.Protoss_Dragoon: return CanBuild_Protoss_Dragoon(u, owner, s);
+        case (int)UnitTypes.Protoss_High_Templar: return CanBuild_Protoss_High_Templar(u, owner, s);
+        case (int)UnitTypes.Protoss_Shuttle: return CanBuild_Protoss_Shuttle(u, owner, s);
+        case (int)UnitTypes.Protoss_Scout: return CanBuild_Protoss_Scout(u, owner, s);
+        case (int)UnitTypes.Protoss_Arbiter: return CanBuild_Protoss_Arbiter(u, owner, s);
+        case (int)UnitTypes.Protoss_Carrier: return CanBuild_Protoss_Carrier(u, owner, s);
+        case (int)UnitTypes.Protoss_Interceptor: return CanBuild_Protoss_Interceptor(u, owner, s);
+        case (int)UnitTypes.Protoss_Reaver: return CanBuild_Protoss_Reaver(u, owner, s);
+        case (int)UnitTypes.Protoss_Scarab: return CanBuild_Protoss_Scarab(u, owner, s);
+        case (int)UnitTypes.Protoss_Observer: return CanBuild_Protoss_Observer(u, owner, s);
+        case (int)UnitTypes.Protoss_Corsair: return CanBuild_Protoss_Corsair(u, owner, s);
+        case (int)UnitTypes.Protoss_Dark_Templar: return CanBuild_Protoss_Dark_Templar(u, owner, s);
+        case (int)UnitTypes.Terran_Command_Center: return CanBuild_Terran_Command_Center(u, owner, s);
+        case (int)UnitTypes.Terran_Comsat_Station: return CanBuild_Terran_Comsat_Station(u, owner, s);
+        case (int)UnitTypes.Terran_Nuclear_Silo: return CanBuild_Terran_Nuclear_Silo(u, owner, s);
+        case (int)UnitTypes.Terran_Supply_Depot: return CanBuild_Terran_Supply_Depot(u, owner, s);
+        case (int)UnitTypes.Terran_Refinery: return CanBuild_Terran_Refinery(u, owner, s);
+        case (int)UnitTypes.Terran_Barracks: return CanBuild_Terran_Barracks(u, owner, s);
+        case (int)UnitTypes.Terran_Academy: return CanBuild_Terran_Academy(u, owner, s);
+        case (int)UnitTypes.Terran_Factory: return CanBuild_Terran_Factory(u, owner, s);
+        case (int)UnitTypes.Terran_Starport: return CanBuild_Terran_Starport(u, owner, s);
+        case (int)UnitTypes.Terran_Control_Tower: return CanBuild_Terran_Control_Tower(u, owner, s);
+        case (int)UnitTypes.Terran_Science_Facility: return CanBuild_Terran_Science_Facility(u, owner, s);
+        case (int)UnitTypes.Terran_Covert_Ops: return CanBuild_Terran_Covert_Ops(u, owner, s);
+        case (int)UnitTypes.Terran_Physics_Lab: return CanBuild_Terran_Physics_Lab(u, owner, s);
+        case (int)UnitTypes.Terran_Machine_Shop: return CanBuild_Terran_Machine_Shop(u, owner, s);
+        case (int)UnitTypes.Terran_Engineering_Bay: return CanBuild_Terran_Engineering_Bay(u, owner, s);
+        case (int)UnitTypes.Terran_Armory: return CanBuild_Terran_Armory(u, owner, s);
+        case (int)UnitTypes.Terran_Missile_Turret: return CanBuild_Terran_Missile_Turret(u, owner, s);
+        case (int)UnitTypes.Terran_Bunker: return CanBuild_Terran_Bunker(u, owner, s);
+        case (int)UnitTypes.Zerg_Hatchery: return CanBuild_Zerg_Hatchery(u, owner, s);
+        case (int)UnitTypes.Zerg_Lair: return CanBuild_Zerg_Lair(u, owner, s);
+        case (int)UnitTypes.Zerg_Hive: return CanBuild_Zerg_Hive(u, owner, s);
+        case (int)UnitTypes.Zerg_Spawning_Pool: return CanBuild_Zerg_Spawning_Pool(u, owner, s);
+        case (int)UnitTypes.Zerg_Hydralisk_Den: return CanBuild_Zerg_Hydralisk_Den(u, owner, s);
+        case (int)UnitTypes.Zerg_Defiler_Mound: return CanBuild_Zerg_Defiler_Mound(u, owner, s);
+        case (int)UnitTypes.Zerg_Greater_Spire: return CanBuild_Zerg_Greater_Spire(u, owner, s);
+        case (int)UnitTypes.Zerg_Queens_Nest: return CanBuild_Zerg_Queens_Nest(u, owner, s);
+        case (int)UnitTypes.Zerg_Evolution_Chamber: return CanBuild_Zerg_Evolution_Chamber(u, owner, s);
+        case (int)UnitTypes.Zerg_Ultralisk_Cavern: return CanBuild_Zerg_Ultralisk_Cavern(u, owner, s);
+        case (int)UnitTypes.Zerg_Spire: return CanBuild_Zerg_Spire(u, owner, s);
+        case (int)UnitTypes.Zerg_Nydus_Canal: return CanBuild_Zerg_Nydus_Canal(u, owner, s);
+        case (int)UnitTypes.Zerg_Creep_Colony: return CanBuild_Zerg_Creep_Colony(u, owner, s);
+        case (int)UnitTypes.Zerg_Spore_Colony: return CanBuild_Zerg_Spore_Colony(u, owner, s);
+        case (int)UnitTypes.Zerg_Sunken_Colony: return CanBuild_Zerg_Sunken_Colony(u, owner, s);
+        case (int)UnitTypes.Zerg_Extractor: return CanBuild_Zerg_Extractor(u, owner, s);
+        case (int)UnitTypes.Protoss_Nexus: return CanBuild_Protoss_Nexus(u, owner, s);
+        case (int)UnitTypes.Protoss_Robotics_Facility: return CanBuild_Protoss_Robotics_Facility(u, owner, s);
+        case (int)UnitTypes.Protoss_Pylon: return CanBuild_Protoss_Pylon(u, owner, s);
+        case (int)UnitTypes.Protoss_Assimilator: return CanBuild_Protoss_Assimilator(u, owner, s);
+        case (int)UnitTypes.Protoss_Observatory: return CanBuild_Protoss_Observatory(u, owner, s);
+        case (int)UnitTypes.Protoss_Gateway: return CanBuild_Protoss_Gateway(u, owner, s);
+        case (int)UnitTypes.Protoss_Photon_Cannon: return CanBuild_Protoss_Photon_Cannon(u, owner, s);
+        case (int)UnitTypes.Protoss_Citadel_of_Adun: return CanBuild_Protoss_Citadel_of_Adun(u, owner, s);
+        case (int)UnitTypes.Protoss_Cybernetics_Core: return CanBuild_Protoss_Cybernetics_Core(u, owner, s);
+        case (int)UnitTypes.Protoss_Templar_Archives: return CanBuild_Protoss_Templar_Archives(u, owner, s);
+        case (int)UnitTypes.Protoss_Forge: return CanBuild_Protoss_Forge(u, owner, s);
+        case (int)UnitTypes.Protoss_Stargate: return CanBuild_Protoss_Stargate(u, owner, s);
+        case (int)UnitTypes.Protoss_Fleet_Beacon: return CanBuild_Protoss_Fleet_Beacon(u, owner, s);
+        case (int)UnitTypes.Protoss_Arbiter_Tribunal: return CanBuild_Protoss_Arbiter_Tribunal(u, owner, s);
+        case (int)UnitTypes.Protoss_Robotics_Support_Bay: return CanBuild_Protoss_Robotics_Support_Bay(u, owner, s);
+        case (int)UnitTypes.Protoss_Shield_Battery: return CanBuild_Protoss_Shield_Battery(u, owner, s);
+        default: return false;
+        }
+    }
+}
