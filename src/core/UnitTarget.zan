@@ -1,0 +1,221 @@
+using System;
+
+// openbw: the target visibility, attack and weapon layer (bwgame.h)
+//
+// The queries that decide whether a unit can see, reach or shoot
+// another unit, and which weapon it would use.
+//
+// The weapon table, the region map and the player's upgrade levels are
+// passed in rather than reached for, so this layer does not depend on
+// the game state.
+
+public class UnitTarget {
+    // openbw: bool unit_is_undetected(const unit_t* u, int owner) const
+    //
+    // Whether the player cannot see the unit: it is either cloaked or
+    // needs a detector, and the player has not detected it.
+    public static bool UnitIsUndetected(Unit u, int owner) {
+        if (!UnitStatus.IsCloaked(u) && !UnitFlags.RequiresDetector(u)) return false;
+        if ((u.DetectedFlags & (1 << owner)) != 0) return false;
+        return true;
+    }
+
+    // openbw: bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the unit cannot see the target.
+    public static bool UnitTargetIsUndetected(Unit u, Unit target) {
+        return UnitIsUndetected(target, u.Owner);
+    }
+
+    // openbw: bool unit_target_is_visible(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the target's sprite is visible to the unit's owner.
+    public static bool UnitTargetIsVisible(Unit u, Unit target) {
+        return (target.VisibilityFlags & (1 << u.Owner)) != 0;
+    }
+
+    // openbw: bool unit_can_see_target(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the unit can see the target at all.
+    public static bool UnitCanSeeTarget(Unit u, Unit target) {
+        if (UnitTargetIsUndetected(u, target)) return false;
+        return UnitTargetIsVisible(u, target);
+    }
+
+    // openbw: bool us_hidden(const thingy_t* u) const
+    //
+    // Whether the unit's sprite is hidden.
+    public static bool UnitSpriteHidden(Unit u) {
+        return u.SpriteHidden;
+    }
+
+    // openbw: bool unit_is_disabled(const unit_t* u) const
+    //
+    // Whether the unit cannot act: it is disabled, locked down, stasis
+    // fielded, or caught in a maelstrom.
+    public static bool UnitIsDisabled(Unit u) {
+        if (UnitFlags.Disabled(u)) return true;
+        if (u.LockdownTimer != 0) return true;
+        if (u.StasisTimer != 0) return true;
+        if (u.MaelstromTimer != 0) return true;
+        return false;
+    }
+
+    // openbw: const weapon_type_t* unit_ground_weapon(const unit_t* u) const
+    //
+    // The unit's ground weapon. A Lurker that is not burrowed has
+    // none.
+    public static WeaponType UnitGroundWeapon(Unit u) {
+        if (UnitTypeIds.Is(u.UnitType, (int)UnitTypes.Zerg_Lurker) && !u.UBurrowed()) return null;
+        return u.UnitType.GroundWeapon;
+    }
+
+    // openbw: const weapon_type_t* unit_air_weapon(const unit_t* u) const
+    //
+    // The unit's air weapon.
+    public static WeaponType UnitAirWeapon(Unit u) {
+        return u.UnitType.AirWeapon;
+    }
+
+    // openbw: const weapon_type_t* unit_or_subunit_ground_weapon(const unit_t* u) const
+    //
+    // The unit's ground weapon, falling back to the subunit's.
+    public static WeaponType UnitOrSubunitGroundWeapon(Unit u, Unit subunit) {
+        WeaponType w = UnitGroundWeapon(u);
+        if (w != null) return w;
+        if (subunit == null) return w;
+        return UnitGroundWeapon(subunit);
+    }
+
+    // openbw: const weapon_type_t* unit_or_subunit_air_weapon(const unit_t* u) const
+    //
+    // The unit's air weapon, falling back to the subunit's.
+    public static WeaponType UnitOrSubunitAirWeapon(Unit u, Unit subunit) {
+        WeaponType w = UnitAirWeapon(u);
+        if (w != null) return w;
+        if (subunit == null) return w;
+        return UnitAirWeapon(subunit);
+    }
+
+    // openbw: const weapon_type_t* unit_target_weapon(const unit_t* u, const unit_t* target) const
+    //
+    // The weapon the unit would use against the target: the air weapon
+    // against a flying target, the ground weapon otherwise. It comes
+    // from the attacking unit, which is the subunit for a turret.
+    public static WeaponType UnitTargetWeapon(Unit u, Unit target, Unit attackingUnit) {
+        if (UnitFlags.Flying(target)) return UnitAirWeapon(attackingUnit);
+        return UnitGroundWeapon(attackingUnit);
+    }
+
+    // openbw: bool unit_can_attack_target(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the unit can attack the target.
+    public static bool UnitCanAttackTarget(Unit u, Unit target, Unit subunit, bool reachable) {
+        if (target == null) return false;
+        if (UnitIsDisabled(u)) return false;
+        if (UnitFlags.Invincible(target)) return false;
+        if (UnitSpriteHidden(target)) return false;
+        if (UnitTargetIsUndetected(u, target)) return false;
+        if (UnitTypeIds.UnitIsCarrier(u.UnitType)) return true;
+        if (UnitTypeIds.UnitIsReaver(u.UnitType)) {
+            if (UnitFlags.Flying(target)) return false;
+            return reachable;
+        }
+        if (UnitTypeIds.UnitIsQueen(u.UnitType)) {
+            return UnitCanBeInfested(target);
+        }
+        return UnitTargetWeapon(u, target, UnitGeometry.UnitAttackingUnit(u, subunit)) != null;
+    }
+
+    // openbw: bool unit_can_be_infested(const unit_t* u) const
+    //
+    // Whether the unit can be infested: it is a completed command
+    // center with less than half its hit points.
+    public static bool UnitCanBeInfested(Unit u) {
+        if (!UnitTypeIds.Is(u.UnitType, (int)UnitTypes.Terran_Command_Center)) return false;
+        if (!UnitFlags.Completed(u)) return false;
+        return UnitHpPercent(u) < 50;
+    }
+
+    // openbw: int max_visible_hp(const unit_t* u) const
+    //
+    // The unit's hit points, as the maximum.
+    public static int MaxVisibleHp(Unit u) {
+        int hp = u.UnitType.Hitpoints.IntegerPart();
+        if (hp == 0) hp = u.Hp.Ceil().IntegerPart();
+        if (hp == 0) hp = 1;
+        return hp;
+    }
+
+    // openbw: int unit_hp_percent(const unit_t* u) const
+    //
+    // The unit's hit points as a percentage of the maximum.
+    public static int UnitHpPercent(Unit u) {
+        int maxHp = MaxVisibleHp(u);
+        int hp = u.Hp.Ceil().IntegerPart();
+        return hp * 100 / maxHp;
+    }
+
+    // openbw: int weapon_max_range(const unit_t* u, const weapon_type_t* w) const
+    //
+    // The weapon's maximum range, plus the unit's bonuses.
+    public static int WeaponMaxRange(Unit u, WeaponType w, bool hasRangeUpgrade) {
+        int r = w.MaxRange;
+        if (UnitFlags.InBunker(u)) r = r + 64;
+        r = r + RangeUpgradeBonus(u, w, hasRangeUpgrade);
+        return r;
+    }
+
+    // openbw: the range upgrade bonus in weapon_max_range
+    //
+    // The C++ looks the range upgrade up per unit type, so the caller
+    // passes whether the owner has that unit type's range upgrade.
+    private static int RangeUpgradeBonus(Unit u, WeaponType w, bool hasRangeUpgrade) {
+        int id = u.UnitType.Id;
+        if (id == (int)UnitTypes.Terran_Marine) {
+            return hasRangeUpgrade ? 32 : 0;
+        }
+        if (id == (int)UnitTypes.Zerg_Hydralisk) {
+            return hasRangeUpgrade ? 32 : 0;
+        }
+        if (id == (int)UnitTypes.Protoss_Dragoon) {
+            return hasRangeUpgrade ? 64 : 0;
+        }
+        if (id == (int)UnitTypes.Hero_Fenix_Dragoon) {
+            return 64;
+        }
+        if (id == (int)UnitTypes.Terran_Goliath || id == (int)UnitTypes.Terran_Goliath_Turret) {
+            if (w.Id == (int)WeaponTypes.Hellfire_Missile_Pack && hasRangeUpgrade) return 96;
+            return 0;
+        }
+        if (id == (int)UnitTypes.Hero_Alan_Schezar || id == (int)UnitTypes.Hero_Alan_Schezar_Turret) {
+            if (w.Id == (int)WeaponTypes.Hellfire_Missile_Pack_Alan_Schezar) return 96;
+            return 0;
+        }
+        return 0;
+    }
+
+    // openbw: the range upgrade of the unit type, in weapon_max_range's
+    // switch. None when the unit type has no range upgrade.
+    public static int UnitRangeUpgradeOf(UnitType ut) {
+        int id = ut.Id;
+        if (id == (int)UnitTypes.Terran_Marine) return (int)UpgradeTypes.U_238_Shells;
+        if (id == (int)UnitTypes.Zerg_Hydralisk) return (int)UpgradeTypes.Grooved_Spines;
+        if (id == (int)UnitTypes.Protoss_Dragoon) return (int)UpgradeTypes.Singularity_Charge;
+        if (id == (int)UnitTypes.Terran_Goliath || id == (int)UnitTypes.Terran_Goliath_Turret) {
+            return (int)UpgradeTypes.Charon_Boosters;
+        }
+        return (int)UpgradeTypes.None;
+    }
+
+    // openbw: bool unit_target_in_range(const unit_t* u, const unit_t* target, int range) const
+    //
+    // Whether the target is within the range of the unit's main unit.
+    //
+    // The C++ measures the distance from the main unit to the target;
+    // the distance is passed in so this layer does not need the
+    // distance function.
+    public static bool UnitTargetInRange(int distance, int range) {
+        return distance <= range;
+    }
+}

@@ -1,0 +1,55 @@
+using System;
+
+// openbw: data_types.h::weapon_type_t -- one weapon.
+//
+// The engine keeps the weapons in a table indexed by WeaponTypes. Only
+// the fields the target and attack queries read are modelled here; the
+// rest of the weapon (the bullet, the damage) belongs to the combat
+// layer.
+
+public class WeaponType {
+    // openbw: weapon_type_t::id
+    public int Id;
+
+    // openbw: weapon_type_t::label
+    public int Label;
+
+    // openbw: weapon_type_t::min_range
+    //
+    // The closest the weapon can hit. Zero means no minimum.
+    public int MinRange;
+
+    // openbw: weapon_type_t::max_range
+    public int MaxRange;
+
+    // openbw: weapon_type_t::target_flags
+    public int TargetFlags;
+
+    // openbw: weapon_type_t::damage_amount
+    public int DamageAmount;
+
+    // openbw: weapon_type_t::cooldown
+    public int Cooldown;
+
+    // openbw: weapon_type_t::bullet_type
+    public int BulletType;
+
+    // openbw: weapon_type_t::hit_type
+    public int HitType;
+
+    // openbw: weapon_type_t::damage_type
+    public int DamageType;
+
+    public WeaponType() {
+        Id = 0;
+        Label = 0;
+        MinRange = 0;
+        MaxRange = 0;
+        TargetFlags = 0;
+        DamageAmount = 0;
+        Cooldown = 0;
+        BulletType = 0;
+        HitType = 0;
+        DamageType = 0;
+    }
+}

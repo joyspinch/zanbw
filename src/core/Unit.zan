@@ -137,6 +137,13 @@ public class UnitType {
     // How much cargo space the unit needs.
     public int SpaceRequired;
 
+    // openbw: unit_type_t::ground_weapon / unit_type_t::air_weapon
+    //
+    // The unit's weapons against ground and air targets. Null when the
+    // unit has none.
+    public WeaponType GroundWeapon;
+    public WeaponType AirWeapon;
+
     public UnitType(int id, FlingyType flingy, int elevationLevel, int flags, int sightRange,
                    Xy dimensionsFrom, Xy dimensionsTo) {
         Id = id;
@@ -153,6 +160,8 @@ public class UnitType {
         RightClickAction = 1;
         SpaceProvided = 0;
         SpaceRequired = 0;
+        GroundWeapon = null;
+        AirWeapon = null;
     }
 }
 
@@ -266,6 +275,17 @@ public class Unit {
     //
     // Which owners have already detected this cloaked unit.
     public int DetectedFlags;
+
+    // openbw: sprite_t::visibility_flags
+    //
+    // Which players can currently see this unit. A set bit means the
+    // player can see it.
+    public int VisibilityFlags;
+
+    // openbw: sprite_t::flags -- the flag_hidden bit.
+    //
+    // The unit is hidden from everyone.
+    public bool SpriteHidden;
 
     // openbw: unit_t::worker.powerup
     //
@@ -388,6 +408,9 @@ public class Unit {
         SecondaryOrderId = (int)Orders.None;
         NydusExit = false;
         DetectedFlags = 0;
+        VisibilityFlags = 0;
+        SpriteHidden = false;
+        PathingFlags = 0;
         WorkerPowerupId = -1;
         LoadedUnitIds = new List<int>();
         SubunitId = -1;

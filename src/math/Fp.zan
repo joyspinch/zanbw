@@ -94,6 +94,19 @@ public struct Fp {
         return new Fp(-Raw);
     }
 
+    // fixed_point::floor(): integer(integer_part())
+    public Fp Floor() {
+        return Fp.Integer(this.IntegerPart());
+    }
+
+    // fixed_point::ceil(): (*this + integer(1) - from_raw(1)).floor()
+    //
+    // The subtraction of one raw unit before flooring is what makes the
+    // result the smallest integer that is not below the value.
+    public Fp Ceil() {
+        return (this + Fp.Integer(1) - Fp.FromRaw(1)).Floor();
+    }
+
     // ---- fp8 <-> fp16 / unsigned views -------------------------------------
 
     // fp8::extend(direction_t): the result type has 24 integer bits and 8

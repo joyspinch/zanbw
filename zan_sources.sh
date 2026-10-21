@@ -48,6 +48,9 @@ ZAN_SOURCES_CORE=(
     src/core/UnitFlags.zan
     src/core/Trigger.zan
     src/core/UnitGeometry.zan
+    src/core/WeaponType.zan
+    src/core/WeaponTypes.zan
+    src/core/UnitTarget.zan
 )
 
 # The regions layer: the tile map and the region decomposition.

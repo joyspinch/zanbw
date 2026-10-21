@@ -1,0 +1,182 @@
+using System;
+
+// The Zan side of the target visibility / attack / weapon layer bed.
+//
+// The bed drives the same predicates over the same unit, weapon and
+// player configurations as the C++ bed
+// (tools/cppbed/unittarget_bed.cpp), so the two traces must match byte
+// for byte.
+
+public class UnitTargetBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The weapons: a spread of ranges, minimum ranges and ids.
+        List<WeaponType> weapons = new List<WeaponType>();
+        for (int i = 0; i < 116; ++i) {
+            WeaponType w = new WeaponType();
+            w.Id = i;
+            w.Label = i;
+            w.MinRange = (i % 3 == 0) ? (i % 8) : 0;
+            w.MaxRange = 32 + (i % 7) * 16;
+            w.DamageAmount = 5 + (i % 11);
+            w.Cooldown = 10 + (i % 13);
+            weapons.Add(w);
+        }
+
+        // The unit types: the weapons, the hit points, the flags.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            // Every third unit type has a ground weapon, every fourth an
+            // air weapon, so the weapon queries discriminate.
+            if (i % 3 != 2) t.GroundWeapon = weapons[i % 116];
+            if (i % 4 != 3) t.AirWeapon = weapons[(i + 5) % 116];
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            if (i % 9 == 0) t.Flags = (int)UnitTypeFlag.Building;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // ---- the detection, the visibility, the seeing ----------------------
+        for (int i = 0; i < 229; ++i) {
+            // The target: cloaked, needing a detector, or plain.
+            int targetFlags = 0;
+            if ((i + variant) % 3 == 0) targetFlags = targetFlags | (int)StatusFlag.Cloaked;
+            if ((i + variant) % 4 == 0) targetFlags = targetFlags | (int)StatusFlag.RequiresDetector;
+            Unit target = MakeUnit(types[i], i % 12, targetFlags);
+            // The detected flags: a few players have detected it.
+            if ((i + variant) % 5 == 0) target.DetectedFlags = (1 << (i % 12)) | (1 << ((i + 1) % 12));
+            // The sprite's visibility flags.
+            if ((i + variant) % 7 != 0) target.VisibilityFlags = (1 << (i % 12)) | (1 << ((i + 3) % 12));
+            if ((i + variant) % 6 == 0) target.SpriteHidden = true;
+
+            // The observer.
+            Unit u = MakeUnit(types[(i + 1) % 229], i % 12, 0);
+
+            Console.WriteLine("D " + i + " "
+                + B(UnitTarget.UnitIsUndetected(target, u.Owner)) + " "
+                + B(UnitTarget.UnitTargetIsUndetected(u, target)) + " "
+                + B(UnitTarget.UnitTargetIsVisible(u, target)) + " "
+                + B(UnitTarget.UnitCanSeeTarget(u, target)) + " "
+                + B(UnitTarget.UnitSpriteHidden(target)));
+        }
+
+        // ---- the weapons -----------------------------------------------------
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 12, 0);
+            // The subunit, with its own weapons.
+            Unit sub = MakeUnit(types[(i + 3) % 229], i % 12, 0);
+            bool hasSub = (i % 2) == 1;
+
+            // The target: flying or not.
+            Unit target = MakeUnit(types[(i + 7) % 229], (i + 1) % 12,
+                (i % 2) == 1 ? (int)StatusFlag.Flying : 0);
+
+            WeaponType gw = UnitTarget.UnitGroundWeapon(u);
+            WeaponType aw = UnitTarget.UnitAirWeapon(u);
+            WeaponType ogw = UnitTarget.UnitOrSubunitGroundWeapon(u, hasSub ? sub : null);
+            WeaponType oaw = UnitTarget.UnitOrSubunitAirWeapon(u, hasSub ? sub : null);
+            WeaponType tw = UnitTarget.UnitTargetWeapon(u, target, UnitGeometry.UnitAttackingUnit(u, hasSub ? sub : null));
+
+            Console.WriteLine("W " + i + " "
+                + WId(gw) + " " + WId(aw) + " " + WId(ogw) + " " + WId(oaw) + " " + WId(tw));
+        }
+
+        // ---- the attack, the hit points, the range --------------------------
+        for (int i = 0; i < 229; ++i) {
+            // The attacker's status: disabled, locked down, stasis, maelstrom.
+            int attackerFlags = 0;
+            if ((i + variant) % 11 == 0) attackerFlags = attackerFlags | (int)StatusFlag.Disabled;
+            Unit u = MakeUnit(types[i], i % 12, attackerFlags);
+            if ((i + variant) % 13 == 0) u.LockdownTimer = 5;
+            if ((i + variant) % 17 == 0) u.StasisTimer = 5;
+            if ((i + variant) % 19 == 0) u.MaelstromTimer = 5;
+
+            Unit sub = MakeUnit(types[(i + 3) % 229], i % 12, 0);
+            bool hasSub = (i % 2) == 1;
+
+            // The target.
+            int targetFlags = 0;
+            if ((i + variant) % 3 == 0) targetFlags = targetFlags | (int)StatusFlag.Invincible;
+            if ((i + variant) % 4 == 0) targetFlags = targetFlags | (int)StatusFlag.Flying;
+            if ((i + variant) % 5 == 0) targetFlags = targetFlags | (int)StatusFlag.Cloaked;
+            Unit target = MakeUnit(types[(i + 7) % 229], (i + 1) % 12, targetFlags);
+            if ((i + variant) % 6 == 0) target.SpriteHidden = true;
+            if ((i + variant) % 7 != 0) target.VisibilityFlags = (1 << (i % 12));
+            target.Hp = Fp.Integer((i % 5) * 10 + 5);
+
+            // The reachability, for the Reaver. The C++'s bed has a
+            // single region, so everything is reachable from
+            // everything else.
+            bool reachable = true;
+
+            // The range upgrade: the C++ looks the range upgrade up per
+            // unit type and then reads the owner's upgrade table, so
+            // only that one upgrade is set here.
+            bool hasRangeUpgrade = false;
+            int rangeUpgradeId = UnitTarget.UnitRangeUpgradeOf(types[i]);
+            if (rangeUpgradeId != (int)UpgradeTypes.None) {
+                hasRangeUpgrade = ((i % 3) == 0);
+            }
+
+            WeaponType w = UnitTarget.UnitTargetWeapon(u, target, UnitGeometry.UnitAttackingUnit(u, hasSub ? sub : null));
+            int maxRange = 0;
+            if (w != null) maxRange = UnitTarget.WeaponMaxRange(u, w, hasRangeUpgrade);
+
+            Console.WriteLine("T " + i + " "
+                + B(UnitTarget.UnitCanAttackTarget(u, target, hasSub ? sub : null, reachable)) + " "
+                + B(UnitTarget.UnitIsDisabled(u)) + " "
+                + B(UnitTarget.UnitCanBeInfested(target)) + " "
+                + UnitTarget.UnitHpPercent(target) + " "
+                + maxRange + " "
+                + UnitsDistance(u, target) + " "
+                + B(UnitTarget.UnitTargetInRange(UnitsDistance(u, target), 64)));
+        }
+
+        return 0;
+    }
+
+    // openbw: int units_distance(const unit_t* a, const unit_t* b) const
+    //
+    // The distance between the two units' boxes. The C++ measures the
+    // gap between the two boxes; here the two units sit at the same
+    // place, so the distance is the gap between their boxes.
+    private static int UnitsDistance(Unit a, Unit b) {
+        Xy aFrom = UnitGeometry.UnitSpriteBoundingBoxFrom(a);
+        Xy aTo = UnitGeometry.UnitSpriteBoundingBoxTo(a);
+        Xy bFrom = UnitGeometry.UnitSpriteBoundingBoxFrom(b);
+        Xy bTo = UnitGeometry.UnitSpriteBoundingBoxTo(b);
+        int dx = 0;
+        if (aTo.X < bFrom.X) dx = bFrom.X - aTo.X;
+        else if (bTo.X < aFrom.X) dx = aFrom.X - bTo.X;
+        int dy = 0;
+        if (aTo.Y < bFrom.Y) dy = bFrom.Y - aTo.Y;
+        else if (bTo.Y < aFrom.Y) dy = aFrom.Y - bTo.Y;
+        return XyMath.XyLength(new Xy(dx, dy));
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.Hp = Fp.Integer(50);
+        return u;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+
+    private static string WId(WeaponType w) {
+        if (w == null) return "-1";
+        return "" + w.Id;
+    }
+}
