@@ -1,0 +1,327 @@
+using System;
+
+// openbw: the unit placement layer (bwgame.h)
+//
+// The C++'s find_unit_placement looks for a spot to put a unit. It
+// scans the area around the wanted position in four passes and returns
+// the first spot that is free and reachable.
+//
+// The four passes, in order:
+//
+//   1. Along the top edge, left to right.
+//   2. Along the right edge, bottom to top.
+//   3. Along the bottom edge, right to left.
+//   4. Along the left edge, top to bottom.
+//
+// Each pass steps 8 pixels at a time. When a blocking unit is in the
+// way, the scan jumps past it instead of stepping over it.
+//
+// If the first pass finds nothing, the whole thing is retried with a
+// wider and wider search area, growing by 16 pixels on each side.
+public class Placement {
+    // The result of a placement search: whether a spot was found, and
+    // where it is.
+    public class PlacementResult {
+        public bool Found;
+        public int X;
+        public int Y;
+
+        public PlacementResult(bool found, int x, int y) {
+            Found = found;
+            X = x;
+            Y = y;
+        }
+    }
+
+    // The scan's working state. openbw's find lambda closes over the
+    // bounds and the result, so the same state is held here.
+    public class Scan {
+        public Sim Sim;
+        public StateMachine M;
+        public Unit U;
+        public int BoundsFromX;
+        public int BoundsFromY;
+        public int BoundsToX;
+        public int BoundsToY;
+        public int ResultX;
+        public int ResultY;
+
+        public Scan(Sim sim, StateMachine m, Unit u) {
+            Sim = sim;
+            M = m;
+            U = u;
+        }
+    }
+
+    // openbw: the blocking_unit_pred of find_unit_placement
+    //
+    // Whether the target unit blocks the placement of u.
+    private static bool BlockingUnitPred(Unit u, Unit target) {
+        if (UnitCondition.UnitDead(target, target.OrderId)) return false;
+        if (UnitFlags.NoCollide(u) || UnitFlags.NoCollide(target)) return false;
+        if (UnitFlags.Powerup(u.UnitType)) {
+            return UnitFlags.GroundedBuilding(target) || UnitFlags.Powerup(target.UnitType);
+        }
+        if (target.UnitType.Id == (int)UnitTypes.Terran_Starport) {
+            if (u.UnitType.Id == (int)UnitTypes.Terran_Wraith) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Terran_Dropship) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Terran_Science_Vessel) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Terran_Battlecruiser) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Terran_Valkyrie) return true;
+        }
+        if (target.UnitType.Id == (int)UnitTypes.Protoss_Robotics_Facility) {
+            if (u.UnitType.Id == (int)UnitTypes.Protoss_Shuttle) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Protoss_Observer) return true;
+        }
+        if (target.UnitType.Id == (int)UnitTypes.Protoss_Stargate) {
+            if (u.UnitType.Id == (int)UnitTypes.Protoss_Scout) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Protoss_Carrier) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Protoss_Arbiter) return true;
+            if (u.UnitType.Id == (int)UnitTypes.Protoss_Corsair) return true;
+        }
+        return UnitFlags.Flying(u) == UnitFlags.Flying(target);
+    }
+
+    // openbw: find_unit(search_bb, blocking_unit_pred)
+    //
+    // The first unit in the area that blocks the placement.
+    private static Unit FindBlockingUnit(Sim sim, Unit u, int fromX, int toX, int fromY, int toY) {
+        List<Unit> units = sim.Finder.Find(sim, fromX, toX, fromY, toY, true);
+        for (int i = 0; i < units.Count; ++i) {
+            if (BlockingUnitPred(u, units[i])) return units[i];
+        }
+        return null;
+    }
+
+    // openbw: the find lambda of find_unit_placement
+    //
+    // The search itself.
+    private static bool Find(Scan s, int startX, int startY, int width, int height) {
+        Unit u = s.U;
+        int bbFromX = startX / 8 * 8;
+        int bbFromY = startY / 8 * 8;
+        int bbToX = (startX + width + 7) / 8 * 8;
+        int bbToY = (startY + height + 7) / 8 * 8;
+        if (bbFromX < s.BoundsFromX) bbFromX = s.BoundsFromX;
+        if (bbFromY < s.BoundsFromY) bbFromY = s.BoundsFromY;
+        if (bbToX > s.BoundsToX) bbToX = s.BoundsToX;
+        if (bbToY > s.BoundsToY) bbToY = s.BoundsToY;
+
+        int unitWidth = u.UnitType.DimensionsFrom.X + u.UnitType.DimensionsTo.X + 1;
+        if (width > unitWidth * 2) {
+            bbFromX = bbFromX + (unitWidth + 7) / 8 * 8;
+        }
+
+        // The top edge, left to right.
+        Rect searchBb = Bounds.UnitTypeInnerBoundingBox(u.UnitType, new Xy(bbFromX, bbToY));
+        int searchFromX = searchBb.From.X;
+        int searchToX = searchBb.To.X;
+        int searchFromY = searchBb.From.Y;
+        int searchToY = searchBb.To.Y;
+        int x = bbFromX;
+        while (x <= bbToX) {
+            if (Bounds.IsInnerBbMoveTargetInValidBounds(
+                    new Rect(new Xy(searchFromX, searchFromY), new Xy(searchToX, searchToY)),
+                    s.Sim.MapWidth, s.Sim.MapHeight)) {
+                Unit n = FindBlockingUnit(s.Sim, u, searchFromX, searchToX, searchFromY, searchToY);
+                if (n != null) {
+                    int inc = n.Sprite.Position.X + n.UnitType.DimensionsTo.X + 1 - searchFromX;
+                    inc = inc + ((8 - ((x + inc) & 7)) & 7);
+                    searchFromX = searchFromX + inc;
+                    searchToX = searchToX + inc;
+                    x = x + inc;
+                    continue;
+                } else {
+                    if (s.M.IsReachable(u.Sprite.Position.X, u.Sprite.Position.Y, x, bbToY)) {
+                        if (UnitFlags.Flying(u) || s.M.UnitTypeCanFitAt(u.UnitType, x, bbToY)) {
+                            s.ResultX = x;
+                            s.ResultY = bbToY;
+                            return true;
+                        }
+                    }
+                }
+            }
+            searchFromX = searchFromX + 8;
+            searchToX = searchToX + 8;
+            x = x + 8;
+        }
+
+        // The right edge, bottom to top.
+        searchBb = Bounds.UnitTypeInnerBoundingBox(u.UnitType, new Xy(bbToX, bbToY));
+        searchFromX = searchBb.From.X;
+        searchToX = searchBb.To.X;
+        searchFromY = searchBb.From.Y;
+        searchToY = searchBb.To.Y;
+        int y = bbToY;
+        while (y >= bbFromY) {
+            if (Bounds.IsInnerBbMoveTargetInValidBounds(
+                    new Rect(new Xy(searchFromX, searchFromY), new Xy(searchToX, searchToY)),
+                    s.Sim.MapWidth, s.Sim.MapHeight)) {
+                Unit n = FindBlockingUnit(s.Sim, u, searchFromX, searchToX, searchFromY, searchToY);
+                if (n != null) {
+                    int dec = searchToY - (n.Sprite.Position.Y - n.UnitType.DimensionsFrom.Y - 1);
+                    dec = dec + ((8 - ((y - dec) & 7)) & 7);
+                    searchFromY = searchFromY - dec;
+                    searchToY = searchToY - dec;
+                    y = y - dec;
+                    continue;
+                } else {
+                    if (s.M.IsReachable(u.Sprite.Position.X, u.Sprite.Position.Y, bbToX, y)) {
+                        if (UnitFlags.Flying(u) || s.M.UnitTypeCanFitAt(u.UnitType, bbToX, y)) {
+                            s.ResultX = bbToX;
+                            s.ResultY = y;
+                            return true;
+                        }
+                    }
+                }
+            }
+            searchFromY = searchFromY - 8;
+            searchToY = searchToY - 8;
+            y = y - 8;
+        }
+
+        if (width > unitWidth * 2) {
+            bbFromX = bbFromX - (unitWidth + 7) / 8 * 8;
+        }
+
+        // The bottom edge, right to left.
+        searchBb = Bounds.UnitTypeInnerBoundingBox(u.UnitType, new Xy(bbToX, bbFromY));
+        searchFromX = searchBb.From.X;
+        searchToX = searchBb.To.X;
+        searchFromY = searchBb.From.Y;
+        searchToY = searchBb.To.Y;
+        x = bbToX;
+        while (x >= bbFromX) {
+            if (Bounds.IsInnerBbMoveTargetInValidBounds(
+                    new Rect(new Xy(searchFromX, searchFromY), new Xy(searchToX, searchToY)),
+                    s.Sim.MapWidth, s.Sim.MapHeight)) {
+                Unit n = FindBlockingUnit(s.Sim, u, searchFromX, searchToX, searchFromY, searchToY);
+                if (n != null) {
+                    int dec = searchToX - (n.Sprite.Position.X - n.UnitType.DimensionsFrom.X - 1);
+                    dec = dec + ((8 - ((x - dec) & 7)) & 7);
+                    searchFromX = searchFromX - dec;
+                    searchToX = searchToX - dec;
+                    x = x - dec;
+                    continue;
+                } else {
+                    if (s.M.IsReachable(u.Sprite.Position.X, u.Sprite.Position.Y, x, bbFromY)) {
+                        if (UnitFlags.Flying(u) || s.M.UnitTypeCanFitAt(u.UnitType, x, bbFromY)) {
+                            s.ResultX = x;
+                            s.ResultY = bbFromY;
+                            return true;
+                        }
+                    }
+                }
+            }
+            searchFromX = searchFromX - 8;
+            searchToX = searchToX - 8;
+            x = x - 8;
+        }
+
+        // The left edge, top to bottom.
+        searchBb = Bounds.UnitTypeInnerBoundingBox(u.UnitType, new Xy(bbFromX, bbFromY));
+        searchFromX = searchBb.From.X;
+        searchToX = searchBb.To.X;
+        searchFromY = searchBb.From.Y;
+        searchToY = searchBb.To.Y;
+        y = bbFromY;
+        while (y <= bbToY) {
+            if (Bounds.IsInnerBbMoveTargetInValidBounds(
+                    new Rect(new Xy(searchFromX, searchFromY), new Xy(searchToX, searchToY)),
+                    s.Sim.MapWidth, s.Sim.MapHeight)) {
+                Unit n = FindBlockingUnit(s.Sim, u, searchFromX, searchToX, searchFromY, searchToY);
+                if (n != null) {
+                    int inc = n.Sprite.Position.Y + n.UnitType.DimensionsTo.Y + 1 - searchFromY;
+                    inc = inc + ((8 - ((y + inc) & 7)) & 7);
+                    searchFromY = searchFromY + inc;
+                    searchToY = searchToY + inc;
+                    y = y + inc;
+                    continue;
+                } else {
+                    if (s.M.IsReachable(u.Sprite.Position.X, u.Sprite.Position.Y, bbFromX, y)) {
+                        if (UnitFlags.Flying(u) || s.M.UnitTypeCanFitAt(u.UnitType, bbFromX, y)) {
+                            s.ResultX = bbFromX;
+                            s.ResultY = y;
+                            return true;
+                        }
+                    }
+                }
+            }
+            searchFromY = searchFromY + 8;
+            searchToY = searchToY + 8;
+            y = y + 8;
+        }
+
+        return false;
+    }
+
+    // openbw: std::pair<bool, xy> find_unit_placement(...)
+    //
+    // Finds a spot for the unit to be placed at.
+    //
+    // The bounds are the area to search in.
+    public static PlacementResult FindUnitPlacement(
+        Sim sim,
+        StateMachine m,
+        Unit u,
+        int posX,
+        int posY,
+        int boundsFromX,
+        int boundsFromY,
+        int boundsToX,
+        int boundsToY,
+        bool terrainDisplacesUnit
+    ) {
+        if (boundsFromX < 0) boundsFromX = 0;
+        if (boundsFromY < 0) boundsFromY = 0;
+        if (boundsToX >= sim.MapWidth) boundsToX = sim.MapWidth - 1;
+        if (boundsToY >= sim.MapHeight - 32) boundsToY = sim.MapHeight - 32 - 1;
+
+        Scan s = new Scan(sim, m, u);
+        s.BoundsFromX = boundsFromX;
+        s.BoundsFromY = boundsFromY;
+        s.BoundsToX = boundsToX;
+        s.BoundsToY = boundsToY;
+
+        // openbw: the fast path. When nothing blocks the wanted position
+        // and it is on the map, the unit goes there and no search runs.
+        //
+        // When the terrain does not fit there and the terrain does not
+        // displace the unit, openbw gives up right here: no search runs
+        // at all.
+        Rect wanted = Bounds.UnitTypeInnerBoundingBox(u.UnitType, new Xy(posX, posY));
+        Unit wantedBlocker = FindBlockingUnit(sim, u, wanted.From.X, wanted.To.X, wanted.From.Y, wanted.To.Y);
+        Rect mapBounds = new Rect(new Xy(0, 0), new Xy(sim.MapWidth, sim.MapHeight - 32));
+        if (wantedBlocker == null && Bounds.IsInBounds(wanted, mapBounds)) {
+            if (UnitFlags.Flying(u) || m.UnitTypeCanFitAt(u.UnitType, posX, posY)) {
+                return new PlacementResult(true, posX, posY);
+            }
+            if (!terrainDisplacesUnit) {
+                return new PlacementResult(false, 0, 0);
+            }
+        }
+
+        // openbw: the blocking unit found above is what widens the
+        // search area. It is not a separate argument.
+        int width = 8;
+        int height = 8;
+        if (wantedBlocker != null) {
+            int newWidth = u.UnitType.DimensionsFrom.X + wantedBlocker.UnitType.DimensionsTo.X + 2;
+            int newHeight = u.UnitType.DimensionsFrom.Y + wantedBlocker.UnitType.DimensionsTo.Y + 2;
+            if (newWidth > width) width = newWidth;
+            if (newHeight > height) height = newHeight;
+        }
+        while (true) {
+            int nposX = posX - width;
+            int nposY = posY - height;
+            if (nposX < boundsFromX && nposY < boundsFromY
+                && posX + width > boundsToX && posY + height > boundsToY) break;
+            if (Find(s, nposX, nposY, width * 2, height * 2)) {
+                return new PlacementResult(true, s.ResultX, s.ResultY);
+            }
+            width = width + 16;
+            height = height + 16;
+        }
+        return new PlacementResult(false, 0, 0);
+    }
+}

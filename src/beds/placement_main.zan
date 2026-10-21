@@ -1,0 +1,214 @@
+using System;
+
+// The Zan side of the unit placement bed.
+//
+// The bed drives the same queries over the same map and the same unit
+// types as the C++ bed (tools/cppbed/placement_bed.cpp), so the two
+// traces must match byte for byte.
+//
+// The map is the shared synthetic terrain, so the regions, the
+// walkability and the reachability all line up with the C++ side.
+
+public class PlacementBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+        Terrain.Variant = variant;
+
+        // The regions and the pathing.
+        Regions r = new Regions(Terrain.TileWidth, Terrain.TileHeight);
+        for (int y = 0; y < Terrain.TileHeight; y++) {
+            for (int x = 0; x < Terrain.TileWidth; x++) {
+                r.MegaTileIndex[y * Terrain.TileWidth + x] = Terrain.MegaTileIndex(x, y);
+                r.TileFlags[y * Terrain.TileWidth + x] = Terrain.TileFlags(x, y);
+            }
+        }
+        for (int i = 0; i < 16; i++) {
+            r.Vf4Flags[i] = 1;
+            r.Vf4Flags[16 + i] = 0;
+            r.Vf4Flags[32 + i] = (i / 4 >= 2) ? 1 : 0;
+        }
+
+        RegionsMain rm = new RegionsMain(r);
+        rm.RegionsCreate();
+
+        Sim sim = new Sim(new Rng(), Terrain.TileWidth * 32, Terrain.TileHeight * 32);
+        sim.MaxUnitWidth = 64;
+        sim.MaxUnitHeight = 64;
+
+        FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
+                                       Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types the bed places.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, ft, 0,
+                (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn, 7,
+                new Xy(8, 8), new Xy(8, 8));
+            types.Add(t);
+        }
+        types[(int)UnitTypes.Terran_Barracks].Flags =
+            (int)UnitTypeFlag.Building | (int)UnitTypeFlag.CanMove | (int)UnitTypeFlag.CanTurn;
+        types[(int)UnitTypes.Terran_Barracks].DimensionsFrom = new Xy(32, 32);
+        types[(int)UnitTypes.Terran_Barracks].DimensionsTo = new Xy(32, 32);
+        types[(int)UnitTypes.Terran_Barracks].GroupFlags = 2;
+        types[(int)UnitTypes.Protoss_Shuttle].GroupFlags = 4;
+
+        int[] placeTypes = new int[] {
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Barracks,
+            (int)UnitTypes.Terran_Goliath,
+            (int)UnitTypes.Protoss_Shuttle,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Hydralisk,
+        };
+        int placeTypeCount = placeTypes.Length;
+
+        Console.WriteLine("variant=" + variant);
+
+        int caseIndex = 0;
+        for (int pt = 0; pt < placeTypeCount; ++pt) {
+            UnitType t = types[placeTypes[pt]];
+            Unit u = MakeUnit(sim, t, ft, 64, 64, placeTypes[pt] == (int)UnitTypes.Protoss_Shuttle);
+
+            PathProgress pp = new PathProgress(r, sim, u);
+            StateMachine sm = new StateMachine(sim, r, pp, u);
+
+            for (int px = 0; px < 8; ++px) {
+                for (int py = 0; py < 8; ++py) {
+                    int posX = 128 + px * 128 + (variant * 16);
+                    int posY = 128 + py * 128 + (variant * 16);
+                    if (caseIndex == 128) {
+                        for (int q = 0; q < sim.Finder.X.Count; ++q) {
+                        }
+                        List<Unit> fd2 = sim.Finder.Find(sim, 88, 152, 104, 168, true);
+                    }
+                    Placement.PlacementResult res = Placement.FindUnitPlacement(
+                        sim, sm, u, posX, posY,
+                        posX - 128, posY - 128, posX + 127, posY + 127, false);
+                    Console.WriteLine("P " + caseIndex + " " + pt + " " + px + " " + py
+                        + " " + posX + " " + posY
+                        + " " + (res.Found ? 1 : 0)
+                        + " " + (res.Found ? res.X : 0)
+                        + " " + (res.Found ? res.Y : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // A field of units, so the search has to work around them.
+        caseIndex = 0;
+        for (int pt = 0; pt < placeTypeCount; ++pt) {
+            UnitType t = types[placeTypes[pt]];
+            Unit u = MakeUnit(sim, t, ft, 64, 64, placeTypes[pt] == (int)UnitTypes.Protoss_Shuttle);
+
+            PathProgress pp = new PathProgress(r, sim, u);
+            StateMachine sm = new StateMachine(sim, r, pp, u);
+
+            // A grid of units covering the middle of the map.
+            int blockerIndex = 0;
+            for (int by = 4; by < 12; ++by) {
+                for (int bx = 4; bx < 12; ++bx) {
+                    Unit blocker = MakeUnit(sim, types[(int)UnitTypes.Terran_Marine], ft,
+                        bx * 64 + 32, by * 64 + 32, false);
+                    blocker.Owner = 1;
+                    blockerIndex = blockerIndex + 1;
+                }
+            }
+
+            for (int px = 0; px < 6; ++px) {
+                for (int py = 0; py < 6; ++py) {
+                    int posX = 288 + px * 48 + (variant * 8);
+                    int posY = 288 + py * 48 + (variant * 8);
+                    Placement.PlacementResult res = Placement.FindUnitPlacement(
+                        sim, sm, u, posX, posY,
+                        posX - 128, posY - 128, posX + 127, posY + 127, false);
+                    Console.WriteLine("F " + caseIndex + " " + pt + " " + px + " " + py
+                        + " " + posX + " " + posY
+                        + " " + (res.Found ? 1 : 0)
+                        + " " + (res.Found ? res.X : 0)
+                        + " " + (res.Found ? res.Y : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The same, but with a blocking unit in the way.
+        caseIndex = 0;
+        for (int pt = 0; pt < placeTypeCount; ++pt) {
+            UnitType t = types[placeTypes[pt]];
+            Unit u = MakeUnit(sim, t, ft, 64, 64, placeTypes[pt] == (int)UnitTypes.Protoss_Shuttle);
+
+            PathProgress pp = new PathProgress(r, sim, u);
+            StateMachine sm = new StateMachine(sim, r, pp, u);
+
+            // A blocking unit next to the wanted position.
+            Unit blocker = MakeUnit(sim, types[(int)UnitTypes.Terran_Marine], ft, 200, 200, false);
+            blocker.Owner = 1;
+
+            for (int px = 0; px < 6; ++px) {
+                for (int py = 0; py < 6; ++py) {
+                    int posX = 160 + px * 64 + (variant * 8);
+                    int posY = 160 + py * 64 + (variant * 8);
+                    Placement.PlacementResult res = Placement.FindUnitPlacement(
+                        sim, sm, u, posX, posY,
+                        posX - 128, posY - 128, posX + 127, posY + 127, false);
+                    Console.WriteLine("B " + caseIndex + " " + pt + " " + px + " " + py
+                        + " " + posX + " " + posY
+                        + " " + (res.Found ? 1 : 0)
+                        + " " + (res.Found ? res.X : 0)
+                        + " " + (res.Found ? res.Y : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    // Makes a unit and puts it into the unit finder, the way openbw's
+    // show_unit() does.
+    static Unit MakeUnit(Sim sim, UnitType ut, FlingyType ft, int x, int y, bool flying) {
+        sim.Rng.Rand(14);
+        Unit u = new Unit();
+        u.WireframeRandomizer = sim.Rng.Rand(15) & 0xff;
+        u.UnitType = ut;
+        u.FlingyType = ft;
+        u.Owner = 0;
+        u.Position = new Xy(x, y);
+        u.ExactPosition = Kin.ToXyFp8(u.Position);
+        u.Sprite = new Sprite();
+        u.Sprite.Position = u.Position;
+        u.MoveTargetPos = new Xy(x, y);
+        u.NextMovementWaypoint = new Xy(x, y);
+        u.NextTargetWaypoint = new Xy(x, y);
+        u.NextSpeed = ft.TopSpeed;
+        u.CurrentSpeed = Fp.Zero();
+        u.FlingyTopSpeed = ft.TopSpeed;
+        u.FlingyAcceleration = ft.Acceleration;
+        u.FlingyTurnRate = ft.TurnRate;
+        u.FlingyMovementType = 0;
+        u.NextVelocityDirection = Dir.FromRaw(64);
+        u.CurrentVelocityDirection = Dir.FromRaw(64);
+        u.DesiredVelocityDirection = Dir.FromRaw(64);
+        u.SetStatus(StatusFlag.CanTurn);
+        u.SetStatus(StatusFlag.CanMove);
+        u.SetStatus(StatusFlag.GroundUnit);
+        if (flying) u.SetStatus(StatusFlag.Flying);
+        u.MovementFlags = 1;
+        u.PathingFlags = 1;
+
+        u.UnitIdIndex = sim.Units.Count;
+        sim.Units.Add(u);
+
+        u.Sprite.Flags = u.Sprite.Flags & ~((int)SpriteFlag.Hidden);
+        int fromX = u.Position.X - ut.DimensionsFrom.X;
+        int toX = u.Position.X + ut.DimensionsTo.X;
+        int fromY = u.Position.Y - ut.DimensionsFrom.Y;
+        int toY = u.Position.Y + ut.DimensionsTo.Y;
+        sim.Finder.Insert(u, fromX, toX, fromY, toY);
+        return u;
+    }
+}

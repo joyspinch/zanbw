@@ -113,6 +113,9 @@ bash check_unittech.sh
 # 单位状态/类型标志层对拍（7 个变体 × 262 行：50 个单行位包装）
 bash check_unitflags.sh
 
+# 建筑放置层对拍（7 个变体 × 1089 行：原地放置 + 四趟扫描 + 阻挡判定）
+bash check_placement.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -1971,3 +1974,65 @@ C++ 的 `set_unit_heading(u, heading)` 做四件事：改
 
 **做法**：这类"魔法数字"要**连同它的单位一起注释**，
 否则后来人一定会当成角度去改。
+
+## 建筑放置层
+
+### 138. `find_unit_placement` 的**阻挡单位是它自己找出来的**，不是参数
+
+C++ 的 `find_unit_placement(u, pos, bounds, terrain_displaces_unit)`
+**没有"阻挡单位"这个入参**。它在函数开头自己调
+`find_unit(unit_inner_bounding_box(u, pos), blocking_unit_pred)`
+找出 `blocking_unit`，然后：
+
+- 找到 → 走扫描搜索，并用这个 `blocking_unit` 的尺寸
+  **放大初始搜索半宽/半高**（`width = max(8, from.x + to.x + 2)`）；
+- 没找到且位置在地图内 → 走**快速通道**，直接原地放置。
+
+移植时若把它当成"外部传入的阻挡单位"，搜索范围会算小，
+扫出来的位置和原版系统性偏移（实测同一用例原版 (128,200)、
+自研 (120,136)）。
+
+**做法**：移植这类"内部自举"的函数时，把它的**全部局部变量来源**
+一起列出来，别按直觉补参数。
+
+### 139. `inc += (8 - ((x + inc) & 7)) & 7;` **按 C++ 优先级写**
+
+C++ 里 `&` 的优先级**低于** `+`，所以这行是
+`inc = inc + ((8 - ((x + inc) & 7)) & 7)`——掩码只作用于括号里那部分，
+`inc` 本身（可能上百）保持不变。
+
+写成 `inc = inc + (8 - ((x + inc) & 7)) & 7`（Zan 里等价于
+`(inc + (...)) & 7`）会把 `inc` 截成 0..7，扫描步长变成 0 或几像素，
+**死循环**。表现是床跑几十分钟不出结果。
+
+**做法**：移植位运算表达式时，**逐个括号对齐 C++**，
+拿 `g++` 和 `zanc` 跑同一个式子对拍，别靠眼睛判断优先级。
+
+### 140. C++ 床的**单位必须有 `order_type`**，否则一律当"已死"
+
+C++ 的 `unit_dead(u)`：`u->order_type == nullptr` **或**
+（是 `Die` 且 `order_state == 1`）才算死。真实引擎建单位时
+`initialize_unit` 会设 `u->order_type = get_order_type(Orders::Fatal)`。
+
+床里手工造单位时若忘了设 `order_type`，这些单位在 C++ 侧
+**全部算"已死"**，`blocking_unit_pred` 第一行就 return false，
+于是**什么都不挡**——而自研侧 `OrderId` 默认为 0（非负，不算死），
+两边行为直接分叉。
+
+**做法**：C++ 床造单位时，**照抄 `initialize_unit` 的最小字段集**
+（`order_type` / `pathing_flags` / `sprite->position`），
+少一个字段就可能让整层对拍偏掉。
+
+### 141. 放置层**依赖 contour 层的 flags**，别在放置层里重算轮廓
+
+`unit_type_can_fit_at` → `can_fit_at` 走的是 `regions.contours[0..3]`，
+判定用 `c.flags & 3` 和 `(c.flags >> 2) & 3` 两组位。
+这些位由 regions 层的 `create_contours` 打包，两侧必须逐位相同。
+
+排查放置层差异时，**先确认 contour 本身一致**（`check_regions.sh`
+会输出 `C <dir> <idx> v0,v1,v2 dir= flags=` 逐条对比），
+再怀疑放置层自己。
+
+**做法**：新层依赖别人的**中间产物**（轮廓、区域表、寻路结果）时，
+**先用已有层的对拍脚本确认中间产物一致**，再逐层往下查。
+否则会拿着"上游本来就错"的结果去改下游，越改越乱。
