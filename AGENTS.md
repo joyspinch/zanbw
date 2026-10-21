@@ -95,6 +95,12 @@ bash check_vision.sh
 # 菌毯层对拍（7 个地形变体 × 18 个场景：铺展 + 蔓延 + 消退）
 bash check_creep.sh
 
+# 订单层对拍（7 个变体 × 16 个场景：队列 + 派发 + 回收）
+bash check_order.sh
+
+# 单位类型谓词层对拍（7 个变体 × 整张单位类型表 229 项）
+bash check_unittype.sh
+
 # 单场景 / 单变体
 bash check.sh s6 900
 bash check_regions.sh 3
@@ -106,6 +112,8 @@ bash check_state2.sh 3
 bash check_collide.sh 5 3
 bash check_vision.sh 3 5
 bash check_creep.sh 3 5
+bash check_order.sh 3 5
+bash check_unittype.sh 3
 ```
 
 对拍脚本会编译两侧、跑同样的场景、逐字节 diff trace。**任何差异都是硬失败。**
@@ -869,6 +877,155 @@ target_tiles[n - 1].push_back(index);
 
 随机选桶内元素：`v[(lcg_rand(26) >> 4) % v.size()]`——注意是
 `>> 4` 之后再取模，不是 `lcg_rand(26) % v.size()`。
+
+## 订单层（order queue / 订单池 / 派发）
+
+### 62. 订单队列的**顺序**是行为，队列的**计数**只算有高亮的那些
+
+```cpp
+if (o->order_type->highlight != -1) ++u->order_queue_count;
+```
+
+`order_queue_count` 不是队列长度。没有高亮的订单（`highlight == -1`，
+比如内部的 `Nothing` / `ResetHarvestCollision`）**进队列但不计数**。
+计数用于 `issue_order` 的上限判断（`< 8`），所以计数错了会导致队列
+容量判断错。
+
+而队列的**顺序**决定 `activate_next_order` 先取哪一条、`set_queued_order`
+从后往前清到哪一条。对拍床必须逐条 dump 队列内容与顺序。
+
+### 63. `set_queued_order` 的清理条件是"打断 **或** 同类型"
+
+```cpp
+while (!u->order_queue.empty()) {
+    auto& o = u->order_queue.back();
+    if ((!interrupt || !o.order_type->can_be_interrupted) && o.order_type != order_type) break;
+    remove_queued_order(u, &o);
+}
+```
+
+从**队尾**往前清。停下来的条件是：不能打断（`!interrupt`）**且**
+这条订单不可中断（`!can_be_interrupted`）**且**类型不同。
+
+注意"类型不同"这一条：同类型的订单即使不可中断也会被清掉。
+
+### 64. `issue_order` 的排队资格有三道关
+
+```cpp
+if (queue && !order_type->can_be_queued) queue = false;
+if (queue) {
+    switch (u->order_type->id) {
+    case Orders::Guard: case Orders::PlayerGuard: case Orders::Nothing:
+    case Orders::PickupIdle: case Orders::Patrol: case Orders::MedicIdle:
+        queue = false; break;
+    }
+}
+```
+
+第一道：订单类型本身可不可排队。第二道：**当前**订单是不是那六个
+"不可作为排队基底"的订单之一。第三道：队列计数 < 8 且
+`active_orders_size < 1800`。
+
+第二道只看**当前**订单（`u->order_type`），不看队列内容。
+
+### 65. 对象池的**下标是倒置**的，而且池不能存"泛型负载"
+
+```cpp
+T* get(size_t index, bool add_new_to_free = true) {
+    if (index) index = max_size - index;
+    ...
+}
+```
+
+`get(0)` 是特殊的（0 表示"最后一个槽"），`get(i)` 映射到
+`max_size - i`。床里要用某个特定单位时，**必须选一个循环范围外的
+下标**，否则循环里后续的赋值会覆盖掉它的状态。
+
+Zan 侧还有一个限制：**不能在类型参数上取成员**
+（`items[i].Value` 编译不过，�� `cannot resolve member`）。所以对象池
+不能用 `ObjectContainer<T>`，改成"基类 + 工厂"：负载继承 `PooledObject`，
+池持有一个 `PooledObjectFactory`，靠虚方法 `Make()` 造对象。
+
+### 66. 链表的 owner 下标被**两处**共用会互相覆盖
+
+侵入式链表节点的 `OwnerIndex` 用来"从节点找回元素"。但订单既是池的
+成员（要记池的槽位），又是某个单位队列的成员（要记队列里的位置）。
+两个用途抢同一个字段，后写的把先写的盖掉 —— 症状是"池回收之后别的
+单位的队列乱了"。
+
+解法是拆字段：池用 `PooledObject.PoolSlot`，队列用 `Order.QueueSlot`，
+链表节点自己的 `OwnerIndex` 只在"当前挂在哪个链表上"时有意义。
+池的 `Top()` / `Push()` 在交接时要把 `OwnerIndex` 复位。
+
+### 67. `activate_next_order` 会调 `iscript_run_to_idle`，它要**精灵**
+
+```cpp
+iscript_run_to_idle(u);
+...
+auto sid = u->sprite->sprite_type->id;
+switch (u->sprite->main_image->iscript_state.animation) { ... }
+```
+
+即使订单层本身不碰图片，激活订单这条路径也会解引用 `u->sprite` 和
+`u->sprite->main_image`。对拍床里必须给单位装上一个最小精灵，否则
+C++ 侧直接段错误。
+
+同理 `order_done` 在队列空时走
+`set_unit_order(u, u->unit_type->return_to_idle, target)` —— 单位类型的
+`return_to_idle` 必须指向一个有效的订单类型。
+
+## 单位类型谓词层（unit_is_* / unit_can_*）
+
+### 68. 这一层的输入只有三样：单位类型 id、类型标志位、单位状态位
+
+几十个谓词散在 `bwgame.h` 各处，但读的东西只有三样。移植时按"读什么"
+分成两个文件：
+
+- `src/core/UnitTypeIds.zan`：只看 id 的 28 个
+- `src/core/UnitStatus.zan`：看标志位的
+
+判据是"调用方手里有什么"：只有单位类型的只能调前者；拿着单位的
+才能调后者。
+
+### 69. 跨单位读的谓词要**把对方的状态当参数**
+
+```cpp
+bool unit_is_building_addon(const unit_t* u) const {
+    if (u->secondary_order_type->id == Orders::BuildAddon) {
+        if (u_grounded_building(u) && u->current_build_unit && !u_completed(u->current_build_unit)) return true;
+    }
+```
+
+`u_completed(u->current_build_unit)` 读的是**另一个单位**。Zan 侧如果
+照抄成"自己去查那个单位"，就得引入全局的单位表 —— 那是属于拥有
+单位的那一层的职责。
+
+移植的做法是**把对方的状态当参数传进来**：
+`UnitIsBuildingAddon(u, currentBuildCompleted)`。调用方（拥有单位表的
+那层）负责查出来再传。签名变了，但行为一字不差。
+
+### 70. 单位类型的枚举名要用 C++ 的**下划线**风格
+
+`UnitTypes::Terran_Siege_Tank_Siege_Mode` 不是 `TerranSiegeTankSiegeMode`。
+枚举补全的时候顺手把原来那几个 camelCase 的成员改成 C++ 的名字，
+调用点一并改（`MovementStates.zan` / `Sim.zan` / `Pathfinder.zan`）。
+
+补全枚举会暴露"之前只声明了几个成员"的问题：原来 `Enums.zan` 里
+只写了碰撞层用到的 4 个单位类型，改成完整的 229 个之后，其它层引用
+的成员名才全部对上。
+
+### 71. 枚举成员的初值必须是**整型常量表达式**
+
+```cpp
+// 编译不过：enum member initializer must be an integer constant expression
+public enum UnitTypeFlag {
+    Flag80000000 = unchecked((int)0x80000000)
+}
+```
+
+`unchecked(...)` 在枚举成员里不合法。`0x80000000` 本身也放不下 32 位
+有符号 enum，只能放在类里当 `const int`（`StatusFlagExtra.LifetimeExpired`
+就是这么做的）。
 
 ## 已知 zanc 缺陷
 
