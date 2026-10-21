@@ -1,0 +1,325 @@
+using System;
+
+// The differential bed for the creep layer.
+//
+// It mirrors tools/cppbed/creep_bed.cpp: it builds the same synthetic
+// map, applies the same scenario, and dumps the tile flags, the creep
+// life bookkeeping and the random number state.
+
+public class CreepActionKind {
+    public const int SetCreep = 0;
+    public const int ClearCreep = 1;
+    public const int SetReceding = 2;
+    public const int Recede = 3;
+    public const int SpreadCreep = 4;
+    public const int SpreadCreepComplete = 5;
+}
+
+public class CreepScenario {
+    public string Name;
+    public int Kind;
+    public int X;
+    public int Y;
+    public int Frames;
+
+    public CreepScenario(string name, int kind, int x, int y, int frames) {
+        Name = name;
+        Kind = kind;
+        X = x;
+        Y = y;
+        Frames = frames;
+    }
+}
+
+public class CreepMain {
+
+    public static int TileWidth = 64;
+    public static int TileHeight = 64;
+
+    public static List<CreepScenario> Scenarios = new List<CreepScenario>();
+
+    // ------------------------------------------------------------------
+    // The synthetic terrain of the creep bed. It is the same map the
+    // vision bed uses, so both beds see the same ground -- but the creep
+    // bed needs its own copy, because the creep rules care about the
+    // unbuildable and partially walkable flags.
+    //
+    // The rules below are mirrored by mega_tile_index() in
+    // tools/cppbed/creep_bed.cpp.
+
+    //   0  fully walkable
+    //   1  fully blocked
+    //   2  partially walkable (the lower two rows of walk cells)
+    //   3  high ground (12 high cells, 4 low ones)
+    //   4  middle ground (12 middle cells, 4 low ones)
+    //   5  very high ground (4 very high cells, 12 low ones)
+    public static int MegaTileIndex(int tx, int ty) {
+        int variant = Terrain.Variant;
+        if (variant == 0) {
+            if (ty >= 24 && ty < 32 && tx >= 16 && tx < 48) return 3;
+            if (ty >= 32 && ty < 40 && tx >= 16 && tx < 48) return 4;
+            if (tx >= 40 && tx < 44 && ty >= 12 && ty < 20) return 5;
+            return 0;
+        }
+        if (variant == 1) {
+            if ((tx / 4 + ty / 4) % 2 == 0) return 3;
+            return 0;
+        }
+        if (variant == 2) {
+            if ((tx + ty) % 12 < 4) return 4;
+            if ((tx + ty) % 12 < 6) return 5;
+            return 0;
+        }
+        if (variant == 3) {
+            if (tx >= 8 && tx < 24 && ty >= 8 && ty < 24) return 3;
+            if (tx >= 32 && tx < 48 && ty >= 8 && ty < 24) return 4;
+            if (tx >= 16 && tx < 32 && ty >= 32 && ty < 48) return 5;
+            return 0;
+        }
+        if (variant == 4) {
+            return 0;
+        }
+        if (variant == 5) {
+            int ring = (tx < 16 || tx >= 48 || ty < 16 || ty >= 48) ? 0
+                     : ((tx < 24 || tx >= 40 || ty < 24 || ty >= 40) ? 1 : 2);
+            if (ring == 0) return 3;
+            if (ring == 1) return 4;
+            return 5;
+        }
+        // variant 6: a field of high ground with a patch of blocked tiles
+        if (tx >= 20 && tx < 28 && ty >= 20 && ty < 28) return 1;
+        if (tx >= 36 && tx < 44 && ty >= 36 && ty < 44) return 2;
+        return 3;
+    }
+
+    // The 16 walkability flags of each mega tile.
+    public static int Vf4Flags(int megaTile, int cell) {
+        if (megaTile == 0) return (int)Vf4Flag.Walkable;
+        if (megaTile == 1) return 0;
+        if (megaTile == 2) return (cell / 4 >= 2) ? (int)Vf4Flag.Walkable : 0;
+        if (megaTile == 3) return (int)Vf4Flag.Walkable | (cell < 12 ? (int)Vf4Flag.High : 0);
+        if (megaTile == 4) return (int)Vf4Flag.Walkable | (cell < 12 ? (int)Vf4Flag.Middle : 0);
+        return (int)Vf4Flag.Walkable | (cell < 4 ? (int)Vf4Flag.VeryHigh : 0);
+    }
+
+    // openbw: the set_mega_tile_flags lambda in load_tile_stuff().
+    public static int MegaTileFlags(int megaTile) {
+        int flags = 0;
+        int walkableCount = 0;
+        int middleCount = 0;
+        int highCount = 0;
+        int veryHighCount = 0;
+        for (int cell = 0; cell < 16; ++cell) {
+            int f = Vf4Flags(megaTile, cell);
+            if ((f & (int)Vf4Flag.Walkable) != 0) ++walkableCount;
+            if ((f & (int)Vf4Flag.Middle) != 0) ++middleCount;
+            if ((f & (int)Vf4Flag.High) != 0) ++highCount;
+            if ((f & (int)Vf4Flag.VeryHigh) != 0) ++veryHighCount;
+        }
+        if (walkableCount > 12) flags |= (int)TileFlag.Walkable;
+        else flags |= (int)TileFlag.Unwalkable;
+        if (walkableCount != 0 && walkableCount != 0x10) flags |= (int)TileFlag.PartiallyWalkable;
+        if (highCount < 12 && middleCount + highCount >= 12) flags |= (int)TileFlag.Middle;
+        if (highCount >= 12) flags |= (int)TileFlag.High;
+        if (veryHighCount != 0) flags |= (int)TileFlag.VeryHigh;
+        return flags;
+    }
+
+    public static void BuildScenarios() {
+        Scenarios.Clear();
+        Scenarios.Add(new CreepScenario("creep_center", CreepActionKind.SetCreep, 32, 32, 0));
+        Scenarios.Add(new CreepScenario("creep_block", CreepActionKind.SetCreep, 24, 24, 0));
+        Scenarios.Add(new CreepScenario("creep_line", CreepActionKind.SetCreep, 10, 10, 0));
+        Scenarios.Add(new CreepScenario("recede_one", CreepActionKind.Recede, 32, 32, 1));
+        Scenarios.Add(new CreepScenario("recede_many", CreepActionKind.Recede, 32, 32, 20));
+        Scenarios.Add(new CreepScenario("recede_lot", CreepActionKind.Recede, 32, 32, 100));
+        Scenarios.Add(new CreepScenario("receding", CreepActionKind.SetReceding, 30, 30, 0));
+        Scenarios.Add(new CreepScenario("recede_after", CreepActionKind.Recede, 20, 20, 5));
+        Scenarios.Add(new CreepScenario("creep_edge", CreepActionKind.SetCreep, 0, 0, 0));
+        Scenarios.Add(new CreepScenario("creep_corner", CreepActionKind.SetCreep, 63, 63, 0));
+        Scenarios.Add(new CreepScenario("creep_wall", CreepActionKind.SetCreep, 22, 22, 0));
+        Scenarios.Add(new CreepScenario("clear_center", CreepActionKind.ClearCreep, 32, 32, 0));
+        Scenarios.Add(new CreepScenario("spread_one", CreepActionKind.SpreadCreep, 32, 32, 1));
+        Scenarios.Add(new CreepScenario("spread_many", CreepActionKind.SpreadCreep, 32, 32, 20));
+        Scenarios.Add(new CreepScenario("spread_lot", CreepActionKind.SpreadCreep, 32, 32, 100));
+        Scenarios.Add(new CreepScenario("spread_full", CreepActionKind.SpreadCreepComplete, 32, 32, 0));
+        Scenarios.Add(new CreepScenario("spread_edge", CreepActionKind.SpreadCreep, 2, 2, 5));
+        Scenarios.Add(new CreepScenario("spread_corner", CreepActionKind.SpreadCreep, 62, 62, 5));
+    }
+
+    // The unit types the creep scenarios use.
+    //
+    // The engine decides whether a unit type spreads creep from its id,
+    // so the bed has to use the same rule. The ids are the engine's own
+    // UnitTypes enum values.
+    static UnitType HatcheryType() {
+        FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
+                                       Fp.Integer(512), Fp.Integer(8), 0);
+        UnitType t = new UnitType(0, ft, 0, 0, 7, new Xy(16, 16), new Xy(16, 16));
+        t.PlacementSize = new Xy(64, 64);
+        t.SpreadsCreep = true;
+        return t;
+    }
+
+    static UnitType PlainBuildingType() {
+        FlingyType ft = new FlingyType(0, Fp.Integer(256), Fp.Integer(3),
+                                       Fp.Integer(512), Fp.Integer(8), 0);
+        UnitType t = new UnitType(0, ft, 0, 0, 7, new Xy(16, 16), new Xy(16, 16));
+        t.PlacementSize = new Xy(64, 64);
+        // openbw: unit_type_spreads_creep() returns false for anything
+        // that is not in its list, so a plain building covers exactly
+        // its own placement size.
+        t.SpreadsCreep = false;
+        return t;
+    }
+
+    static int Main(string[] args) {
+        int variant = 0;
+        int scenario = -1;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+        if (args.Length >= 2) scenario = Convert.ToInt32(args[1]);
+
+        Terrain.Variant = variant;
+        BuildScenarios();
+
+        TileMap map = new TileMap(TileWidth, TileHeight);
+
+        for (int mega = 0; mega < 6; ++mega) {
+            for (int cell = 0; cell < 16; ++cell) {
+                map.Vf4.Add(Vf4Flags(mega, cell));
+            }
+        }
+        for (int g = 0; g < 6; ++g) {
+            for (int s = 0; s < 16; ++s) map.Cv5.Add(g);
+        }
+
+        for (int y = 0; y < TileHeight; ++y) {
+            for (int x = 0; x < TileWidth; ++x) {
+                MapTile mt = new MapTile();
+                int mega = MegaTileIndex(x, y);
+                mt.Tile.Flags = MegaTileFlags(mega);
+                mt.Tile.Visible = 0xff;
+                mt.Tile.Explored = 0xff;
+                mt.MegaTileIndex = mega;
+                mt.GfxTile = (mega << 4) | 0;
+                map.Tiles.Add(mt);
+            }
+        }
+
+        Rng rng = new Rng();
+        CreepLife life = new CreepLife();
+        CreepRules rules = new CreepRules(map, life, rng);
+        UnitType hatchery = HatcheryType();
+        UnitType plain = PlainBuildingType();
+
+        Console.WriteLine("variant=" + variant);
+
+        if (scenario >= 0 && scenario < Scenarios.Count) {
+            CreepScenario sc = Scenarios[scenario];
+            Console.WriteLine("scenario=" + sc.Name + " kind=" + sc.Kind
+                + " x=" + sc.X + " y=" + sc.Y + " frames=" + sc.Frames);
+
+            // A patch of creep around the scenario point, so that the
+            // creep life bookkeeping has something to bucket.
+            int cx = sc.X;
+            int cy = sc.Y;
+            for (int dy = -3; dy <= 3; ++dy) {
+                for (int dx = -3; dx <= 3; ++dx) {
+                    int tx = cx + dx;
+                    int ty = cy + dy;
+                    if (tx < 0 || tx >= TileWidth || ty < 0 || ty >= TileHeight) continue;
+                    rules.SetTileCreep(tx, ty, true);
+                }
+            }
+
+            if (sc.Kind == CreepActionKind.SetCreep) {
+                rules.SetTileCreep(cx, cy, true);
+            } else if (sc.Kind == CreepActionKind.ClearCreep) {
+                rules.SetTileCreep(cx, cy, false);
+            } else if (sc.Kind == CreepActionKind.SetReceding) {
+                rules.SetCreepReceding(cx, cy);
+            } else if (sc.Kind == CreepActionKind.Recede) {
+                // The creep life lists are only populated by
+                // set_creep_receding(), so the scenario has to mark some
+                // tiles as receding first -- otherwise recede_creep() finds
+                // every list empty and does nothing.
+                for (int dy = -2; dy <= 2; ++dy) {
+                    for (int dx = -2; dx <= 2; ++dx) {
+                        int tx = cx + dx;
+                        int ty = cy + dy;
+                        if (tx < 0 || tx >= TileWidth || ty < 0 || ty >= TileHeight) continue;
+                        rules.SetCreepReceding(tx, ty);
+                    }
+                }
+                for (int i = 0; i < sc.Frames; ++i) {
+                    rules.RecedeCreep();
+                }
+            } else if (sc.Kind == CreepActionKind.SpreadCreep) {
+                // A hatchery spreads creep over a radius, so the bed
+                // starts it off with a patch of creep and lets it spread.
+                for (int dy = -2; dy <= 2; ++dy) {
+                    for (int dx = -2; dx <= 2; ++dx) {
+                        int tx = cx + dx;
+                        int ty = cy + dy;
+                        if (tx < 0 || tx >= TileWidth || ty < 0 || ty >= TileHeight) continue;
+                        rules.SetTileCreep(tx, ty, true);
+                    }
+                }
+                bool occupied;
+                for (int i = 0; i < sc.Frames; ++i) {
+                    rules.SpreadCreep(hatchery, cx * 32 + 16, cy * 32 + 16, out occupied);
+                }
+            } else if (sc.Kind == CreepActionKind.SpreadCreepComplete) {
+                // A plain building does not spread creep; the creep
+                // covers exactly its own placement size.
+                rules.SpreadCreepCompletely(plain, cx * 32 + 16, cy * 32 + 16);
+            }
+        }
+
+        DumpCreepLife(life);
+        Console.WriteLine("RNG state=" + rng.State + " total=" + rng.TotalRandomCounts);
+        DumpTiles(map);
+    }
+
+    private static void DumpCreepLife(CreepLife life) {
+        Console.WriteLine("LIFE recede_timer=" + life.RecedeTimer
+            + " free_list_size=" + life.FreeListSize);
+        for (int i = 0; i < life.Lists.Count; ++i) {
+            string line = "LIST " + i + " size=" + life.ListsSize[i] + ":";
+            IntrusiveListNode p = life.Lists[i].Front();
+            while (p != null) {
+                CreepLifeEntry e = life.EntryContainer[p.OwnerIndex];
+                line += " (" + e.TileX + "," + e.TileY + "," + e.NeighboringCreepTiles + ")";
+                p = life.Lists[i].NextOf(p);
+            }
+            Console.WriteLine(line);
+        }
+        string free = "FREE size=" + life.FreeListSize + ":";
+        IntrusiveListNode f = life.FreeList.Front();
+        while (f != null) {
+            free += " " + f.OwnerIndex;
+            f = life.FreeList.NextOf(f);
+        }
+        Console.WriteLine(free);
+    }
+
+    private static void DumpTiles(TileMap map) {
+        for (int y = 0; y < map.MapTileHeight; ++y) {
+            for (int x = 0; x < map.MapTileWidth; ++x) {
+                Tile t = map.Tiles[y * map.MapTileWidth + x].Tile;
+                Console.WriteLine("T " + x + "," + y + " flags=0x" + Hex4(t.Flags));
+            }
+        }
+    }
+
+    private static string Hex4(int v) {
+        string digits = "0123456789abcdef";
+        string r = "";
+        int x = v;
+        for (int i = 0; i < 4; ++i) {
+            r = digits[x & 0xf] + r;
+            x = x >> 4;
+        }
+        return r;
+    }
+}

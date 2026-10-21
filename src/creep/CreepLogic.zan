@@ -1,0 +1,320 @@
+using System;
+
+// The creep rules: which tiles have creep, how creep spreads, and how it
+// recedes.
+//
+// The tile map lives in core (TileMap); the random numbers come from the
+// ported LCG (core/Rng.zan).
+
+public class CreepRules {
+    public TileMap Map;
+    public CreepLife Life;
+    public Rng Rng;
+
+    public CreepRules(TileMap map, CreepLife life, Rng rng) {
+        Map = map;
+        Life = life;
+        Rng = rng;
+    }
+
+    // openbw: bool tile_can_have_creep(xy_t<size_t> tile_pos)
+    public bool TileCanHaveCreep(int tileX, int tileY) {
+        int index = tileY * Map.MapTileWidth + tileX;
+        int flags = Map.Tiles[index].Tile.Flags;
+        if ((flags & ((int)TileFlag.Unbuildable | (int)TileFlag.PartiallyWalkable)) != 0) return false;
+        if (tileY == Map.MapTileHeight - 1) return true;
+        if ((Map.Tiles[index + Map.MapTileWidth].Tile.Flags & (int)TileFlag.Unbuildable) != 0) return false;
+        return true;
+    }
+
+    // openbw: size_t count_neighboring_creep_tiles(xy_t<size_t> tile_pos)
+    //
+    // The C++ walks the eight neighbours with one running index. The
+    // index and the coordinates are size_t, so the step back to the
+    // previous row wraps around -- the guards (tile_pos.y != 0 and
+    // friends) are what keep the reads inside the tile array. The
+    // uint arithmetic below reproduces that exactly.
+    public int CountNeighboringCreepTiles(int tileX, int tileY) {
+        int r = 0;
+        uint width = (uint)Map.MapTileWidth;
+        uint x = (uint)tileX;
+        uint y = (uint)tileY;
+        uint index = y * width + x;
+        index -= width;
+        index -= 1;
+        if (y != 0) {
+            if (x != 0) { if (HasCreep(index)) ++r; }
+            ++index;
+            if (HasCreep(index)) ++r;
+            ++index;
+            if (x != width - 1) { if (HasCreep(index)) ++r; }
+            index -= 2;
+        }
+        index += width;
+        if (x != 0) { if (HasCreep(index)) ++r; }
+        index += 2;
+        if (x != width - 1) { if (HasCreep(index)) ++r; }
+        index -= 2;
+        index += width;
+        if (y != (uint)Map.MapTileHeight - 1) {
+            if (x != 0) { if (HasCreep(index)) ++r; }
+            ++index;
+            if (HasCreep(index)) ++r;
+            ++index;
+            if (x != width - 1) { if (HasCreep(index)) ++r; }
+        }
+        return r;
+    }
+
+    // The creep flag of the tile at the given index. The C++ indexes the
+    // tile array with the running size_t index; the guards keep that
+    // index inside the array.
+    private bool HasCreep(uint index) {
+        return (Map.Tiles[(int)index].Tile.Flags & (int)TileFlag.HasCreep) != 0;
+    }
+
+    // openbw: void set_tile_creep(xy_t<size_t> tile_pos, bool has_creep = true)
+    //
+    // Sets or clears the creep flag of a tile, and re-buckets the tiles
+    // around it: the number of a tile's creep neighbours decides which
+    // list it sits in, so a change next to it can move it to another
+    // list.
+    public void SetTileCreep(int tileX, int tileY, bool hasCreep) {
+        uint index = (uint)tileY * (uint)Map.MapTileWidth + (uint)tileX;
+        if (hasCreep) {
+            Map.Tiles[(int)index].Tile.Flags = Map.Tiles[(int)index].Tile.Flags | (int)TileFlag.HasCreep;
+        } else {
+            Map.Tiles[(int)index].Tile.Flags = Map.Tiles[(int)index].Tile.Flags & ~(int)TileFlag.HasCreep;
+        }
+
+        uint width = (uint)Map.MapTileWidth;
+        uint height = (uint)Map.MapTileHeight;
+
+        // The C++ walks the eight neighbours with a single running index,
+        // starting at (tile_x - 1, tile_y - 1) and stepping right, then
+        // down a row and back to the left. The coordinates are size_t, so
+        // the step back wraps around; the guards are what keep the reads
+        // inside the tile array.
+        index -= width;
+        --tileX;
+        index -= 1;
+        --tileY;
+
+        if ((uint)tileY < height) {
+            if ((uint)tileX < width) { TestNeighbour(index, tileX, tileY); }
+            ++index;
+            ++tileX;
+            TestNeighbour(index, tileX, tileY);
+            ++index;
+            ++tileX;
+            if ((uint)tileX < width) { TestNeighbour(index, tileX, tileY); }
+            index -= 2;
+            tileX -= 2;
+        }
+        index += width;
+        ++tileY;
+        if ((uint)tileX < width) { TestNeighbour(index, tileX, tileY); }
+        index += 2;
+        tileX += 2;
+        if ((uint)tileX < width) { TestNeighbour(index, tileX, tileY); }
+        index -= 2;
+        tileX -= 2;
+        index += width;
+        ++tileY;
+        if ((uint)tileY < height) {
+            if ((uint)tileX < width) { TestNeighbour(index, tileX, tileY); }
+            ++index;
+            ++tileX;
+            TestNeighbour(index, tileX, tileY);
+            ++index;
+            ++tileX;
+            if ((uint)tileX < width) { TestNeighbour(index, tileX, tileY); }
+        }
+    }
+
+    // The C++'s test() lambda inside set_tile_creep.
+    private void TestNeighbour(uint index, int tileX, int tileY) {
+        int flags = Map.Tiles[(int)index].Tile.Flags;
+        if ((~flags & (int)TileFlag.HasCreep) != 0) return;
+        if ((~flags & (int)TileFlag.CreepReceding) != 0) return;
+        CreepLifeEntry v = Life.Find(tileX, tileY);
+        if (v == null) return;
+        int nNeighbors = CountNeighboringCreepTiles(tileX, tileY);
+        if (v.NeighboringCreepTiles == nNeighbors) return;
+
+        Life.Lists[v.NeighboringCreepTiles].Remove(v.ListLink);
+        Life.ListsSize[v.NeighboringCreepTiles] = Life.ListsSize[v.NeighboringCreepTiles] - 1;
+        v.NeighboringCreepTiles = nNeighbors;
+        Life.Lists[nNeighbors].PushFront(v.ListLink);
+        Life.ListsSize[nNeighbors] = Life.ListsSize[nNeighbors] + 1;
+    }
+
+    // openbw: bool set_creep_receding(xy_t<size_t> tile_pos)
+    public bool SetCreepReceding(int tileX, int tileY) {
+        IntrusiveListNode front = Life.FreeList.Front();
+        if (front == null) return false;
+        CreepLifeEntry v = Life.EntryContainer[front.OwnerIndex];
+        Life.FreeList.PopFront();
+        Life.FreeListSize = Life.FreeListSize - 1;
+        int nNeighbors = CountNeighboringCreepTiles(tileX, tileY);
+        v.NeighboringCreepTiles = nNeighbors;
+        v.TileX = tileX;
+        v.TileY = tileY;
+        Life.Lists[nNeighbors].PushFront(v.ListLink);
+        Life.ListsSize[nNeighbors] = Life.ListsSize[nNeighbors] + 1;
+        Life.TableInsert(v);
+
+        int index = tileY * Map.MapTileWidth + tileX;
+        Map.Tiles[index].Tile.Flags = Map.Tiles[index].Tile.Flags | (int)TileFlag.CreepReceding;
+        return true;
+    }
+
+    // openbw: rect_t<xy_t<size_t>> get_max_creep_bb(unit_type_autocast unit_type, xy pos, bool unit_is_completed)
+    //
+    // The area a unit can spread creep over. A building that spreads
+    // creep covers a fixed radius around itself; one that does not
+    // covers exactly its own placement size.
+    public void GetMaxCreepBb(UnitType unitType, int posX, int posY, bool unitIsCompleted,
+                               out int fromX, out int fromY, out int toX, out int toY) {
+        int rFromX;
+        int rFromY;
+        int rToX;
+        int rToY;
+        bool spreadsCreep = unitType.SpreadsCreep;
+        if (spreadsCreep) {
+            rFromX = posX - 320;
+            rFromY = posY - 200;
+            rToX = posX + 320;
+            rToY = posY + 200;
+        } else {
+            rFromX = (posX / 32 - unitType.PlacementSize.X / 32 / 2) * 32;
+            rFromY = (posY / 32 - unitType.PlacementSize.Y / 32 / 2) * 32;
+            rToX = (rFromX / 32 + unitType.PlacementSize.X / 32 - 1) * 32;
+            rToY = (rFromY / 32 + unitType.PlacementSize.Y / 32 - 1) * 32;
+        }
+
+        if (rFromX <= 0) fromX = 0;
+        else fromX = rFromX / 32;
+        if (rFromY <= 0) fromY = 0;
+        else fromY = rFromY / 32;
+        if (rToX >= Map.MapTileWidth * 32) toX = Map.MapTileWidth - 1;
+        else toX = rToX / 32;
+        if (rToY >= Map.MapTileHeight * 32) toY = Map.MapTileHeight - 1;
+        else toY = rToY / 32;
+    }
+
+    // openbw: bool spread_creep(unit_type_autocast unit_type, xy pos, bool* out_any_tiles_occupied = nullptr)
+    //
+    // Spreads creep to at most one tile: the tiles around pos that could
+    // take creep are bucketed by how many of their neighbours already
+    // have creep, and the bucket with the most creep neighbours wins.
+    // The tile that gets the creep is picked at random out of that
+    // bucket.
+    public bool SpreadCreep(UnitType unitType, int posX, int posY, out bool anyTilesOccupied) {
+        // The target tiles, bucketed by the number of creep neighbours.
+        // The C++ uses eight buckets and indexes them with n - 1, where
+        // n is the number of creep neighbours (1..8 -- a tile has only
+        // eight neighbours).
+        List<List<int>> targetTiles = new List<List<int>>();
+        for (int i = 0; i < 8; ++i) targetTiles.Add(new List<int>());
+
+        bool spreadsCreep = unitType.SpreadsCreep;
+        int fromX;
+        int fromY;
+        int toX;
+        int toY;
+        GetMaxCreepBb(unitType, posX, posY, true, out fromX, out fromY, out toX, out toY);
+
+        int dy = fromY * 32 - posY + 16;
+        anyTilesOccupied = false;
+        for (int tileY = fromY; tileY != toY + 1; ++tileY) {
+            int dx = fromX * 32 - posX + 16;
+            for (int tileX = fromX; tileX != toX + 1; ++tileX) {
+                int index = tileY * Map.MapTileWidth + tileX;
+                int flags = Map.Tiles[index].Tile.Flags;
+                if ((flags & (int)TileFlag.HasCreep) != 0) { dx += 32; continue; }
+                if (!TileCanHaveCreep(tileX, tileY)) { dx += 32; continue; }
+                if ((flags & (int)TileFlag.Occupied) != 0) {
+                    if (!anyTilesOccupied) anyTilesOccupied = true;
+                    dx += 32;
+                    continue;
+                }
+                if (spreadsCreep) {
+                    int d = dx * dx * 25 + dy * dy * 64;
+                    if (d > 320 * 320 * 25) { dx += 32; continue; }
+                }
+                int n = CountNeighboringCreepTiles(tileX, tileY);
+                if (n == 0) { dx += 32; continue; }
+                targetTiles[n - 1].Add(index);
+                dx += 32;
+            }
+            dy += 32;
+        }
+
+        // The C++ iterates the buckets in reverse, so the bucket with
+        // the most creep neighbours is tried first.
+        for (int i = 7; i >= 0; --i) {
+            List<int> bucket = targetTiles[i];
+            if (bucket.Count == 0) continue;
+            int index = bucket[(Rng.Rand(26) >> 4) % bucket.Count];
+            SetTileCreep(index % Map.MapTileWidth, index / Map.MapTileWidth, true);
+            return true;
+        }
+        return false;
+    }
+
+    // openbw: void spread_creep_completely(unit_type_autocast unit_type, xy pos)
+    //
+    // Covers the unit's own placement area with creep, then spreads
+    // outwards until nothing more can take creep.
+    public void SpreadCreepCompletely(UnitType unitType, int posX, int posY) {
+        int fromX = posX / 32 - unitType.PlacementSize.X / 32 / 2;
+        int fromY = posY / 32 - unitType.PlacementSize.Y / 32 / 2;
+        int toX = fromX + unitType.PlacementSize.X / 32;
+        int toY = fromY + unitType.PlacementSize.Y / 32;
+        for (int y = fromY; y != toY; ++y) {
+            for (int x = fromX; x != toX; ++x) {
+                if (!TileCanHaveCreep(x, y)) continue;
+                SetTileCreep(x, y, true);
+            }
+        }
+        bool occupied;
+        while (SpreadCreep(unitType, posX, posY, out occupied)) {
+        }
+    }
+
+    // openbw: void recede_creep()
+    //
+    // Removes one creep tile per call, picked at random out of the
+    // creep_life lists. The first non-empty list wins, and the random
+    // index picks which entry of it recedes -- so the *order* of the
+    // lists decides the result.
+    public void RecedeCreep() {
+        if (Life.RecedeTimer != 0) {
+            --Life.RecedeTimer;
+            return;
+        }
+        int[] lut = new int[] { 1, 3, 5, 6, 7, 8, 9, 9, 9 };
+        Life.RecedeTimer = lut[Life.FreeListSize >> 7];
+
+        for (int i = 0; i != Life.Lists.Count; ++i) {
+            IntrusiveList list = Life.Lists[i];
+            int size = Life.ListsSize[i];
+            if (list.IsEmpty()) continue;
+            IntrusiveListNode picked = list.Advance(Rng.Rand(27, 0, size - 1));
+            if (picked == null) continue;
+            CreepLifeEntry v = Life.EntryContainer[picked.OwnerIndex];
+            list.Remove(v.ListLink);
+            Life.ListsSize[i] = Life.ListsSize[i] - 1;
+            Life.TableRemove(v);
+            v.NeighboringCreepTiles = 9;
+            Life.FreeList.PushFront(v.ListLink);
+            Life.FreeListSize = Life.FreeListSize + 1;
+
+            int index = v.TileY * Map.MapTileWidth + v.TileX;
+            Map.Tiles[index].Tile.Flags = Map.Tiles[index].Tile.Flags & ~(int)TileFlag.CreepReceding;
+            SetTileCreep(v.TileX, v.TileY, false);
+            break;
+        }
+    }
+}

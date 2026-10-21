@@ -1,0 +1,134 @@
+using System;
+
+// openbw: intrusive_list (intrusive_list.h)
+//
+// A doubly linked list whose nodes carry their own links, so an element
+// can be unlinked in O(1) without knowing its neighbours' addresses.
+//
+// The creep layer uses nine of these (one per "number of neighbouring
+// creep tiles" bucket) plus a free list, and the *order* of the elements
+// matters: recede_creep() picks a random element out of one of the
+// lists, so the list order decides which tile recedes.
+//
+// The C++ list keeps a header node inside the list object itself, and
+// `ptr_end()` recovers the header's address by subtracting the offset of
+// the link member from the header's address. That trick only exists
+// because the header must be at a fixed offset; here the header is a
+// separate object, which does not change any observable behaviour.
+public class IntrusiveListNode {
+    // The previous and the next node. A null Prev means "the list's
+    // header", so the header is the list's own object.
+    public IntrusiveListNode Prev;
+    public IntrusiveListNode Next;
+
+    // The index of the element that owns this link, in the element
+    // container the list belongs to. The C++ stores the link *inside*
+    // the element, so the link's address identifies the element; here
+    // the link is a separate object, so the owner is recorded by index
+    // to get back from a link to its element in O(1).
+    public int OwnerIndex;
+
+    public IntrusiveListNode() {
+        Prev = null;
+        Next = null;
+        OwnerIndex = -1;
+    }
+}
+
+// A list of intrusive nodes.
+//
+// `T` is the node type; the C++ parameterises on the link member, which
+// has the same effect here: every node in a list is linked through its
+// own Prev / Next fields.
+public class IntrusiveList {
+    private IntrusiveListNode header;
+
+    public IntrusiveList() {
+        header = new IntrusiveListNode();
+        header.Prev = header;
+        header.Next = header;
+    }
+
+    public bool IsEmpty() {
+        return header.Next == header;
+    }
+
+    public int Count() {
+        int n = 0;
+        IntrusiveListNode p = header.Next;
+        while (p != header) {
+            ++n;
+            p = p.Next;
+        }
+        return n;
+    }
+
+    // The first element, or null when the list is empty.
+    public IntrusiveListNode Front() {
+        if (IsEmpty()) return null;
+        return header.Next;
+    }
+
+    // The last element, or null when the list is empty.
+    public IntrusiveListNode Back() {
+        if (IsEmpty()) return null;
+        return header.Prev;
+    }
+
+    // The element after v, or null when v is the last one.
+    public IntrusiveListNode NextOf(IntrusiveListNode v) {
+        IntrusiveListNode n = v.Next;
+        if (n == header) return null;
+        return n;
+    }
+
+    // The element before v, or null when v is the first one.
+    public IntrusiveListNode PrevOf(IntrusiveListNode v) {
+        IntrusiveListNode n = v.Prev;
+        if (n == header) return null;
+        return n;
+    }
+
+    // openbw: void push_front(reference v)
+    public void PushFront(IntrusiveListNode v) {
+        v.Prev = header;
+        v.Next = header.Next;
+        header.Next.Prev = v;
+        header.Next = v;
+    }
+
+    // openbw: void push_back(reference v)
+    public void PushBack(IntrusiveListNode v) {
+        v.Next = header;
+        v.Prev = header.Prev;
+        header.Prev.Next = v;
+        header.Prev = v;
+    }
+
+    // openbw: void pop_front()
+    public void PopFront() {
+        if (IsEmpty()) return;
+        IntrusiveListNode v = header.Next;
+        Remove(v);
+    }
+
+    // openbw: void erase(iterator pos)
+    public void Remove(IntrusiveListNode v) {
+        v.Prev.Next = v.Next;
+        v.Next.Prev = v.Prev;
+        v.Prev = null;
+        v.Next = null;
+    }
+
+    // The element at the given index, counted from the front. The C++
+    // uses std::advance() on a bidirectional iterator, which walks the
+    // list one node at a time.
+    public IntrusiveListNode Advance(int n) {
+        IntrusiveListNode p = header.Next;
+        for (int i = 0; i < n && p != header; ++i) {
+            p = p.Next;
+        }
+        if (p == header) return null;
+        return p;
+    }
+}

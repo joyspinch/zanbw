@@ -1,80 +1,11 @@
 using System;
 
-// openbw: game_types.h::tile_t -- one map tile.
-//
-// The visibility layer keeps two byte masks per tile: which players can
-// currently see it, and which players have ever seen it. Both are bit
-// masks over the twelve players.
-public class Tile {
-    public int Visible;
-    public int Explored;
-    public int Flags;
-
-    public Tile() {
-        Visible = 0;
-        Explored = 0;
-        Flags = 0;
-    }
-}
-
-// One map tile, with everything the visibility layer needs to know about
-// it. The engine keeps the terrain in a few parallel arrays; here they
-// live in one entity so the tile cannot get out of sync with itself.
-public class MapTile {
-    // The visibility masks.
-    public Tile Tile;
-
-    // openbw: st.tiles_mega_tile_index -- the mega tile the terrain
-    // function picked for this tile.
-    public int MegaTileIndex;
-
-    // openbw: game_st.gfx_tiles -- the graphics tile id. Its raw value
-    // splits into a group index and a subtile index.
-    public int GfxTile;
-
-    public MapTile() {
-        Tile = new Tile();
-        MegaTileIndex = 0;
-        GfxTile = 0;
-    }
-}
-
-// The tile grid plus everything the visibility layer needs to look at it:
-// the per-tile terrain flags, the graphics-side tile table and the cv5 /
-// vf4 tables the ground height is derived from.
-public class VisionMap {
-    public int MapTileWidth;
-    public int MapTileHeight;
-
-    // The tiles, in row-major order: index = y * MapTileWidth + x.
-    public List<MapTile> Tiles;
-
-    // openbw: game_st.cv5 -- per group, the mega tile index of each of
-    // the 16 subtiles.
-    public List<int> Cv5;
-
-    // openbw: game_st.vf4 -- per mega tile, 16 walkability flags.
-    public List<int> Vf4;
-
-    public VisionMap(int tileWidth, int tileHeight) {
-        MapTileWidth = tileWidth;
-        MapTileHeight = tileHeight;
-        Tiles = new List<MapTile>();
-        Cv5 = new List<int>();
-        Vf4 = new List<int>();
-    }
-
-    public int TileIndex(int posX, int posY) {
-        return (posY / 32) * MapTileWidth + (posX / 32);
-    }
-}
-
 // The sight range table, shared by the whole map.
 public class Vision {
-    public VisionMap Map;
+    public TileMap Map;
     public List<SightValues> SightValues;
 
-    public Vision(VisionMap map, List<SightValues> sightValues) {
+    public Vision(TileMap map, List<SightValues> sightValues) {
         Map = map;
         SightValues = sightValues;
     }

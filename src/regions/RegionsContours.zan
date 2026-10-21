@@ -136,7 +136,7 @@ public class RegionsContours {
                 }
                 R.Contours[curDir].Add(c);
 
-                if (!nextWalkable) {
+                if (nextWalkable == 0) {
                     curDir = nextDir;
                 } else {
                     int[] nrelX = new int[] { 1, 1, -1, -1 };

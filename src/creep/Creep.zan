@@ -1,0 +1,129 @@
+using System;
+
+// The creep layer.
+//
+// openbw's creep system is tile-based: a creep tile is a map tile with
+// flag_has_creep set. The layer keeps two things:
+//
+//   * which tiles currently have creep;
+//   * a "creep life" bookkeeping structure that remembers, for every
+//     creep tile, how many of its eight neighbours also have creep --
+//     so that creep can recede from the edges inward.
+//
+// The bookkeeping is an intrusive list per neighbour count (0..8), a
+// hash table to find a tile's entry, and a free list of unused entries.
+// recede_creep() picks a random element out of one of the lists, so the
+// *order* of those lists is behaviour, not an implementation detail.
+
+// openbw: game_types.h::creep_life_t::entry
+public class CreepLifeEntry {
+    // The links of the entry in the intrusive list it belongs to.
+    public IntrusiveListNode ListLink;
+
+    // The links of the entry in the hash table bucket it belongs to.
+    public IntrusiveListNode HashLink;
+
+    // The tile this entry describes.
+    public int TileX;
+    public int TileY;
+
+    // How many of the eight neighbours of the tile have creep.
+    public int NeighboringCreepTiles;
+
+    public CreepLifeEntry() {
+        ListLink = new IntrusiveListNode();
+        HashLink = new IntrusiveListNode();
+        TileX = 0;
+        TileY = 0;
+        NeighboringCreepTiles = 0;
+    }
+}
+
+// openbw: game_types.h::creep_life_t
+public class CreepLife {
+    // openbw: int recede_timer
+    public int RecedeTimer;
+
+    // openbw: int check_dead_unit_timer
+    public int CheckDeadUnitTimer;
+
+    // openbw: std::array<intrusive_list<entry, ...>, 9> lists
+    public List<IntrusiveList> Lists;
+
+    // openbw: std::array<size_t, 9> lists_size
+    public List<int> ListsSize;
+
+    // openbw: intrusive_list<entry, ...> free_list
+    public IntrusiveList FreeList;
+
+    // openbw: size_t free_list_size
+    public int FreeListSize;
+
+    // openbw: entry_hash_table table -- 0x200 buckets, the bucket index
+    // is (y * 7 + x) % 0x200.
+    public List<IntrusiveList> TableBuckets;
+
+    // openbw: a_vector<entry> entry_container
+    public List<CreepLifeEntry> EntryContainer;
+
+    public CreepLife() {
+        RecedeTimer = 0;
+        CheckDeadUnitTimer = 0;
+        Lists = new List<IntrusiveList>();
+        ListsSize = new List<int>();
+        FreeList = new IntrusiveList();
+        FreeListSize = 0;
+        TableBuckets = new List<IntrusiveList>();
+        EntryContainer = new List<CreepLifeEntry>();
+
+        for (int i = 0; i < 9; ++i) {
+            Lists.Add(new IntrusiveList());
+            ListsSize.Add(0);
+        }
+        for (int i = 0; i < 0x200; ++i) {
+            TableBuckets.Add(new IntrusiveList());
+        }
+        for (int i = 0; i < 1024; ++i) {
+            CreepLifeEntry e = new CreepLifeEntry();
+            e.ListLink.OwnerIndex = i;
+            e.HashLink.OwnerIndex = i;
+            EntryContainer.Add(e);
+            FreeList.PushBack(e.ListLink);
+            ++FreeListSize;
+        }
+    }
+
+    // openbw: entry* find(xy_t<size_t> tile_pos)
+    public CreepLifeEntry Find(int tileX, int tileY) {
+        int index = (tileY * 7 + tileX) % TableBuckets.Count;
+        IntrusiveList bucket = TableBuckets[index];
+        IntrusiveListNode p = bucket.Front();
+        while (p != null) {
+            CreepLifeEntry e = EntryContainer[p.OwnerIndex];
+            if (e.TileX == tileX && e.TileY == tileY) return e;
+            p = bucket.NextOf(p);
+        }
+        return null;
+    }
+
+    // openbw: void insert(entry* v)
+    public void TableInsert(CreepLifeEntry v) {
+        int index = (v.TileY * 7 + v.TileX) % TableBuckets.Count;
+        TableBuckets[index].PushFront(v.HashLink);
+    }
+
+    // openbw: void remove(entry* v)
+    public void TableRemove(CreepLifeEntry v) {
+        int index = (v.TileY * 7 + v.TileX) % TableBuckets.Count;
+        TableBuckets[index].Remove(v.HashLink);
+    }
+
+    // The index of an entry in the entry container. The C++ gets it by
+    // subtracting the container's data pointer from the entry's address.
+    public int IndexOfEntry(CreepLifeEntry e) {
+        for (int i = 0; i < EntryContainer.Count; ++i) {
+            if (EntryContainer[i] == e) return i;
+        }
+        return -1;
+    }
+}

@@ -29,6 +29,8 @@ ZAN_SOURCES_CORE=(
     src/core/Sim.zan
     src/core/Kinematics.zan
     src/core/Scenario.zan
+    src/core/TileMap.zan
+    src/core/IntrusiveList.zan
 )
 
 # The regions layer: the tile map and the region decomposition.
@@ -86,4 +88,10 @@ ZAN_SOURCES_COLLISION=(
 ZAN_SOURCES_VISION=(
     src/vision/SightValues.zan
     src/vision/Vision.zan
+)
+
+# The creep layer: the creep life bookkeeping and the creep rules.
+ZAN_SOURCES_CREEP=(
+    src/creep/Creep.zan
+    src/creep/CreepLogic.zan
 )

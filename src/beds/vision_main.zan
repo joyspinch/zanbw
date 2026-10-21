@@ -150,7 +150,7 @@ public class VisionMain {
         Terrain.Variant = variant;
         BuildScenarios();
 
-        VisionMap map = new VisionMap(TileWidth, TileHeight);
+        TileMap map = new TileMap(TileWidth, TileHeight);
 
         // The synthetic vf4 table, with high / middle / very high ground
         // so that the sight blocking path is exercised.
@@ -221,7 +221,7 @@ public class VisionMain {
         }
     }
 
-    private static void DumpTiles(VisionMap map) {
+    private static void DumpTiles(TileMap map) {
         for (int y = 0; y < map.MapTileHeight; ++y) {
             for (int x = 0; x < map.MapTileWidth; ++x) {
                 Tile t = map.Tiles[y * map.MapTileWidth + x].Tile;
