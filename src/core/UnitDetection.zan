@@ -1,0 +1,142 @@
+using System;
+
+// openbw: the detection and sight range layer (bwgame.h)
+//
+// The queries that decide who can see a unit, and how far a unit can
+// see.
+//
+// The player's shared vision, the map's ground heights and the list of
+// detectors are passed in rather than reached for, so this layer does
+// not depend on the game state.
+
+public class UnitDetection {
+    // openbw: int unit_sight_range(const unit_t* u, bool ignore_blindness = false) const
+    //
+    // How far the unit can see, in pixels.
+    //
+    // A grounded building that is still being built sees only a little.
+    // A blinded unit sees even less, unless the blindness is ignored.
+    // Some unit types see much further with the right upgrade.
+    public static int UnitSightRange(Unit u, bool hasSightUpgrade) {
+        return UnitSightRange(u, hasSightUpgrade, false);
+    }
+
+    // openbw: int unit_sight_range(const unit_t* u, bool ignore_blindness = false) const
+    //
+    // How far the unit can see, in pixels.
+    //
+    // A grounded building that is still being built sees only a little.
+    // A blinded unit sees even less, unless the blindness is ignored.
+    // Some unit types see much further with the right upgrade.
+    public static int UnitSightRange(Unit u, bool hasSightUpgrade, bool ignoreBlindness) {
+        if (UnitFlags.GroundedBuilding(u) && !UnitFlags.Completed(u) && !UnitStatus.UnitIsMorphingBuilding(u)) return 32 * 4;
+        if (!ignoreBlindness && u.BlindedByUnitId != -1) return 32 * 2;
+        int id = u.UnitType.Id;
+        if (id == (int)UnitTypes.Terran_Ghost && hasSightUpgrade) return 32 * 11;
+        if (id == (int)UnitTypes.Zerg_Overlord && hasSightUpgrade) return 32 * 11;
+        if (id == (int)UnitTypes.Protoss_Observer && hasSightUpgrade) return 32 * 11;
+        if (id == (int)UnitTypes.Protoss_Scout && hasSightUpgrade) return 32 * 11;
+        return 32 * u.UnitType.SightRange;
+    }
+
+    // openbw: int unit_sight_range_ignore_blindness(const unit_t* u) const
+    //
+    // The unit's sight range, ignoring blindness.
+    public static int UnitSightRangeIgnoreBlindness(Unit u, bool hasSightUpgrade) {
+        return UnitSightRange(u, hasSightUpgrade, true);
+    }
+
+    // openbw: the sight upgrade of the unit type, in unit_sight_range.
+    // None when the unit type has no sight upgrade.
+    public static int UnitSightUpgradeOf(UnitType ut) {
+        int id = ut.Id;
+        if (id == (int)UnitTypes.Terran_Ghost) return (int)UpgradeTypes.Ocular_Implants;
+        if (id == (int)UnitTypes.Zerg_Overlord) return (int)UpgradeTypes.Antennae;
+        if (id == (int)UnitTypes.Protoss_Observer) return (int)UpgradeTypes.Sensor_Array;
+        if (id == (int)UnitTypes.Protoss_Scout) return (int)UpgradeTypes.Apial_Sensors;
+        return (int)UpgradeTypes.None;
+    }
+
+    // openbw: bool unit_can_detect(const unit_t* u) const
+    //
+    // Whether the unit can see cloaked units.
+    public static bool UnitCanDetect(Unit u) {
+        if (!UnitFlags.Detector(u.UnitType)) return false;
+        if (!UnitFlags.Completed(u)) return false;
+        if (UnitTarget.UnitIsDisabled(u)) return false;
+        if (u.BlindedByUnitId != -1) return false;
+        return true;
+    }
+
+    // openbw: bool visible_to_everyone(const unit_t* u) const
+    //
+    // Whether the unit is visible to everyone.
+    //
+    // A worker that picked up a flag is visible to everyone, and so is
+    // a carrier that has one of them aboard.
+    public static bool VisibleToEveryone(Unit u, Unit firstLoadedUnit) {
+        if (UnitFlags.Worker(u.UnitType)) {
+            if (u.WorkerPowerupId == (int)UnitTypes.Powerup_Flag) return true;
+            return false;
+        }
+        if (!UnitStatus.UnitProvidesSpace(u, false)) return false;
+        if (firstLoadedUnit != null) {
+            if (firstLoadedUnit.WorkerPowerupId == (int)UnitTypes.Powerup_Flag) return true;
+        }
+        return false;
+    }
+
+    // openbw: uint32_t unit_calculate_detected_flags(const unit_t* u) const
+    //
+    // The players who can see the unit.
+    //
+    // The effects that reveal a unit to everyone win. Otherwise the
+    // owner and the owner's shared vision see it, and so does every
+    // detector in range.
+    //
+    // The detectors are the units the caller has already filtered to
+    // the ones in range: the C++ tests the sight range against the
+    // positions, which this layer does not have. A detector that is
+    // not in range is simply not in the list.
+    public static int UnitCalculateDetectedFlags(Unit u, int sharedVisionMask, int parasiteFlags,
+                                                  List<Unit> detectors, bool visibleToEveryone) {
+        if (u.DefensiveMatrixHp.RawValue() != 0 || u.LockdownTimer != 0 || u.MaelstromTimer != 0
+            || u.IrradiateTimer != 0 || u.EnsnareTimer != 0 || u.StasisTimer != 0
+            || u.PlagueTimer != 0 || u.AcidSporeCount != 0) {
+            return 0xff;
+        } else if (visibleToEveryone) {
+            return 0xff;
+        }
+
+        int detectedFlags = 0;
+        detectedFlags = detectedFlags | (1 << u.Owner);
+        detectedFlags = detectedFlags | sharedVisionMask;
+        detectedFlags = detectedFlags | parasiteFlags;
+
+        for (int i = 0; i < detectors.Count; ++i) {
+            Unit detector = detectors[i];
+            if (!UnitCanDetect(detector)) continue;
+            if (detector == u) continue;
+            if (UnitFlags.Hallucination(detector)) continue;
+            // The sprite's visibility flags hold the *inverted* tile
+            // visibility, so a clear bit means the tile is visible.
+            if ((~detector.VisibilityFlags & (1 << detector.Owner)) == 0) continue;
+            detectedFlags = detectedFlags | (1 << detector.Owner) | detector.ParasiteFlags;
+        }
+
+        return detectedFlags;
+    }
+
+    // openbw: fp8 unit_armor(const unit_t* u) const
+    //
+    // The unit's armor.
+    //
+    // An Ultralisk with chitinous plating has two more, and the unit
+    // type's own armor upgrade adds its level.
+    public static Fp UnitArmor(Unit u, int armorUpgradeLevel, bool hasChitinousPlating) {
+        Fp r = Fp.Integer(u.UnitType.Armor);
+        if (UnitTypeIds.UnitIsUltralisk(u.UnitType) && hasChitinousPlating) r = r + Fp.Integer(2);
+        r = r + Fp.Integer(armorUpgradeLevel);
+        return r;
+    }
+}

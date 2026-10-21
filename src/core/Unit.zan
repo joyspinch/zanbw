@@ -137,6 +137,16 @@ public class UnitType {
     // How much cargo space the unit needs.
     public int SpaceRequired;
 
+    // openbw: unit_type_t::armor
+    //
+    // The unit type's base armor.
+    public int Armor;
+
+    // openbw: unit_type_t::armor_upgrade
+    //
+    // The upgrade that raises the unit type's armor.
+    public int ArmorUpgrade;
+
     // openbw: unit_type_t::target_acquisition_range
     //
     // How far the unit type can acquire targets.
@@ -287,6 +297,21 @@ public class Unit {
     // player can see it.
     public int VisibilityFlags;
 
+    // openbw: unit_t::defensive_matrix_hp / ensnare_timer / irradiate_timer
+    // / plague_timer / acid_spore_count
+    //
+    // The effects that make a unit visible to everyone.
+    public Fp DefensiveMatrixHp;
+    public int EnsnareTimer;
+    public int IrradiateTimer;
+    public int PlagueTimer;
+    public int AcidSporeCount;
+
+    // openbw: unit_t::parasite_flags
+    //
+    // The players that have a parasite on the unit.
+    public int ParasiteFlags;
+
     // openbw: sprite_t::flags -- the flag_hidden bit.
     //
     // The unit is hidden from everyone.
@@ -414,6 +439,12 @@ public class Unit {
         NydusExit = false;
         DetectedFlags = 0;
         VisibilityFlags = 0;
+        DefensiveMatrixHp = Fp.Zero();
+        EnsnareTimer = 0;
+        IrradiateTimer = 0;
+        PlagueTimer = 0;
+        AcidSporeCount = 0;
+        ParasiteFlags = 0;
         SpriteHidden = false;
         PathingFlags = 0;
         WorkerPowerupId = -1;

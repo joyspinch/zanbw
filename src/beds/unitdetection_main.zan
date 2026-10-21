@@ -1,0 +1,135 @@
+using System;
+
+// The Zan side of the detection and sight range layer bed.
+//
+// The bed drives the same predicates over the same unit, player and
+// detector configurations as the C++ bed
+// (tools/cppbed/unitdetection_bed.cpp), so the two traces must match
+// byte for byte.
+
+public class UnitDetectionBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types: the sight range, the armor, the flags.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4 + (i % 6), new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            if (i % 9 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+            if (i % 8 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Detector;
+            if (i % 6 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Worker;
+            t.Armor = i % 7;
+            if (i % 4 == 0) t.ArmorUpgrade = (int)UpgradeTypes.Terran_Infantry_Armor;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The per player upgrade tables. The C++'s tables persist
+        // across the cases, so a player that has an upgrade in one
+        // case has it in every later case of that player.
+        bool[] chitinous = new bool[12];
+
+        // ---- the sight range, the detector, the armor -----------------------
+        for (int i = 0; i < 229; ++i) {
+            int statusFlags = 0;
+            if ((i + variant) % 4 == 0) statusFlags = statusFlags | (int)StatusFlag.Completed;
+            Unit u = MakeUnit(types[i], i % 12, statusFlags);
+            // The blindness.
+            if ((i + variant) % 5 == 0) u.BlindedByUnitId = 1;
+            // The sight upgrade, per unit type.
+            bool hasSightUpgrade = false;
+            int sightUpgradeId = UnitDetection.UnitSightUpgradeOf(types[i]);
+            if (sightUpgradeId != (int)UpgradeTypes.None) {
+                hasSightUpgrade = (i % 3) == 0;
+            }
+            // The armor upgrade level.
+            int armorLevel = 0;
+            if (i % 4 == 0) armorLevel = i % 3;
+            // The chitinous plating, for the Ultralisk. The C++'s
+            // upgrade table is per player and persists, so once a
+            // player has it, every later case of that player has it
+            // too.
+            if ((i % 11) == 0) chitinous[i % 12] = true;
+            bool hasChitinousPlating = chitinous[i % 12];
+
+            Console.WriteLine("S " + i + " "
+                + UnitDetection.UnitSightRange(u, hasSightUpgrade) + " "
+                + UnitDetection.UnitSightRangeIgnoreBlindness(u, hasSightUpgrade) + " "
+                + B(UnitDetection.UnitCanDetect(u)) + " "
+                + UnitDetection.UnitArmor(u, armorLevel, hasChitinousPlating).RawValue());
+        }
+
+        // ---- the visible to everyone, the detected flags ---------------------
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 12, 0);
+            // The worker's powerup: a flag makes the worker visible to
+            // everyone.
+            bool hasFlag = (i + variant) % 10 == 0;
+            if (hasFlag) u.WorkerPowerupId = (int)UnitTypes.Powerup_Flag;
+            // The carrier with a flag aboard.
+            Unit loaded = MakeUnit(types[(i + 5) % 229], i % 12, 0);
+            bool loadedHasFlag = (i + variant) % 10 == 1;
+            if (loadedHasFlag) loaded.WorkerPowerupId = (int)UnitTypes.Powerup_Flag;
+            Unit firstLoaded = null;
+            if ((i + variant) % 4 == 0) firstLoaded = loaded;
+
+            // The revealing effects.
+            if ((i + variant) % 12 == 0) u.DefensiveMatrixHp = Fp.Integer(10);
+            if ((i + variant) % 13 == 0) u.LockdownTimer = 5;
+            if ((i + variant) % 14 == 0) u.MaelstromTimer = 5;
+            if ((i + variant) % 15 == 0) u.IrradiateTimer = 5;
+            if ((i + variant) % 16 == 0) u.EnsnareTimer = 5;
+            if ((i + variant) % 17 == 0) u.StasisTimer = 5;
+            if ((i + variant) % 18 == 0) u.PlagueTimer = 5;
+            if ((i + variant) % 19 == 0) u.AcidSporeCount = 3;
+
+            // The parasite flags.
+            if ((i + variant) % 6 == 0) u.ParasiteFlags = 1 << (i % 12);
+
+            // The detector, in range.
+            Unit detector = MakeUnit(types[(i + 9) % 229], (i + 1) % 12, 0);
+            detector.VisibilityFlags = 0xff;
+            if ((i + variant) % 7 == 0) detector.StatusFlagBits = detector.StatusFlagBits | (int)StatusFlag.Hallucination;
+            if ((i + variant) % 8 == 0) detector.BlindedByUnitId = 1;
+
+            List<Unit> detectors = new List<Unit>();
+            detectors.Add(detector);
+
+            bool visibleToEveryone = UnitDetection.VisibleToEveryone(u, firstLoaded);
+            int flags = UnitDetection.UnitCalculateDetectedFlags(u, SharedVision(i % 12), u.ParasiteFlags,
+                detectors, visibleToEveryone);
+
+            Console.WriteLine("V " + i + " " + B(visibleToEveryone) + " " + flags);
+        }
+
+        return 0;
+    }
+
+    // The shared vision mask of a player, matching the C++ bed.
+    private static int SharedVision(int player) {
+        if (player % 3 == 0) return 1 << ((player + 1) % 12);
+        return 0;
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner, int statusFlags) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.StatusFlagBits = statusFlags;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        u.VisibilityFlags = 0xff;
+        u.Hp = Fp.Integer(50);
+        return u;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}
