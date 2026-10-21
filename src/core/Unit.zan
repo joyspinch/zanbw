@@ -277,6 +277,29 @@ public class Unit {
     // The units this unit is carrying, as unit ids.
     public List<int> LoadedUnitIds;
 
+    // openbw: unit_t::subunit
+    //
+    // The turret riding on this unit, as a unit id, or -1.
+    public int SubunitId;
+
+    // openbw: unit_t::building.addon
+    //
+    // The addon attached to this building, as a unit id, or -1.
+    public int BuildingAddonId;
+
+    // openbw: unit_t::carrier / unit_t::reaver
+    //
+    // The fighter counts. A carrier holds fighters inside and lets them
+    // out; a reaver only holds them inside.
+    public int CarrierInsideCount;
+    public int CarrierOutsideCount;
+
+    // openbw: unit_t::sprite
+    //
+    // The unit's sprite position. The C++ keeps the position in the
+    // sprite; here the unit keeps it directly.
+    public Xy SpritePosition;
+
     // openbw: unit_t::vulture.spider_mine_count
     //
     // How many spider mines the vulture has laid and not yet used.
@@ -367,6 +390,11 @@ public class Unit {
         DetectedFlags = 0;
         WorkerPowerupId = -1;
         LoadedUnitIds = new List<int>();
+        SubunitId = -1;
+        BuildingAddonId = -1;
+        CarrierInsideCount = 0;
+        CarrierOutsideCount = 0;
+        SpritePosition = new Xy(0, 0);
         SpiderMineCount = 0;
         UserActionFlags = 0;
         MovementState = MovementStates.UM_Init;

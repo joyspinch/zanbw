@@ -134,6 +134,18 @@ public class UnitFlags {
     public static bool Turret(UnitType ut) {
         return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Turret);
     }
+    // openbw: bool unit_type_sprite_size_medium
+    //
+    // The unit type's sprite is the medium size.
+    public static bool SpriteSizeMedium(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.SpriteSizeMedium);
+    }
+    // openbw: bool unit_type_sprite_size_large
+    //
+    // The unit type's sprite is the large size.
+    public static bool SpriteSizeLarge(UnitType ut) {
+        return UnitTypeHasFlag(ut, (int)UnitTypeFlag.SpriteSizeLarge);
+    }
     // openbw: bool ut_worker(unit_type_autocast ut) const
     public static bool Worker(UnitType ut) {
         return UnitTypeHasFlag(ut, (int)UnitTypeFlag.Worker);

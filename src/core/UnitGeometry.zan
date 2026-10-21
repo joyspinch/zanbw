@@ -1,0 +1,236 @@
+using System;
+
+// openbw: the unit geometry, cargo and energy layer (bwgame.h)
+//
+// The unit-level queries that are neither a status bit nor an order:
+// how big a unit's sprite is, how much cargo space it has left, how
+// many fighters it carries, how much energy it holds, and whether a
+// tile is visible to it.
+//
+// The per-player state (the upgrade levels) and the tile map are
+// passed in rather than reached for, so this layer does not depend on
+// the game state.
+
+public class UnitGeometry {
+    // openbw: int unit_sprite_size(unit_type_autocast ut) const
+    //
+    // The sprite size class: 0 is small, 1 is medium, 2 is large.
+    public static int UnitSpriteSize(UnitType ut) {
+        if (UnitFlags.SpriteSizeMedium(ut)) return 1;
+        if (UnitFlags.SpriteSizeLarge(ut)) return 2;
+        return 0;
+    }
+
+    // openbw: rect unit_sprite_bounding_box(const unit_t* u) const
+    //
+    // The unit's box, in pixels, around its sprite position.
+    public static Xy UnitSpriteBoundingBoxFrom(Unit u) {
+        return new Xy(u.SpritePosition.X - u.UnitType.DimensionsFrom.X,
+                      u.SpritePosition.Y - u.UnitType.DimensionsFrom.Y);
+    }
+
+    public static Xy UnitSpriteBoundingBoxTo(Unit u) {
+        return new Xy(u.SpritePosition.X + u.UnitType.DimensionsTo.X + 1,
+                      u.SpritePosition.Y + u.UnitType.DimensionsTo.Y + 1);
+    }
+
+    // openbw: xy nearest_pos_in_rect(xy pos, rect area) const
+    //
+    // The point of the rectangle nearest to the position.
+    public static Xy NearestPosInRect(Xy pos, Xy from, Xy to) {
+        if (from.X > pos.X) pos.X = from.X;
+        else if (to.X < pos.X) pos.X = to.X;
+        if (from.Y > pos.Y) pos.Y = from.Y;
+        else if (to.Y < pos.Y) pos.Y = to.Y;
+        return pos;
+    }
+
+    // openbw: int unit_distance_to(const unit_t* u, xy pos) const
+    //
+    // The distance from the position to the nearest point of the
+    // unit's box.
+    public static int UnitDistanceTo(Unit u, Xy pos) {
+        Xy nearest = NearestPosInRect(pos, UnitSpriteBoundingBoxFrom(u), UnitSpriteBoundingBoxTo(u));
+        int dx = nearest.X - pos.X;
+        int dy = nearest.Y - pos.Y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        return XyMath.XyLength(new Xy(dx, dy));
+    }
+
+    // openbw: size_t unit_space_left(const unit_t* u) const
+    //
+    // How much cargo space the unit still has.
+    //
+    // The C++ subtracts the cargo of the loaded units from the space
+    // the unit type provides. The subtraction is unsigned there, so a
+    // unit carrying more than it provides wraps around; here the
+    // subtraction is done on ints, which is the same result for the
+    // values the game produces.
+    public static int UnitSpaceLeft(Unit u, List<Unit> loaded) {
+        int r = u.UnitType.SpaceProvided;
+        for (int i = 0; i < loaded.Count; ++i) {
+            r = r - loaded[i].UnitType.SpaceRequired;
+        }
+        return r;
+    }
+
+    // openbw: size_t unit_space_occupied(const unit_t* u) const
+    //
+    // How much cargo space the unit's cargo takes up.
+    public static int UnitSpaceOccupied(Unit u, List<Unit> loaded) {
+        int r = 0;
+        for (int i = 0; i < loaded.Count; ++i) {
+            r = r + loaded[i].UnitType.SpaceRequired;
+        }
+        return r;
+    }
+
+    // openbw: size_t unit_interceptor_count(const unit_t* u) const
+    //
+    // How many interceptors the unit carries, inside and out.
+    public static int UnitInterceptorCount(Unit u) {
+        if (!UnitTypeIds.UnitIsCarrier(u.UnitType)) return 0;
+        return u.CarrierInsideCount + u.CarrierOutsideCount;
+    }
+
+    // openbw: size_t unit_scarab_count(const unit_t* u) const
+    //
+    // How many scarabs the unit carries.
+    public static int UnitScarabCount(Unit u) {
+        if (!UnitTypeIds.UnitIsReaver(u.UnitType)) return 0;
+        return u.CarrierInsideCount;
+    }
+
+    // openbw: unit_t* unit_first_loaded_unit(const unit_t* u) const
+    //
+    // The first unit the unit is carrying, or null.
+    public static Unit UnitFirstLoadedUnit(Unit u, List<Unit> loaded) {
+        if (loaded.Count == 0) return null;
+        return loaded[0];
+    }
+
+    // openbw: const unit_t* unit_main_unit(const unit_t* u) const
+    //
+    // The unit itself, unless it is a turret, in which case it is the
+    // turret riding on it.
+    public static Unit UnitMainUnit(Unit u, Unit subunit) {
+        if (UnitFlags.Turret(u.UnitType)) return subunit;
+        return u;
+    }
+
+    // openbw: const unit_t* unit_attacking_unit(const unit_t* u) const
+    //
+    // The unit that does the attacking: the subunit if this is a
+    // turret, or the subunit is itself a turret, else the unit.
+    public static Unit UnitAttackingUnit(Unit u, Unit subunit) {
+        if (subunit != null && UnitFlags.Turret(subunit.UnitType)) return subunit;
+        return u;
+    }
+
+    // openbw: bool unit_has_addon(const unit_t* u, UnitTypes unit_type_id) const
+    //
+    // Whether the building has an addon of the given type.
+    public static bool UnitHasAddon(Unit u, Unit addon, int unitTypeId) {
+        if (!UnitFlags.Building(u.UnitType)) return false;
+        if (addon == null) return false;
+        if (!UnitTypeIds.Is(addon.UnitType, unitTypeId)) return false;
+        return true;
+    }
+
+    // openbw: bool unit_position_is_visible(const unit_t* u, xy position) const
+    //
+    // Whether the unit can see the position.
+    //
+    // The C++'s mask is inverted: a set bit in the tile's visible mask
+    // means the player cannot see it.
+    public static bool UnitPositionIsVisible(TileMap map, Unit u, Xy position) {
+        int mask = 1 << u.Owner;
+        return (map.TileAt(position).Visible & mask) == 0;
+    }
+
+    // openbw: bool unit_position_is_explored(const unit_t* u, xy position) const
+    //
+    // Whether the unit has explored the position. The mask is inverted
+    // here too.
+    public static bool UnitPositionIsExplored(TileMap map, Unit u, Xy position) {
+        int mask = 1 << u.Owner;
+        return (map.TileAt(position).Explored & mask) == 0;
+    }
+
+    // openbw: fp8 unit_cloak_energy_cost(const unit_t* u) const
+    //
+    // How much energy the unit spends per unit of cloaking.
+    //
+    // The C++ returns the literals 10_fp8 and 13_fp8. Those are raw
+    // value literals in openbw (the _fp8 suffix builds the value from
+    // its raw bits, not from an integer), so the values are 10/256 and
+    // 13/256 rather than 10 and 13. The same raw values are used here
+    // so the traces match bit for bit.
+    public static Fp UnitCloakEnergyCost(Unit u) {
+        int id = u.UnitType.Id;
+        if (id == (int)UnitTypes.Terran_Ghost
+            || id == (int)UnitTypes.Hero_Sarah_Kerrigan
+            || id == (int)UnitTypes.Hero_Alexei_Stukov
+            || id == (int)UnitTypes.Hero_Samir_Duran
+            || id == (int)UnitTypes.Hero_Infested_Duran
+            || id == (int)UnitTypes.Hero_Infested_Kerrigan) {
+            return Fp.FromRaw(10);
+        }
+        if (id == (int)UnitTypes.Terran_Wraith
+            || id == (int)UnitTypes.Hero_Tom_Kazansky) {
+            return Fp.FromRaw(13);
+        }
+        return Fp.FromRaw(0);
+    }
+
+    // openbw: fp8 unit_max_energy(const unit_t* u) const
+    //
+    // The unit's maximum energy: 250 for a hero, 250 with the energy
+    // upgrade, 200 otherwise.
+    //
+    // The C++ looks the energy upgrade up per unit type, so the caller
+    // passes whether the owner has that unit type's energy upgrade.
+    public static Fp UnitMaxEnergy(Unit u, bool hasEnergyUpgrade) {
+        if (UnitFlags.Hero(u.UnitType)) return Fp.Integer(250);
+        if (hasEnergyUpgrade) return Fp.Integer(250);
+        return Fp.Integer(200);
+    }
+
+    // openbw: the energy upgrade of the unit type, in unit_max_energy's
+    // switch. None when the unit type has no energy upgrade.
+    public static int UnitMaxEnergyUpgradeOf(UnitType ut) {
+        int id = ut.Id;
+        if (id == (int)UnitTypes.Terran_Ghost) return (int)UpgradeTypes.Moebius_Reactor;
+        if (id == (int)UnitTypes.Terran_Wraith) return (int)UpgradeTypes.Apollo_Reactor;
+        if (id == (int)UnitTypes.Terran_Science_Vessel) return (int)UpgradeTypes.Titan_Reactor;
+        if (id == (int)UnitTypes.Terran_Battlecruiser) return (int)UpgradeTypes.Colossus_Reactor;
+        if (id == (int)UnitTypes.Terran_Medic) return (int)UpgradeTypes.Caduceus_Reactor;
+        if (id == (int)UnitTypes.Zerg_Queen) return (int)UpgradeTypes.Gamete_Meiosis;
+        if (id == (int)UnitTypes.Zerg_Defiler) return (int)UpgradeTypes.Metasynaptic_Node;
+        if (id == (int)UnitTypes.Protoss_Corsair) return (int)UpgradeTypes.Argus_Jewel;
+        if (id == (int)UnitTypes.Protoss_Dark_Archon) return (int)UpgradeTypes.Argus_Talisman;
+        if (id == (int)UnitTypes.Protoss_High_Templar) return (int)UpgradeTypes.Khaydarin_Amulet;
+        if (id == (int)UnitTypes.Protoss_Arbiter) return (int)UpgradeTypes.Khaydarin_Core;
+        return (int)UpgradeTypes.None;
+    }
+
+    // openbw: size_t unit_queued_fighter_units(const unit_t* u) const
+    //
+    // How many fighters are in the unit's build queue.
+    public static int UnitQueuedFighterUnits(Unit u, List<UnitType> buildQueue) {
+        int r = 0;
+        for (int i = 0; i < buildQueue.Count; ++i) {
+            if (UnitTypeIds.UnitIsFighter(buildQueue[i])) r = r + 1;
+        }
+        return r;
+    }
+
+    // openbw: unit_id_32 get_unit_id_32(const unit_t* u) const
+    //
+    // The unit's 32-bit id: the index plus the generation.
+    public static int GetUnitId32(Unit u) {
+        if (u == null) return 0;
+        return (u.UnitIdIndex + 1) | ((u.UnitIdGeneration % (1 << 21)) << 11);
+    }
+}

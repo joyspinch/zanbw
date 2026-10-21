@@ -1,0 +1,164 @@
+using System;
+
+// The Zan side of the unit geometry / cargo / energy layer bed.
+//
+// The bed drives the same predicates over the same unit and player
+// configurations as the C++ bed
+// (tools/cppbed/unitgeom_bed.cpp), so the two traces must match byte
+// for byte.
+
+public class UnitGeomBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The unit types: the sprite size flags, the hero flag, the
+        // space, and the dimensions.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, (i % 7) + 1, new Xy(8, 8), new Xy(8, 8));
+            // The sprite size flags, so unit_sprite_size discriminates.
+            int flags = 0;
+            if (i % 3 == 0) flags = flags | (int)UnitTypeFlag.SpriteSizeMedium;
+            else if (i % 3 == 1) flags = flags | (int)UnitTypeFlag.SpriteSizeLarge;
+            // The hero flag, so unit_max_energy discriminates.
+            if (i % 7 == 0) flags = flags | (int)UnitTypeFlag.Hero;
+            // The building and turret flags, so unit_has_addon and
+            // unit_main_unit discriminate.
+            if (i % 5 == 0) flags = flags | (int)UnitTypeFlag.Building;
+            if (i % 11 == 0) flags = flags | (int)UnitTypeFlag.Turret;
+            t.Flags = flags;
+            t.RightClickAction = i % 6;
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            if (i % 4 == 0) t.GroupFlags = GroupFlag.Men;
+            else if (i % 4 == 1) t.GroupFlags = GroupFlag.Building;
+            else if (i % 4 == 2) t.GroupFlags = GroupFlag.Factory;
+            else t.GroupFlags = GroupFlag.Men | GroupFlag.Building;
+            t.SpaceProvided = (i % 11 == 0) ? 8 : 0;
+            t.SpaceRequired = (i % 13 == 0) ? 1 : 0;
+            t.DimensionsFrom = new Xy((i % 5) * 2, (i % 3) * 2);
+            t.DimensionsTo = new Xy((i % 4) * 2, (i % 6) * 2);
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // ---- the sprite size, the sprite box, the distance -----------------
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 3);
+            u.SpritePosition = new Xy((i % 7) * 16, (i % 5) * 16);
+
+            string line = "S " + i + " " + UnitGeometry.UnitSpriteSize(types[i]);
+            for (int d = 0; d < 4; ++d) {
+                Xy pos = new Xy((i * 3 + d * 11) % 64, (i * 5 + d * 7) % 64);
+                line = line + " " + UnitGeometry.UnitDistanceTo(u, pos);
+            }
+            Console.WriteLine(line);
+        }
+
+        // ---- the cargo, the fighters, the first loaded unit ----------------
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 3);
+            u.CarrierInsideCount = i % 4;
+            u.CarrierOutsideCount = (i + 1) % 3;
+
+            // The cargo: a few loaded units.
+            List<Unit> loaded = new List<Unit>();
+            for (int c = 0; c < 3; ++c) {
+                Unit lu = MakeUnit(types[(i + c * 13) % 229], i % 3);
+                loaded.Add(lu);
+            }
+
+            Console.WriteLine("C " + i + " "
+                + UnitGeometry.UnitSpaceLeft(u, loaded) + " "
+                + UnitGeometry.UnitSpaceOccupied(u, loaded) + " "
+                + UnitGeometry.UnitInterceptorCount(u) + " "
+                + UnitGeometry.UnitScarabCount(u) + " "
+                + B(UnitGeometry.UnitFirstLoadedUnit(u, loaded) != null));
+        }
+
+        // ---- the main unit, the attacking unit, the addon ------------------
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 3);
+
+            // The subunit, sometimes a turret.
+            Unit sub = MakeUnit(types[(i + 1) % 229], i % 3);
+            if (i % 2 == 1) u.SubunitId = 1;
+
+            // The addon, sometimes present.
+            Unit addon = MakeUnit(types[(i + 2) % 229], i % 3);
+            bool hasAddon = (i % 3) != 0;
+
+            Unit main = UnitGeometry.UnitMainUnit(u, (i % 2 == 1) ? sub : null);
+            Unit attacking = UnitGeometry.UnitAttackingUnit(u, (i % 2 == 1) ? sub : null);
+            Console.WriteLine("A " + i + " "
+                + (main != null ? main.UnitType.Id : -1) + " "
+                + (attacking != null ? attacking.UnitType.Id : -1) + " "
+                + B(UnitGeometry.UnitHasAddon(u, hasAddon ? addon : null, (int)UnitTypes.Terran_Siege_Tank_Siege_Mode)) + " "
+                + B(UnitGeometry.UnitHasAddon(u, hasAddon ? addon : null, (int)UnitTypes.Protoss_Nexus)) + " "
+                + B(UnitGeometry.UnitHasAddon(u, hasAddon ? addon : null, 0)));
+        }
+
+        // ---- the visibility, the energy, the queue, the id -----------------
+        TileMap map = new TileMap(16, 16);
+        for (int t = 0; t < 16 * 16; ++t) {
+            MapTile mt = new MapTile();
+            mt.Tile = new Tile();
+            map.Tiles.Add(mt);
+        }
+
+        for (int i = 0; i < 229; ++i) {
+            Unit u = MakeUnit(types[i], i % 9);
+            u.UnitIdIndex = i;
+            u.UnitIdGeneration = i * 3 + 1;
+
+            // The tiles: the visible and explored masks.
+            for (int t = 0; t < 16 * 16; ++t) {
+                map.Tiles[t].Tile.Visible = (t * 7 + i) & 0xff;
+                map.Tiles[t].Tile.Explored = (t * 11 + i) & 0xff;
+            }
+
+            // The energy upgrade: the C++ looks the energy upgrade up
+            // per unit type and then reads the owner's upgrade table,
+            // so only that one upgrade is set here.
+            bool energyUpgrade = false;
+            int energyUpgradeId = UnitGeometry.UnitMaxEnergyUpgradeOf(types[i]);
+            if (energyUpgradeId != (int)UpgradeTypes.None) {
+                energyUpgrade = ((i % 4) == 1);
+            }
+
+            // The build queue: a few unit types.
+            List<UnitType> queue = new List<UnitType>();
+            for (int c = 0; c < 4; ++c) {
+                queue.Add(types[(i + c * 7) % 229]);
+            }
+
+            Xy pos = new Xy((i % 4) * 32, (i % 3) * 32);
+            Console.WriteLine("V " + i + " "
+                + B(UnitGeometry.UnitPositionIsVisible(map, u, pos)) + " "
+                + B(UnitGeometry.UnitPositionIsExplored(map, u, pos)) + " "
+                + (int)UnitGeometry.UnitCloakEnergyCost(u).RawValue() + " "
+                + (int)UnitGeometry.UnitMaxEnergy(u, energyUpgrade).IntegerPart() + " "
+                + UnitGeometry.UnitQueuedFighterUnits(u, queue) + " "
+                + UnitGeometry.GetUnitId32(u) + " "
+                + UnitGeometry.UnitSpriteSize(types[i]));
+        }
+
+        return 0;
+    }
+
+    private static Unit MakeUnit(UnitType t, int owner) {
+        Unit u = new Unit();
+        u.UnitType = t;
+        u.Owner = owner;
+        u.OrderId = (int)Orders.Stop;
+        u.SpritePosition = new Xy(0, 0);
+        return u;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}
