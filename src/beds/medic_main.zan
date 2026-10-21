@@ -1,0 +1,134 @@
+using System;
+
+// The Zan side of the medic bed.
+//
+// The bed drives the same queries over the same unit types and unit
+// states as the C++ bed (tools/cppbed/medic_bed.cpp), so the two
+// traces must match byte for byte.
+
+public class MedicBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+
+        // The alliance table.
+        int[] alliances = new int[12 * 12];
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] unitTypeIds = new int[] {
+            (int)UnitTypes.Terran_Medic,
+            (int)UnitTypes.Terran_Marine,
+            (int)UnitTypes.Terran_SCV,
+            (int)UnitTypes.Terran_Command_Center,
+            (int)UnitTypes.Terran_Bunker,
+            (int)UnitTypes.Terran_Vulture,
+            (int)UnitTypes.Terran_Ghost,
+            (int)UnitTypes.Zerg_Zergling,
+            (int)UnitTypes.Zerg_Larva,
+            (int)UnitTypes.Zerg_Hydralisk,
+            (int)UnitTypes.Zerg_Lurker,
+            (int)UnitTypes.Zerg_Egg,
+            (int)UnitTypes.Zerg_Ultralisk,
+            (int)UnitTypes.Zerg_Ultralisk_Cavern,
+            (int)UnitTypes.Protoss_Zealot,
+            (int)UnitTypes.Protoss_Shuttle,
+            (int)UnitTypes.Protoss_Nexus,
+            (int)UnitTypes.Protoss_Carrier,
+            (int)UnitTypes.Protoss_Arbiter,
+        };
+        int unitTypeCount = unitTypeIds.Length;
+
+        int caseIndex = 0;
+        for (int ut = 0; ut < unitTypeCount; ++ut) {
+            for (int tu = 0; tu < unitTypeCount; ++tu) {
+                for (int sv = 0; sv < 16; ++sv) {
+                    // The medic.
+                    Unit u = new Unit();
+                    u.UnitType = types[unitTypeIds[ut]];
+                    u.Owner = caseIndex % 12;
+                    u.StatusFlagBits = 0;
+                    u.Sprite = new Sprite();
+                    u.Sprite.Owner = (u.Owner == 11) ? 0 : u.Owner;
+                    u.Hp = Fp.Integer(50);
+                    u.LockdownTimer = 0;
+                    u.StasisTimer = 0;
+                    u.MaelstromTimer = 0;
+
+                    // The target.
+                    Unit target = new Unit();
+                    target.UnitType = types[unitTypeIds[tu]];
+                    target.Owner = (caseIndex * 5 + 1) % 12;
+                    target.StatusFlagBits = 0;
+                    target.Sprite = new Sprite();
+                    target.Sprite.Owner = (target.Owner == 11) ? 0 : target.Owner;
+                    target.Hp = Fp.Integer(50);
+                    target.LockdownTimer = 0;
+                    target.StasisTimer = 0;
+                    target.MaelstromTimer = 0;
+
+                    // The unit types' flags, so the organic and building
+                    // rules have something to bite on.
+                    for (int i = 0; i < unitTypeCount; ++i) {
+                        UnitType t = types[unitTypeIds[i]];
+                        t.Flags = 0;
+                        if (i % 3 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Organic;
+                        if (i % 4 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Building;
+                        if (i % 5 == 0) t.Flags = t.Flags | (int)UnitTypeFlag.Flyer;
+                    }
+
+                    // The target's state.
+                    if ((sv + variant) % 4 == 0) target.StatusFlagBits = target.StatusFlagBits | (int)StatusFlag.Hallucination;
+                    if ((sv + variant) % 5 == 1) target.LockdownTimer = 1;
+                    if ((sv + variant) % 5 == 2) target.StasisTimer = 1;
+                    if ((sv + variant) % 5 == 3) target.MaelstromTimer = 1;
+                    if ((sv + variant) % 6 == 0) target.Hp = Fp.Integer(50);
+                    else if ((sv + variant) % 6 == 1) target.Hp = Fp.Integer(10);
+                    else target.Hp = Fp.Integer(25);
+                    if ((sv + variant) % 7 == 0) target.Owner = 8;
+                    else if ((sv + variant) % 7 == 1) target.Owner = 11;
+                    else if ((sv + variant) % 7 == 2) target.Owner = 9;
+                    if ((sv + variant) % 8 == 0) u.Owner = 8;
+                    else if ((sv + variant) % 8 == 1) u.Owner = 11;
+                    else if ((sv + variant) % 8 == 2) u.Owner = 9;
+
+                    // The alliance table.
+                    for (int o = 0; o < 12; ++o) {
+                        for (int o2 = 0; o2 < 12; ++o2) {
+                            alliances[o * 12 + o2] = (o == o2) ? 1 : 0;
+                        }
+                    }
+                    if ((sv + variant) % 3 == 0) {
+                        int other = (target.Owner == 11) ? target.Sprite.Owner : target.Owner;
+                        alliances[u.Owner * 12 + other] = 1;
+                    }
+
+                    bool canHeal = Medic.MedicCanHealTarget(u, target, alliances);
+
+                    Console.WriteLine("H " + caseIndex + " " + ut + " " + tu + " " + sv
+                        + " " + target.UnitType.Id
+                        + " " + u.Owner + " " + target.Owner
+                        + " " + target.StatusFlagBits
+                        + " " + target.LockdownTimer + " " + target.StasisTimer + " " + target.MaelstromTimer
+                        + " " + target.Hp.IntegerPart()
+                        + " " + target.UnitType.Hitpoints.IntegerPart()
+                        + " " + alliances[u.Owner * 12 + ((target.Owner == 11) ? target.Sprite.Owner : target.Owner)]
+                        + " " + (canHeal ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+}

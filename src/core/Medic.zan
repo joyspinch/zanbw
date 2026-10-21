@@ -1,0 +1,46 @@
+using System;
+
+// openbw: the medic layer (bwgame.h)
+//
+// The C++'s medic_can_heal_target decides whether a medic may heal a
+// given target. It has eight gates:
+//
+//   1. the target has to exist and it has to be somebody else
+//   2. the target has to be organic and not a building
+//   3. the target must not be flying and must not be a hallucination
+//   4. the target must be hurt
+//   5. the target must not be an enemy
+//   6. both owners have to be real players, not the neutral ones
+//   7. the target must not be disabled
+//
+// The C++'s unit_target_is_enemy reads the alliance table, so the table
+// is passed in here rather than reaching for the game state.
+public class Medic {
+    // openbw: bool unit_target_is_enemy(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the target is an enemy of the unit's owner. The neutral
+    // owner (11) is resolved through the sprite's owner.
+    public static bool UnitTargetIsEnemy(Unit u, Unit target, int[] alliances) {
+        int nOwner = target.Owner;
+        if (nOwner == 11) nOwner = target.Sprite.Owner;
+        return alliances[u.Owner * 12 + nOwner] == 0;
+    }
+
+    // openbw: bool medic_can_heal_target(const unit_t* u, const unit_t* target) const
+    //
+    // Whether the medic may heal the target.
+    public static bool MedicCanHealTarget(Unit u, Unit target, int[] alliances) {
+        if (target == null) return false;
+        if (target == u) return false;
+        if (!UnitFlags.Organic(target.UnitType)) return false;
+        if (UnitFlags.Building(target.UnitType)) return false;
+        if (UnitFlags.Flying(target)) return false;
+        if (UnitFlags.Hallucination(target)) return false;
+        if (target.Hp.Ceil() >= target.UnitType.Hitpoints) return false;
+        if (UnitTargetIsEnemy(u, target, alliances)) return false;
+        if (u.Owner >= 8) return false;
+        if (target.Owner >= 8) return false;
+        if (UnitStatus.UnitIsDisabled(target)) return false;
+        return true;
+    }
+}
