@@ -1,0 +1,44 @@
+using System;
+
+// openbw: the weapon targeting layer (bwgame.h)
+//
+// The C++'s weapon_can_target_unit decides whether a weapon may be
+// fired at a target. The weapon's target_flags hold the rules:
+//
+//   0x01   may target flying units
+//   0x02   may target ground units
+//   0x04   only mechanical units
+//   0x08   only organic units
+//   0x10   not buildings
+//   0x20   not robotic units
+//   0x40   may target nothing (the empty target case)
+//   0x80   only mechanical or organic units
+//   0x100  only the shooter's own units
+public class WeaponTargeting {
+    // openbw: bool weapon_can_target_unit(const weapon_type_t* weapon, const unit_t* target) const
+    //
+    // Whether the weapon may be fired at the target.
+    public static bool WeaponCanTargetUnit(WeaponType weapon, Unit target) {
+        if (target == null) return (weapon.TargetFlags & 0x40) != 0;
+        if (UnitFlags.Invincible(target)) return false;
+        if ((~weapon.TargetFlags & (UnitFlags.Flying(target) ? 1 : 2)) != 0) return false;
+        if ((weapon.TargetFlags & 4) != 0 && !UnitFlags.Mechanical(target.UnitType)) return false;
+        if ((weapon.TargetFlags & 8) != 0 && !UnitFlags.Organic(target.UnitType)) return false;
+        if ((weapon.TargetFlags & 0x10) != 0 && UnitFlags.Building(target.UnitType)) return false;
+        if ((weapon.TargetFlags & 0x20) != 0 && UnitFlags.Robotic(target.UnitType)) return false;
+        if ((weapon.TargetFlags & 0x80) != 0
+            && !UnitFlags.Mechanical(target.UnitType)
+            && !UnitFlags.Organic(target.UnitType)) return false;
+        return true;
+    }
+
+    // openbw: bool weapon_can_target_unit(const weapon_type_t* weapon, const unit_t* target, const unit_t* source_unit) const
+    //
+    // Whether the weapon may be fired at the target by the source unit.
+    public static bool WeaponCanTargetUnitBy(WeaponType weapon, Unit target, Unit sourceUnit) {
+        if (!WeaponCanTargetUnit(weapon, target)) return false;
+        if (target != null && (weapon.TargetFlags & 0x100) != 0
+            && target.Owner != sourceUnit.Owner) return false;
+        return true;
+    }
+}
