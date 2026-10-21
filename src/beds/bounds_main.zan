@@ -1,0 +1,142 @@
+using System;
+
+// The Zan side of the rectangle geometry bed.
+//
+// The bed drives the same queries over the same rectangles, points,
+// unit types and map sizes as the C++ bed (tools/cppbed/bounds_bed.cpp),
+// so the two traces must match byte for byte.
+
+public class BoundsBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id. Only the first one's dimensions are
+        // changed by the bed.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        int[] coords = new int[] {
+            -64, -33, -32, -1, 0, 1, 2, 15, 16, 31, 32, 33, 63, 64,
+            127, 128, 255, 256, 511, 512, 513,
+        };
+        int coordCount = coords.Length;
+
+        int caseIndex = 0;
+
+        // The map sizes.
+        int[] mapWidths = new int[] { 64, 128, 256, 512, 1024 };
+        int[] mapHeights = new int[] { 64, 128, 256, 512, 1024 };
+        int mapSizeCount = mapWidths.Length;
+
+        // The bounds tests.
+        for (int ms = 0; ms < mapSizeCount; ++ms) {
+            int mapWidth = mapWidths[ms];
+            int mapHeight = mapHeights[ms];
+            for (int i = 0; i < coordCount; ++i) {
+                for (int j = 0; j < coordCount; ++j) {
+                    Rect area = new Rect(new Xy(coords[i], coords[j]),
+                                         new Xy(coords[(j + 1) % coordCount], coords[(i + 1) % coordCount]));
+                    Rect bounds = Bounds.MapBounds(mapWidth, mapHeight);
+                    Console.WriteLine("B " + caseIndex + " " + ms
+                        + " " + area.From.X + " " + area.From.Y + " " + area.To.X + " " + area.To.Y
+                        + " " + bounds.From.X + " " + bounds.From.Y + " " + bounds.To.X + " " + bounds.To.Y
+                        + " " + (Bounds.IsInMapBounds(area, mapWidth, mapHeight) ? 1 : 0)
+                        + " " + (Bounds.IsInInnerMapBounds(area, mapWidth, mapHeight) ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The bounds tests against a fixed bounds rect.
+        {
+            Rect bounds = new Rect(new Xy(0, 0), new Xy(256, 256));
+            for (int i = 0; i < coordCount; ++i) {
+                for (int j = 0; j < coordCount; ++j) {
+                    Rect area = new Rect(new Xy(coords[i], coords[j]),
+                                         new Xy(coords[(j + 2) % coordCount], coords[(i + 3) % coordCount]));
+                    Console.WriteLine("B2 " + caseIndex
+                        + " " + area.From.X + " " + area.From.Y + " " + area.To.X + " " + area.To.Y
+                        + " " + bounds.From.X + " " + bounds.From.Y + " " + bounds.To.X + " " + bounds.To.Y
+                        + " " + (Bounds.IsInBounds(area, bounds) ? 1 : 0)
+                        + " " + (Bounds.IsInInnerBounds(area, bounds) ? 1 : 0)
+                        + " " + (Bounds.IsInBounds(area.From, bounds) ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The point bounds tests.
+        {
+            Rect bounds = new Rect(new Xy(0, 0), new Xy(256, 256));
+            int mapWidth = 512;
+            int mapHeight = 512;
+            for (int i = 0; i < coordCount; ++i) {
+                for (int j = 0; j < coordCount; ++j) {
+                    Xy pos = new Xy(coords[i], coords[j]);
+                    Console.WriteLine("P " + caseIndex + " " + pos.X + " " + pos.Y
+                        + " " + (Bounds.IsInBounds(pos, bounds) ? 1 : 0)
+                        + " " + (Bounds.IsInInnerBounds(pos, bounds) ? 1 : 0)
+                        + " " + (Bounds.IsInMapBounds(pos, mapWidth, mapHeight) ? 1 : 0)
+                        + " " + (Bounds.IsInMapBoundsForType(types[0], pos, mapWidth, mapHeight) ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The bounding boxes, for a spread of unit type dimensions.
+        int[][] dims = new int[][] {
+            new int[] { 0, 0, 0, 0 }, new int[] { 1, 1, 1, 1 },
+            new int[] { 4, 4, 4, 4 }, new int[] { 8, 8, 8, 8 },
+            new int[] { 16, 16, 16, 16 }, new int[] { 16, 8, 8, 16 },
+            new int[] { 32, 32, 32, 32 }, new int[] { 4, 8, 12, 16 },
+            new int[] { 24, 12, 36, 24 }, new int[] { 64, 64, 64, 64 },
+        };
+        for (int d = 0; d < dims.Length; ++d) {
+            types[0].DimensionsFrom = new Xy(dims[d][0], dims[d][1]);
+            types[0].DimensionsTo = new Xy(dims[d][2], dims[d][3]);
+            UnitType ut = types[0];
+            for (int i = 0; i < coordCount; ++i) {
+                for (int j = 0; j < coordCount; ++j) {
+                    Xy origin = new Xy(coords[i], coords[j]);
+                    PrintRect("BB", caseIndex, Bounds.UnitTypeBoundingBox(ut));
+                    PrintRect("BI", caseIndex, Bounds.UnitTypeInnerBoundingBox(ut));
+                    PrintRect("BO", caseIndex, Bounds.UnitTypeBoundingBox(ut, origin));
+                    PrintRect("IO", caseIndex, Bounds.UnitTypeInnerBoundingBox(ut, origin));
+                    Xy restricted = Bounds.RestrictUnitPosToBounds(origin, ut, Bounds.MapBounds(512, 512));
+                    Console.WriteLine("RS " + caseIndex + " " + restricted.X + " " + restricted.Y
+                        + " " + (Bounds.IsInnerBbMoveTargetInValidBounds(
+                                Bounds.UnitTypeBoundingBox(ut, origin), 512, 512) ? 1 : 0));
+                    Xy mapped = Bounds.RestrictPosToMapBounds(origin, 512, 512);
+                    Console.WriteLine("PM " + caseIndex + " " + mapped.X + " " + mapped.Y);
+                    Xy moved = Bounds.RestrictMoveTargetToValidBounds(ut, origin, 512, 512);
+                    Console.WriteLine("MV " + caseIndex + " " + moved.X + " " + moved.Y);
+                    PrintRect("SQ", caseIndex, Bounds.SquareAt(origin, 16));
+                    PrintRect("TR", caseIndex, Bounds.TranslateRect(Bounds.MapBounds(512, 512), origin));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        // The map bounds.
+        {
+            PrintRect("MB", caseIndex, Bounds.MapBounds(512, 512));
+            caseIndex = caseIndex + 1;
+        }
+
+        return 0;
+    }
+
+    private static void PrintRect(string tag, int caseIndex, Rect r) {
+        Console.WriteLine(tag + " " + caseIndex
+            + " " + r.From.X + " " + r.From.Y + " " + r.To.X + " " + r.To.Y);
+    }
+}

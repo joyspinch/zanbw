@@ -1,0 +1,230 @@
+using System;
+
+// openbw: the rectangle geometry layer (bwgame.h)
+//
+// The C++'s rect is a pair of corners, and the bounds tests are a
+// family of small predicates over it. They differ in one important
+// way: some are inclusive of the far edge and some are exclusive.
+//
+//   is_in_bounds         the far edge is exclusive
+//   is_in_inner_bounds   the far edge is inclusive
+//
+// is_in_map_bounds and is_in_inner_map_bounds are the same idea but
+// against the map's own size, and they differ from each other in
+// whether the far edge is allowed to reach the map's edge.
+//
+// The C++'s rect also knows how to add another rect, which is how the
+// inner-bounds tests get the map's bounds shrunk by 32 pixels at the
+// bottom.
+public class Rect {
+    public Xy From;
+    public Xy To;
+
+    public Rect(Xy from, Xy to) { From = from; To = to; }
+
+    // openbw: rect_t::operator+(const rect_t& n)
+    //
+    // The rect shifted by the other one. The C++'s rect addition adds
+    // the corners, so it is a shift and not a union.
+    public Rect Add(Rect o) {
+        return new Rect(new Xy(From.X + o.From.X, From.Y + o.From.Y),
+                        new Xy(To.X + o.To.X, To.Y + o.To.Y));
+    }
+
+    // openbw: rect operator+(const rect& r, const xy& o)
+    //
+    // The rect moved by the point.
+    public Rect Add(Xy o) {
+        return new Rect(new Xy(From.X + o.X, From.Y + o.Y), new Xy(To.X + o.X, To.Y + o.Y));
+    }
+}
+
+public class Bounds {
+    // openbw: bool is_in_map_bounds(const unit_type_t* unit_type, xy pos) const
+    //
+    // Whether the unit type's box, centred on the position, is inside
+    // the map.
+    public static bool IsInMapBoundsForType(UnitType ut, Xy pos, int mapWidth, int mapHeight) {
+        if (pos.X - ut.DimensionsFrom.X < 0) return false;
+        if (pos.Y - ut.DimensionsFrom.Y < 0) return false;
+        if ((uint)(pos.X + ut.DimensionsTo.X) >= (uint)mapWidth) return false;
+        if ((uint)(pos.Y + ut.DimensionsTo.Y) >= (uint)mapHeight) return false;
+        return true;
+    }
+
+    // openbw: bool is_in_map_bounds(rect area) const
+    //
+    // Whether the area is inside the map. The far edge may reach the
+    // map's edge exactly.
+    public static bool IsInMapBounds(Rect area, int mapWidth, int mapHeight) {
+        if (area.From.X < 0) return false;
+        if ((uint)area.To.X > (uint)mapWidth) return false;
+        if (area.From.Y < 0) return false;
+        if ((uint)area.To.Y > (uint)mapHeight) return false;
+        return true;
+    }
+
+    // openbw: bool is_in_inner_map_bounds(rect area) const
+    //
+    // Whether the area is inside the map. The far edge may not reach
+    // the map's edge.
+    public static bool IsInInnerMapBounds(Rect area, int mapWidth, int mapHeight) {
+        if (area.From.X < 0) return false;
+        if ((uint)area.To.X >= (uint)mapWidth) return false;
+        if (area.From.Y < 0) return false;
+        if ((uint)area.To.Y >= (uint)mapHeight) return false;
+        return true;
+    }
+
+    // openbw: bool is_in_map_bounds(xy pos) const
+    //
+    // Whether the point is inside the map.
+    public static bool IsInMapBounds(Xy pos, int mapWidth, int mapHeight) {
+        return (uint)pos.X < (uint)mapWidth && (uint)pos.Y < (uint)mapHeight;
+    }
+
+    // openbw: bool is_in_bounds(rect area, rect bounds) const
+    //
+    // Whether the area is inside the bounds. The far edge is
+    // exclusive.
+    public static bool IsInBounds(Rect area, Rect bounds) {
+        if (area.From.X < bounds.From.X) return false;
+        if (area.To.X > bounds.To.X) return false;
+        if (area.From.Y < bounds.From.Y) return false;
+        if (area.To.Y > bounds.To.Y) return false;
+        return true;
+    }
+
+    // openbw: bool is_in_inner_bounds(rect area, rect bounds) const
+    //
+    // Whether the area is inside the bounds. The far edge is
+    // inclusive.
+    public static bool IsInInnerBounds(Rect area, Rect bounds) {
+        if (area.From.X < bounds.From.X) return false;
+        if (area.To.X >= bounds.To.X) return false;
+        if (area.From.Y < bounds.From.Y) return false;
+        if (area.To.Y >= bounds.To.Y) return false;
+        return true;
+    }
+
+    // openbw: bool is_in_bounds(xy pos, rect bounds) const
+    //
+    // Whether the point is inside the bounds. The far edge is
+    // exclusive.
+    public static bool IsInBounds(Xy pos, Rect bounds) {
+        return pos.X >= bounds.From.X && pos.Y >= bounds.From.Y
+            && pos.X < bounds.To.X && pos.Y < bounds.To.Y;
+    }
+
+    // openbw: bool is_in_inner_bounds(xy pos, rect bounds) const
+    //
+    // Whether the point is inside the bounds. The far edge is
+    // inclusive.
+    public static bool IsInInnerBounds(Xy pos, Rect bounds) {
+        return pos.X >= bounds.From.X && pos.Y >= bounds.From.Y
+            && pos.X <= bounds.To.X && pos.Y <= bounds.To.Y;
+    }
+
+    // openbw: rect translate_rect(rect src, xy translation) const
+    public static Rect TranslateRect(Rect src, Xy translation) {
+        return new Rect(new Xy(src.From.X + translation.X, src.From.Y + translation.Y),
+                        new Xy(src.To.X + translation.X, src.To.Y + translation.Y));
+    }
+
+    // openbw: rect square_at(xy pos, int half_width) const
+    public static Rect SquareAt(Xy pos, int halfWidth) {
+        return new Rect(new Xy(pos.X - halfWidth, pos.Y - halfWidth),
+                        new Xy(pos.X + halfWidth, pos.Y + halfWidth));
+    }
+
+    // openbw: rect unit_type_bounding_box(const unit_type_t* unit_type) const
+    public static Rect UnitTypeBoundingBox(UnitType ut) {
+        return new Rect(new Xy(-ut.DimensionsFrom.X, -ut.DimensionsFrom.Y),
+                        new Xy(ut.DimensionsTo.X + 1, ut.DimensionsTo.Y + 1));
+    }
+
+    // openbw: rect unit_type_bounding_box(const unit_type_t* unit_type, xy origin) const
+    public static Rect UnitTypeBoundingBox(UnitType ut, Xy origin) {
+        return new Rect(new Xy(origin.X - ut.DimensionsFrom.X, origin.Y - ut.DimensionsFrom.Y),
+                        new Xy(origin.X + ut.DimensionsTo.X + 1, origin.Y + ut.DimensionsTo.Y + 1));
+    }
+
+    // openbw: rect unit_bounding_box(const unit_t* u, xy origin) const
+    public static Rect UnitBoundingBox(Unit u, Xy origin) {
+        return UnitTypeBoundingBox(u.UnitType, origin);
+    }
+
+    // openbw: rect unit_sprite_bounding_box(const unit_t* u) const
+    public static Rect UnitSpriteBoundingBox(Unit u) {
+        Xy pos = u.SpritePosition;
+        return new Rect(new Xy(pos.X - u.UnitType.DimensionsFrom.X, pos.Y - u.UnitType.DimensionsFrom.Y),
+                        new Xy(pos.X + u.UnitType.DimensionsTo.X + 1, pos.Y + u.UnitType.DimensionsTo.Y + 1));
+    }
+
+    // openbw: rect unit_type_inner_bounding_box(const unit_type_t* unit_type) const
+    public static Rect UnitTypeInnerBoundingBox(UnitType ut) {
+        return new Rect(new Xy(-ut.DimensionsFrom.X, -ut.DimensionsFrom.Y),
+                        new Xy(ut.DimensionsTo.X, ut.DimensionsTo.Y));
+    }
+
+    // openbw: rect unit_type_inner_bounding_box(const unit_type_t* unit_type, xy origin) const
+    public static Rect UnitTypeInnerBoundingBox(UnitType ut, Xy origin) {
+        return new Rect(new Xy(origin.X - ut.DimensionsFrom.X, origin.Y - ut.DimensionsFrom.Y),
+                        new Xy(origin.X + ut.DimensionsTo.X, origin.Y + ut.DimensionsTo.Y));
+    }
+
+    // openbw: rect unit_inner_bounding_box(const unit_t* u, xy origin) const
+    public static Rect UnitInnerBoundingBox(Unit u, Xy origin) {
+        return UnitTypeInnerBoundingBox(u.UnitType, origin);
+    }
+
+    // openbw: rect unit_sprite_inner_bounding_box(const unit_t* u) const
+    public static Rect UnitSpriteInnerBoundingBox(Unit u) {
+        Xy pos = u.SpritePosition;
+        return new Rect(new Xy(pos.X - u.UnitType.DimensionsFrom.X, pos.Y - u.UnitType.DimensionsFrom.Y),
+                        new Xy(pos.X + u.UnitType.DimensionsTo.X, pos.Y + u.UnitType.DimensionsTo.Y));
+    }
+
+    // openbw: rect map_bounds() const
+    public static Rect MapBounds(int mapWidth, int mapHeight) {
+        return new Rect(new Xy(0, 0), new Xy(mapWidth, mapHeight));
+    }
+
+    // openbw: xy restrict_unit_pos_to_bounds(xy pos, const unit_type_t* ut, rect bounds) const
+    //
+    // The position moved so the unit's box fits inside the bounds.
+    public static Xy RestrictUnitPosToBounds(Xy pos, UnitType ut, Rect bounds) {
+        Rect bb = UnitTypeBoundingBox(ut, pos);
+        if (bb.From.X < bounds.From.X) pos.X = pos.X - (bb.From.X - bounds.From.X);
+        else if (bb.To.X >= bounds.To.X) pos.X = pos.X - (bb.To.X - bounds.To.X);
+        if (bb.From.Y < bounds.From.Y) pos.Y = pos.Y - (bb.From.Y - bounds.From.Y);
+        else if (bb.To.Y >= bounds.To.Y) pos.Y = pos.Y - (bb.To.Y - bounds.To.Y);
+        return pos;
+    }
+
+    // openbw: xy restrict_pos_to_map_bounds(xy pos) const
+    //
+    // The position clamped to the map.
+    public static Xy RestrictPosToMapBounds(Xy pos, int mapWidth, int mapHeight) {
+        if (pos.X < 0) pos.X = 0;
+        else if (pos.X >= mapWidth) pos.X = mapWidth - 1;
+        if (pos.Y < 0) pos.Y = 0;
+        else if (pos.Y >= mapHeight) pos.Y = mapHeight - 1;
+        return pos;
+    }
+
+    // openbw: bool is_inner_bb_move_target_in_valid_bounds(rect bb) const
+    //
+    // Whether the box is inside the map's inner bounds, which are the
+    // map's bounds shrunk by 32 pixels at the bottom.
+    public static bool IsInnerBbMoveTargetInValidBounds(Rect bb, int mapWidth, int mapHeight) {
+        Rect bounds = MapBounds(mapWidth, mapHeight).Add(new Rect(new Xy(0, 0), new Xy(0, -32)));
+        return IsInInnerBounds(bb, bounds);
+    }
+
+    // openbw: xy restrict_move_target_to_valid_bounds(unit_type_autocast ut, xy move_target) const
+    public static Xy RestrictMoveTargetToValidBounds(UnitType ut, Xy moveTarget, int mapWidth, int mapHeight) {
+        Rect bounds = MapBounds(mapWidth, mapHeight).Add(new Rect(new Xy(0, 0), new Xy(0, -32)));
+        return RestrictUnitPosToBounds(moveTarget, ut, bounds);
+    }
+}
