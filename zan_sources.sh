@@ -46,6 +46,7 @@ ZAN_SOURCES_CORE=(
     src/core/UnitTech.zan
     src/core/TechTypes.zan
     src/core/UnitFlags.zan
+    src/core/Trigger.zan
 )
 
 # The regions layer: the tile map and the region decomposition.

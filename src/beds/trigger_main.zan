@@ -1,0 +1,184 @@
+using System;
+
+// The Zan side of the trigger layer bed.
+//
+// The bed drives the same predicates over the same player, alliance
+// and unit configurations as the C++ bed
+// (tools/cppbed/trigger_bed.cpp), so the two traces must match byte
+// for byte.
+
+public class TriggerBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        // The unit types.
+        List<UnitType> types = new List<UnitType>();
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, (i % 7) + 1, new Xy(8, 8), new Xy(8, 8));
+            t.Flags = (i * 0x9 + variant * 0x37) & 0x7fffffff;
+            t.RightClickAction = i % 6;
+            t.Hitpoints = Fp.Integer((i % 5) * 25 + 25);
+            // The group flags, so the group unit ids discriminate.
+            if (i % 4 == 0) t.GroupFlags = GroupFlag.Men;
+            else if (i % 4 == 1) t.GroupFlags = GroupFlag.Building;
+            else if (i % 4 == 2) t.GroupFlags = GroupFlag.Factory;
+            else t.GroupFlags = GroupFlag.Men | GroupFlag.Building;
+            t.SpaceProvided = (i % 11 == 0) ? 8 : 0;
+            t.SpaceRequired = (i % 13 == 0) ? 1 : 0;
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // ---- the player selectors --------------------------------------------
+        for (int c = 0; c < 8; ++c) {
+            Player[] players = new Player[12];
+            int[][] alliances = new int[12][];
+            for (int p = 0; p < 12; ++p) {
+                players[p] = new Player();
+                alliances[p] = new int[12];
+            }
+            for (int p = 0; p < 12; ++p) {
+                if (p < 8) {
+                    int k = (p + c) % 5;
+                    if (k == 0) players[p].Controller = PlayerController.Occupied;
+                    else if (k == 1) players[p].Controller = PlayerController.ComputerGame;
+                    else if (k == 2) players[p].Controller = PlayerController.Neutral;
+                    else if (k == 3) players[p].Controller = PlayerController.RescuePassive;
+                    else players[p].Controller = PlayerController.Open;
+                    // Some of the occupied players are defeated.
+                    if (players[p].Controller == PlayerController.Occupied && (p + c) % 7 == 0) players[p].VictoryState = 1;
+                } else {
+                    players[p].Controller = PlayerController.Open;
+                }
+                players[p].Force = (p + c) % 5;
+            }
+            for (int a = 0; a < 12; ++a) {
+                for (int b = 0; b < 12; ++b) alliances[a][b] = (a + b + c) % 3;
+            }
+
+            for (int owner = 0; owner < 4; ++owner) {
+                for (int player = 0; player < 27; ++player) {
+                    string line = "P " + c + " " + owner + " " + player;
+                    for (int n = 0; n < 12; ++n) {
+                        line = line + " " + B(Trigger.TriggerPlayersPred(players, alliances, owner, player, n));
+                    }
+                    Console.WriteLine(line);
+                }
+            }
+        }
+
+        // ---- the count comparison --------------------------------------------
+        for (int c = 0; c < 8; ++c) {
+            for (int numN = 0; numN < 4; ++numN) {
+                for (int count = 0; count < 6; ++count) {
+                    for (int countN = 0; countN < 6; ++countN) {
+                        TriggerCondition cond = new TriggerCondition();
+                        cond.NumN = numN;
+                        cond.CountN = countN;
+                        Console.WriteLine("C " + c + " " + numN + " " + count + " " + countN + " "
+                            + B(Trigger.TriggerCountComparison(cond, count)));
+                    }
+                }
+            }
+        }
+
+        // ---- the unit predicate ----------------------------------------------
+        {
+            Player[] players = new Player[12];
+            int[][] alliances = new int[12][];
+            for (int p = 0; p < 12; ++p) {
+                players[p] = new Player();
+                alliances[p] = new int[12];
+                players[p].Controller = p < 8 ? PlayerController.Occupied : PlayerController.Open;
+                players[p].Force = p % 5;
+            }
+            for (int a = 0; a < 12; ++a) {
+                for (int b = 0; b < 12; ++b) alliances[a][b] = (a + b) % 3;
+            }
+
+            for (int i = 0; i < types.Count; ++i) {
+                for (int owner = 0; owner < 3; ++owner) {
+                    Unit u = new Unit();
+                    u.UnitType = types[i];
+                    u.Owner = owner;
+                    u.StatusFlagBits = (i * 0x1041) & 0x7fffffff;
+                    // The order type decides whether the unit is dying.
+                    u.OrderId = (i % 3) != 0 ? (int)Orders.Stop : (int)Orders.Die;
+
+                    for (int player = 0; player < 3; ++player) {
+                        for (int uid = 0; uid < 5; ++uid) {
+                            // The group ids are 229 - 232; the first few
+                            // real unit types are used for the rest.
+                            int testId = uid < 3 ? (int)UnitTypes.Terran_Marine + uid : 229 + uid;
+                            // The C++ throws on a powerup that reaches the
+                            // unit predicate; the port does the same, so the
+                            // exception is caught here and reported the same
+                            // way on both sides.
+                            try {
+                                Console.WriteLine("U " + i + " " + owner + " " + player + " " + testId + " "
+                                    + B(Trigger.TriggerUnitPred(u, new List<Unit>(), players, alliances, owner, player, testId, false, null)));
+                            } catch (Exception e) {
+                                Console.WriteLine("U " + i + " " + owner + " " + player + " " + testId + " E");
+                                return 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- the command count ------------------------------------------------
+        {
+            Player[] players = new Player[12];
+            int[][] alliances = new int[12][];
+            for (int p = 0; p < 12; ++p) {
+                players[p] = new Player();
+                alliances[p] = new int[12];
+                players[p].Controller = p < 8 ? PlayerController.Occupied : PlayerController.Open;
+                players[p].Force = p % 5;
+            }
+            for (int a = 0; a < 12; ++a) {
+                for (int b = 0; b < 12; ++b) alliances[a][b] = (a + b) % 3;
+            }
+
+            // The counters: the per-player unit counts, and the four
+            // per-player sums.
+            TriggerCounters counters = new TriggerCounters();
+            for (int p = 0; p < 12; ++p) {
+                for (int u = 0; u < 228; ++u) {
+                    counters.UnitCounts.Add((p * 3 + u) % 5);
+                    counters.CompletedUnitCounts.Add((p + u) % 4);
+                }
+                counters.FactoryCounts[p] = p % 3;
+                counters.BuildingCounts[p] = (p + 1) % 3;
+                counters.NonBuildingCounts[p] = (p + 2) % 3;
+                counters.CompletedFactoryCounts[p] = (p + 1) % 2;
+                counters.CompletedBuildingCounts[p] = (p + 2) % 2;
+                counters.CompletedNonBuildingCounts[p] = p % 2;
+            }
+
+            for (int owner = 0; owner < 3; ++owner) {
+                for (int player = 0; player < 22; ++player) {
+                    for (int uid = 0; uid < 4; ++uid) {
+                        int testId = uid < 2 ? (int)UnitTypes.Terran_Marine + uid : 229 + uid;
+                        for (int completed = 0; completed < 2; ++completed) {
+                            int count = Trigger.TriggerCommandCount(counters, players, alliances, owner, player, testId, completed != 0);
+                            int opponents = Trigger.TriggerOpponentCount(players, alliances, owner, player);
+                            Console.WriteLine("K " + owner + " " + player + " " + testId + " " + completed + " " + count + " " + opponents);
+                        }
+                    }
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private static string B(bool v) {
+        if (v) return "1";
+        return "0";
+    }
+}

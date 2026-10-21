@@ -1,0 +1,260 @@
+using System;
+
+// openbw: the trigger layer (bwgame.h)
+//
+// The trigger system's counting and matching. A trigger condition
+// asks a question like "does the owner have at least N of this unit",
+// and the answer is a count plus a comparison.
+//
+// The pieces here, in the order the C++'s test_trigger_condition uses
+// them:
+//
+//   1. trigger_players_pred: which player slots a condition refers
+//      to. The player index in a condition is not a slot but a
+//      selector: 13 means "the current player", 14 means "enemies",
+//      17 means "everyone", and so on.
+//   2. trigger_unit_pred: whether a single unit counts towards a
+//      condition's unit id.
+//   3. trigger_count_comparison: the comparison itself, with the
+//      condition's num_n picking >=, <= or ==.
+//   4. trigger_command_count: the count of units a condition sees.
+//
+// The per-player tables (the unit counts, the alliances, the player
+// records) are passed in rather than reached for, so this layer does
+// not depend on the game state.
+
+// openbw: namespace GroupFlags
+//
+// The unit type group bits. A condition's unit id can name a group
+// instead of a unit type: 229 means any unit, 230 means a man, 231
+// means a building, 232 means a factory.
+public class GroupFlag {
+    public const int Zerg = 1;
+    public const int Terran = 2;
+    public const int Protoss = 4;
+    public const int Men = 8;
+    public const int Building = 16;
+    public const int Factory = 32;
+    public const int Independant = 64;
+    public const int Neutral = 128;
+}
+
+// openbw: the trigger condition
+//
+// One condition of a trigger: what to count, where to count it, and
+// how to compare.
+public class TriggerCondition {
+    // openbw: trigger::condition::location
+    //
+    // The location index, one based. Zero means no location.
+    public int Location;
+
+    // openbw: trigger::condition::group
+    //
+    // The player selector, not a slot number. See TriggerPlayersPred.
+    public int Group;
+
+    // openbw: trigger::condition::count_n
+    public int CountN;
+
+    // openbw: trigger::condition::unit_id
+    //
+    // The unit type id, or one of the group ids 229 - 232.
+    public int UnitId;
+
+    // openbw: trigger::condition::num_n
+    //
+    // The comparison: 0 is >=, 1 is <=, 2 is ==, anything else fails.
+    public int NumN;
+
+    // openbw: trigger::condition::type
+    //
+    // 2 = command, 3 = bring, 12 = elapsed time, 14 = opponents,
+    // 22 = always.
+    public int Type;
+
+    public TriggerCondition() {
+        Location = 0;
+        Group = 0;
+        CountN = 0;
+        UnitId = 0;
+        NumN = 0;
+        Type = 0;
+    }
+}
+
+// openbw: the per-player tables a trigger count reads
+//
+// The counters the C++'s trigger_command_count walks. The two unit
+// count tables are indexed by unit type, the rest are per player.
+public class TriggerCounters {
+    // openbw: bring_unit_counters::unit_counts
+    public List<int> UnitCounts;
+
+    // openbw: bring_unit_counters::completed_unit_counts
+    public List<int> CompletedUnitCounts;
+
+    // openbw: bring_unit_counters::factory_counts
+    public int[] FactoryCounts;
+
+    // openbw: bring_unit_counters::building_counts
+    public int[] BuildingCounts;
+
+    // openbw: bring_unit_counters::non_building_counts
+    public int[] NonBuildingCounts;
+
+    // openbw: bring_unit_counters::completed_factory_counts
+    public int[] CompletedFactoryCounts;
+
+    // openbw: bring_unit_counters::completed_building_counts
+    public int[] CompletedBuildingCounts;
+
+    // openbw: bring_unit_counters::completed_non_building_counts
+    public int[] CompletedNonBuildingCounts;
+
+    public TriggerCounters() {
+        UnitCounts = new List<int>();
+        CompletedUnitCounts = new List<int>();
+        FactoryCounts = new int[12];
+        BuildingCounts = new int[12];
+        NonBuildingCounts = new int[12];
+        CompletedFactoryCounts = new int[12];
+        CompletedBuildingCounts = new int[12];
+        CompletedNonBuildingCounts = new int[12];
+    }
+}
+
+public class Trigger {
+    // openbw: bool trigger_players_pred(int owner, int player, int n) const
+    //
+    // Whether the player slot n is one of the slots the condition's
+    // group selector names.
+    //
+    // The selector is not a slot number except for 0 - 11, which are
+    // the slot itself. 12 is "no players", 13 is the current player,
+    // 14 - 16 are the enemy / ally / neutral relationships, 17 is
+    // everyone, 18 - 21 are the four forces, and 26 is the set of
+    // players that are not allied with the owner.
+    public static bool TriggerPlayersPred(Player[] players, int[][] alliances, int owner, int player, int n) {
+        if (!PlayerState.PlayerSlotActive(players, n)) return false;
+        if (player < 12) return n == player; // player index
+        if (player == 12) return false; // no players
+        if (player == 13) return n == owner; // current player
+        if (player == 14) return owner != n && alliances[owner][n] == 0; // enemy
+        if (player == 15) return owner != n && alliances[owner][n] == 2; // ally
+        if (player == 16) return owner != n && alliances[owner][n] == 1; // neutral
+        if (player == 17) return true; // all players
+        if (player == 18) return n < 8 && players[n].Force == 1;
+        if (player == 19) return n < 8 && players[n].Force == 2;
+        if (player == 20) return n < 8 && players[n].Force == 3;
+        if (player == 21) return n < 8 && players[n].Force == 4;
+        if (player == 26) return owner != n && (alliances[owner][n] != 2 || alliances[n][owner] != 2); // non allied victory
+        return false;
+    }
+
+    // openbw: auto trigger_players(int owner, int player) const
+    //
+    // The slots the group selector names.
+    public static List<int> TriggerPlayers(Player[] players, int[][] alliances, int owner, int player) {
+        List<int> result = new List<int>();
+        for (int n = 0; n < 12; ++n) {
+            if (TriggerPlayersPred(players, alliances, owner, player, n)) result.Add(n);
+        }
+        return result;
+    }
+
+    // openbw: bool trigger_count_comparison(const trigger::condition& c, int count) const
+    //
+    // The comparison the condition asks for.
+    public static bool TriggerCountComparison(TriggerCondition c, int count) {
+        if (c.NumN == 0) return count >= c.CountN;
+        if (c.NumN == 1) return count <= c.CountN;
+        if (c.NumN == 2) return count == c.CountN;
+        return false;
+    }
+
+    // openbw: int trigger_command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const
+    //
+    // How many units the condition sees.
+    //
+    // The unit id can name a group instead of a unit type: 229 counts
+    // every unit, 230 the men, 231 the buildings, 232 the factories.
+    // With completed_units, the counts are the completed ones.
+    public static int TriggerCommandCount(TriggerCounters counters, Player[] players, int[][] alliances, int owner, int player, int unitId, bool completedUnits) {
+        int r = 0;
+        List<int> slots = TriggerPlayers(players, alliances, owner, player);
+        for (int i = 0; i < slots.Count; ++i) {
+            int p = slots[i];
+            if (completedUnits) {
+                if (unitId == 229) r = r + counters.CompletedNonBuildingCounts[p] + counters.CompletedBuildingCounts[p];
+                else if (unitId == 230) r = r + counters.CompletedNonBuildingCounts[p];
+                else if (unitId == 231) r = r + counters.CompletedBuildingCounts[p];
+                else if (unitId == 232) r = r + counters.CompletedFactoryCounts[p];
+                else r = r + counters.CompletedUnitCounts[p * 228 + unitId];
+            } else {
+                if (unitId == 229) r = r + counters.NonBuildingCounts[p] + counters.BuildingCounts[p];
+                else if (unitId == 230) r = r + counters.NonBuildingCounts[p];
+                else if (unitId == 231) r = r + counters.BuildingCounts[p];
+                else if (unitId == 232) r = r + counters.FactoryCounts[p];
+                else r = r + counters.UnitCounts[owner * 228 + unitId];
+            }
+        }
+        return r;
+    }
+
+    // openbw: int trigger_opponent_count(int owner, int player) const
+    //
+    // How many slots are neither the owner nor allied with the owner.
+    public static int TriggerOpponentCount(Player[] players, int[][] alliances, int owner, int player) {
+        int r = 0;
+        List<int> slots = TriggerPlayers(players, alliances, owner, player);
+        for (int i = 0; i < slots.Count; ++i) {
+            int p = slots[i];
+            r = r + TriggerPlayers(players, alliances, p, 26).Count;
+        }
+        return r;
+    }
+
+    // openbw: bool trigger_unit_pred(int owner, const unit_t* u, int player, int uid) const
+    //
+    // Whether the unit counts towards the condition.
+    //
+    // A unit that provides space counts as its cargo, and a worker
+    // that picked up a powerup counts as the powerup. A dying unit
+    // does not count at all.
+    public static bool TriggerUnitPred(Unit u, List<Unit> loaded, Player[] players, int[][] alliances, int owner, int player, int uid, bool ventralSacs, Unit powerup) {
+        if (UnitStatus.UnitProvidesSpace(u, ventralSacs)) {
+            for (int i = 0; i < loaded.Count; ++i) {
+                if (TriggerUnitPred(loaded[i], new List<Unit>(), players, alliances, owner, player, uid, ventralSacs, null)) return true;
+            }
+        }
+        if (UnitFlags.Worker(u.UnitType) && u.WorkerPowerupId >= 0) {
+            // The C++ recurses into the worker's powerup, which is
+            // another unit. The powerup is passed in, because the
+            // worker only holds its id.
+            if (powerup != null && TriggerUnitPred(powerup, new List<Unit>(), players, alliances, owner, player, uid, ventralSacs, null)) return true;
+        }
+
+        if (UnitCondition.UnitDying(u, u.OrderId)) return false;
+        // openbw: if (ut_powerup(u)) error("trigger_unit_pred: powerup");
+        //
+        // The C++ treats a powerup reaching this point as a bug and
+        // throws. The powerups are matched earlier, by the worker's
+        // powerup recursion, so a powerup that gets here is an error.
+        if (UnitFlags.Powerup(u.UnitType)) {
+            throw new Exception("trigger_unit_pred: powerup");
+        }
+        if (!TriggerPlayersPred(players, alliances, owner, player, u.Owner)) return false;
+        if (uid == 229) return true;
+        if (uid == 230) {
+            if ((u.UnitType.GroupFlags & GroupFlag.Men) != 0) return true;
+        } else if (uid == 231) {
+            if ((u.UnitType.GroupFlags & GroupFlag.Building) != 0) return true;
+        } else if (uid == 232) {
+            if ((u.UnitType.GroupFlags & GroupFlag.Factory) != 0) return true;
+        } else {
+            if (UnitTypeIds.Is(u.UnitType, uid)) return true;
+        }
+        return false;
+    }
+}
