@@ -1,0 +1,65 @@
+using System;
+
+// The Zan side of the psionic matrix bed.
+//
+// The bed drives the same queries over the same positions and pylons
+// as the C++ bed (tools/cppbed/psionicmatrix_bed.cpp), so the two
+// traces must match byte for byte.
+
+public class PsionicMatrixBed {
+    public static int Main(string[] args) {
+        int variant = 0;
+        if (args.Length >= 1) variant = Convert.ToInt32(args[0]);
+
+        FlingyType flingy = new FlingyType(0, Fp.Integer(256), Fp.Integer(3), Fp.Integer(512), Fp.Integer(8), 0);
+
+        // The unit types, by id.
+        List<UnitType> types = new List<UnitType>();
+        for (int i = 0; i < 229; ++i) {
+            UnitType t = new UnitType(i, flingy, 0, 0, 4, new Xy(4, 4), new Xy(4, 4));
+            t.Hitpoints = Fp.Integer(50);
+            types.Add(t);
+        }
+
+        Console.WriteLine("variant=" + variant);
+
+        // The range check, over a spread of offsets.
+        int caseIndex = 0;
+        for (int x = -280; x <= 280; x += 8) {
+            for (int y = -180; y <= 180; y += 8) {
+                bool inRange = PsionicMatrix.IsInPsionicMatrixRange(new Xy(x, y));
+                Console.WriteLine("R " + caseIndex + " " + x + " " + y + " " + (inRange ? 1 : 0));
+                caseIndex = caseIndex + 1;
+            }
+        }
+
+        // The whole check, over a few pylons with different owners.
+        List<Unit> pylons = new List<Unit>();
+        for (int i = 0; i < 3; ++i) {
+            Unit u = new Unit();
+            u.UnitType = types[(int)UnitTypes.Protoss_Pylon];
+            u.Owner = ((i + variant) == 2) ? 1 : 0;
+            u.StatusFlagBits = 0;
+            u.Sprite = new Sprite();
+            // The pylon positions shift with the variant so the
+            // variants really differ.
+            u.Sprite.Position = new Xy((i - 1) * 64 + variant * 8, i * 32 + variant * 4);
+            u.Hp = Fp.Integer(50);
+            pylons.Add(u);
+        }
+
+        caseIndex = 0;
+        for (int x = -300; x <= 300; x += 12) {
+            for (int y = -200; y <= 200; y += 12) {
+                for (int owner = 0; owner < 2; ++owner) {
+                    bool inMatrix = PsionicMatrix.IsInPsionicMatrix(owner, new Xy(x, y), pylons);
+                    Console.WriteLine("M " + caseIndex + " " + x + " " + y + " " + owner
+                        + " " + (inMatrix ? 1 : 0));
+                    caseIndex = caseIndex + 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+}

@@ -1914,3 +1914,33 @@ C++ 的 `spell_order_valid` 不是纯函数——它读 `iscript_unit`
 
 **做法**：照抄数值前，**在原版头文件里 grep 一遍**那个枚举，
 确认真实值。床里**把哨兵值打印出来**，不一致立刻能看见。
+
+## 灵能矩阵层
+
+### 134. 掩码表查表前，**负坐标要挪一格**
+
+C++ 的 `is_in_psionic_matrix_range`：
+
+```cpp
+unsigned x = std::abs(rel.x);
+unsigned y = std::abs(rel.y);
+if (x >= 256) return false;
+if (y >= 160) return false;
+if (rel.x < 0) --x;
+if (rel.y < 0) --y;
+return psi_field_mask[y / 32u][x / 32u];
+```
+
+负坐标**先取绝对值再减一**——这是原版让矩阵**不对称**、
+按美术效果偏斜的办法。**去掉那一行**，矩阵就变成对称的，
+边界上的格子判定会反过来。
+
+**做法**：照搬，包括那两个 `--`。
+
+### 135. 灵能矩阵的**提供者是水晶塔**，不是nexus
+
+`st.psionic_matrix_units` 里放的是**水晶塔**（`order_InitializePsiProvider`
+push 进去的），不是nexus。判定时**按塔的归属**过滤。
+
+**做法**：床里把塔**显式加进列表**——列表是 intrusive 的，
+要 `push_front` 进去，遍历才看得到。

@@ -55,6 +55,7 @@ ZAN_SOURCES_CORE=(
     src/core/UnitDetection.zan
     src/core/Bounds.zan
     src/core/Medic.zan
+    src/core/PsionicMatrix.zan
     src/core/SpellOrder.zan
     src/core/WeaponTargeting.zan
     src/core/UpgradeEffects.zan

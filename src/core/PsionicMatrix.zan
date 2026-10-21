@@ -1,0 +1,56 @@
+using System;
+
+// openbw: the psionic matrix layer (bwgame.h)
+//
+// The C++'s is_in_psionic_matrix_range tells whether a position is
+// inside the psionic matrix of a nexus. It reads a 5 by 8 mask table,
+// one bit per 32-pixel tile.
+//
+// The bounds are asymmetric: 256 in x, 160 in y. And the negative
+// coordinates are shifted by one before the lookup, which is how the
+// C++ makes the field lean the way the art does.
+public class PsionicMatrix {
+    // openbw: static const bool psi_field_mask[5][8]
+    //
+    // The mask, one row per 32-pixel tile of y, one column per tile of
+    // x. The last two rows cut the corners off.
+    private static readonly bool[][] Mask = new bool[][] {
+        new bool[] { true, true, true, true, true, true, true, true },
+        new bool[] { true, true, true, true, true, true, true, true },
+        new bool[] { true, true, true, true, true, true, true, false },
+        new bool[] { true, true, true, true, true, true, false, false },
+        new bool[] { true, true, true, false, false, false, false, false },
+    };
+
+    // openbw: bool is_in_psionic_matrix_range(xy rel) const
+    //
+    // Whether the position, relative to the nexus, is inside the
+    // psionic matrix.
+    public static bool IsInPsionicMatrixRange(Xy rel) {
+        int x = rel.X < 0 ? -rel.X : rel.X;
+        int y = rel.Y < 0 ? -rel.Y : rel.Y;
+        if (x >= 256) return false;
+        if (y >= 160) return false;
+        if (rel.X < 0) x = x - 1;
+        if (rel.Y < 0) y = y - 1;
+        return Mask[y / 32][x / 32];
+    }
+
+    // openbw: bool is_in_psionic_matrix(int owner, xy pos) const
+    //
+    // Whether the position is inside the psionic matrix of any of the
+    // owner's nexuses.
+    //
+    // The nexuses are the ones given, each with its owner and its
+    // position.
+    public static bool IsInPsionicMatrix(int owner, Xy pos, List<Unit> psionicMatrixUnits) {
+        for (int i = 0; i < psionicMatrixUnits.Count; ++i) {
+            Unit u = psionicMatrixUnits[i];
+            if (u.Owner != owner) continue;
+            if (IsInPsionicMatrixRange(new Xy(pos.X - u.Sprite.Position.X, pos.Y - u.Sprite.Position.Y))) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
